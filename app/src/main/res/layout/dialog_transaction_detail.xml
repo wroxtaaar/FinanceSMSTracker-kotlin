@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Transaction Details"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:paddingBottom="12dp" />
+
+        <TextView
+            android:id="@+id/detailTextAmount"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="6dp"
+            android:text="Amount: ₹0.00" />
+
+        <TextView
+            android:id="@+id/detailTextType"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="Type: DEBIT" />
+
+        <TextView
+            android:id="@+id/detailTextPaymentMethod"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="Payment Method: UPI" />
+
+        <TextView
+            android:id="@+id/detailTextAccountType"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="Account Type: BANK_ACCOUNT" />
+
+        <TextView
+            android:id="@+id/detailTextBank"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="Bank: HDFC" />
+
+        <TextView
+            android:id="@+id/detailTextMerchant"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="Merchant: -" />
+
+        <TextView
+            android:id="@+id/detailTextPayeeId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="UPI ID: -" />
+
+        <TextView
+            android:id="@+id/detailTextAccountLastFour"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="A/C Last 4: -" />
+
+        <TextView
+            android:id="@+id/detailTextRefNumber"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="Reference: -" />
+
+        <TextView
+            android:id="@+id/detailTextDateTime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="12dp"
+            android:text="Date/Time: -" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Category:"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <Spinner
+            android:id="@+id/spinnerCategory"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="12dp" />
+
+        <CheckBox
+            android:id="@+id/checkboxRememberPayee"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Remember this category for this payee"
+            android:paddingBottom="16dp" />
+
+        <Button
+            android:id="@+id/buttonSaveCategory"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save Changes" />
+
+    </LinearLayout>
+</ScrollView>
