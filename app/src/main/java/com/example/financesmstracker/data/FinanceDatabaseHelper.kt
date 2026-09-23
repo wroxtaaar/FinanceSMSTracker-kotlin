@@ -4,11 +4,12 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+class FinanceDatabaseHelper(context: Context) :
+    SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
         private const val DATABASE_NAME = "finance_tracker.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
 
         const val TABLE_TRANSACTIONS = "transactions"
         const val COLUMN_ID = "id"
@@ -26,12 +27,22 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
         const val COLUMN_CATEGORY = "category"
         const val COLUMN_PARSER_CONFIDENCE = "parser_confidence"
 
-        const val TABLE_PAYEE_MAPPINGS = "payee_category_mappings"
-        const val COLUMN_MAPPING_PAYEE_ID = "payee_id"
-        const val COLUMN_MAPPING_CATEGORY = "category"
+        const val TABLE_CATEGORY_MEMORY = "category_memory"
+        const val COLUMN_MEMORY_KEY = "memory_key"
+        const val COLUMN_MEMORY_CATEGORY = "category"
+
+        // Kept only for migration compatibility.
+        private const val OLD_TABLE_PAYEE_MAPPINGS = "payee_category_mappings"
+        private const val OLD_COLUMN_PAYEE_ID = "payee_id"
+        private const val OLD_COLUMN_CATEGORY = "category"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
+        createTransactionsTable(db)
+        createCategoryMemoryTable(db)
+    }
+
+    private fun createTransactionsTable(db: SQLiteDatabase) {
         val createTransactionsTable = """
             CREATE TABLE $TABLE_TRANSACTIONS (
                 $COLUMN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,20 +62,49 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             )
         """.trimIndent()
 
-        val createMappingsTable = """
-            CREATE TABLE $TABLE_PAYEE_MAPPINGS (
-                $COLUMN_MAPPING_PAYEE_ID TEXT PRIMARY KEY,
-                $COLUMN_MAPPING_CATEGORY TEXT NOT NULL
+        db.execSQL(createTransactionsTable)
+    }
+
+    private fun createCategoryMemoryTable(db: SQLiteDatabase) {
+        val createCategoryMemoryTable = """
+            CREATE TABLE $TABLE_CATEGORY_MEMORY (
+                $COLUMN_MEMORY_KEY TEXT PRIMARY KEY,
+                $COLUMN_MEMORY_CATEGORY TEXT NOT NULL
             )
         """.trimIndent()
 
-        db.execSQL(createTransactionsTable)
-        db.execSQL(createMappingsTable)
+        db.execSQL(createCategoryMemoryTable)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_TRANSACTIONS")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_PAYEE_MAPPINGS")
-        onCreate(db)
+    override fun onUpgrade(
+        db: SQLiteDatabase,
+        oldVersion: Int,
+        newVersion: Int
+    ) {
+        if (oldVersion < 2) {
+            migratePayeeMappingsToCategoryMemory(db)
+        }
+    }
+
+    private fun migratePayeeMappingsToCategoryMemory(db: SQLiteDatabase) {
+        createCategoryMemoryTable(db)
+
+        // Preserve all existing VPA/payee mappings.
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO $TABLE_CATEGORY_MEMORY
+                ($COLUMN_MEMORY_KEY, $COLUMN_MEMORY_CATEGORY)
+            SELECT
+                'VPA|' || lower(trim($OLD_COLUMN_PAYEE_ID)),
+                $OLD_COLUMN_CATEGORY
+            FROM $OLD_TABLE_PAYEE_MAPPINGS
+            WHERE $OLD_COLUMN_PAYEE_ID IS NOT NULL
+              AND trim($OLD_COLUMN_PAYEE_ID) != ''
+            """.trimIndent()
+        )
+
+        db.execSQL(
+            "DROP TABLE IF EXISTS $OLD_TABLE_PAYEE_MAPPINGS"
+        )
     }
 }
