@@ -263,6 +263,21 @@ class SmsParserTest {
     }
 
     @Test
+    fun testMultipartSmsReconstructionParsing() {
+        val part1 = "Sent Rs.400.00 From HDFC Bank A/C *9591 To AJAY MECAL"
+        val part2 = "STORE on 12-OCT-23 Ref 625674065"
+        val fullBody = part1 + part2
+
+        val result = manager.parse("JD-HDFCBK-S", fullBody)
+        assertTrue(result.isTransaction)
+        assertEquals(40000L, result.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals("HDFC", result.bank)
+        assertNotNull(result.merchantName)
+        assertTrue(result.merchantName!!.contains("AJAY MECAL"))
+    }
+
+    @Test
     fun testFalsePositiveSafetyCases() {
         val c1 = manager.parse("HDFC", "Your account has been credited with Rs. 1000")
         assertTrue(c1.isTransaction)

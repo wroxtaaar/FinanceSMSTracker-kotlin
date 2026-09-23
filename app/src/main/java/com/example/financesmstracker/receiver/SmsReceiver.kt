@@ -22,22 +22,20 @@ class SmsReceiver : BroadcastReceiver() {
         if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION) {
             try {
                 val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
-                val parserManager = SmsParserManager()
-                val dbHelper = FinanceDatabaseHelper(context)
-                val repository = TransactionRepository(dbHelper)
+                if (!messages.isNullOrEmpty()) {
+                    val sender = messages[0].originatingAddress ?: "UNKNOWN"
+                    val timestamp = messages[0].timestampMillis
+                    val fullBody = messages.joinToString(separator = "") { it.messageBody ?: "" }
 
-                for (sms in messages) {
-                    val sender = sms.originatingAddress ?: "UNKNOWN"
-                    val body = sms.messageBody ?: continue
-                    val timestamp = sms.timestampMillis
-
-                    Log.d(TAG, "Received SMS from: $sender at $timestamp")
-
-                    val parserResult = parserManager.parse(sender, body)
+                    val parserManager = SmsParserManager()
+                    val parserResult = parserManager.parse(sender, fullBody)
                     if (parserResult.isTransaction) {
-                        val smsHash = HashUtil.sha256(body)
+                        val dbHelper = FinanceDatabaseHelper(context)
+                        val repository = TransactionRepository(dbHelper)
+
+                        val smsHash = HashUtil.sha256(fullBody)
                         val normalizedPayee = parserResult.payeeId?.trim()?.lowercase()
-                        val deterministicCategory = TransactionCategorizer.categorize(parserResult, body)
+                        val deterministicCategory = TransactionCategorizer.categorize(parserResult, fullBody)
                         val rememberedCategory = normalizedPayee?.let { repository.getCategoryForPayee(it) }
                         val category = rememberedCategory ?: deterministicCategory
 
@@ -61,13 +59,13 @@ class SmsReceiver : BroadcastReceiver() {
                         if (rowId != -1L) {
                             val rupees = parserResult.amountPaise / 100.0
                             val amountFormatted = String.format(Locale.US, "₹%.2f (%d paise)", rupees, parserResult.amountPaise)
-                            Log.d(TAG, "Successfully persisted transaction ID: $rowId, Amount: $amountFormatted, Category: $category")
+                            Log.d(TAG, "Successfully persisted multipart transaction ID: $rowId, Amount: $amountFormatted, Category: $category")
                         } else {
                             Log.d(TAG, "Duplicate SMS skipped (hash already exists): $smsHash")
                         }
+                        dbHelper.close()
                     }
                 }
-                dbHelper.close()
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing received SMS pipeline", e)
             }
