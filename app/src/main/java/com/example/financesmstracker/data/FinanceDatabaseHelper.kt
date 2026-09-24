@@ -8,7 +8,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
 
     companion object {
         private const val DATABASE_NAME = "finance_tracker.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
 
         const val TABLE_TRANSACTIONS = "transactions"
         const val COLUMN_ID = "id"
@@ -46,6 +46,14 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
         const val COLUMN_EVIDENCE_CONTENT_HASH = "content_hash"
         const val COLUMN_EVIDENCE_CONFIDENCE = "confidence"
         const val COLUMN_EVIDENCE_STATUS = "status"
+
+        const val TABLE_UNRECOGNIZED_SMS = "unrecognized_sms"
+        const val COLUMN_UNRECOGNIZED_ID = "id"
+        const val COLUMN_UNRECOGNIZED_SENDER = "sender"
+        const val COLUMN_UNRECOGNIZED_RECEIVED_AT = "received_at"
+        const val COLUMN_UNRECOGNIZED_CONTENT_HASH = "content_hash"
+        const val COLUMN_UNRECOGNIZED_REASON = "reason"
+        const val COLUMN_UNRECOGNIZED_STATUS = "status"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -101,10 +109,22 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             ON $TABLE_SOURCE_EVIDENCE($COLUMN_EVIDENCE_STATUS, $COLUMN_EVIDENCE_AMOUNT_PAISE)
         """.trimIndent()
 
+        val createUnrecognizedTable = """
+            CREATE TABLE $TABLE_UNRECOGNIZED_SMS (
+                $COLUMN_UNRECOGNIZED_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                $COLUMN_UNRECOGNIZED_SENDER TEXT NOT NULL,
+                $COLUMN_UNRECOGNIZED_RECEIVED_AT INTEGER NOT NULL,
+                $COLUMN_UNRECOGNIZED_CONTENT_HASH TEXT UNIQUE NOT NULL,
+                $COLUMN_UNRECOGNIZED_REASON TEXT NOT NULL,
+                $COLUMN_UNRECOGNIZED_STATUS TEXT NOT NULL DEFAULT 'REVIEW'
+            )
+        """.trimIndent()
+
         db.execSQL(createTransactionsTable)
         db.execSQL(createMemoryTable)
         db.execSQL(createEvidenceTable)
         db.execSQL(createEvidenceIndex)
+        db.execSQL(createUnrecognizedTable)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -142,6 +162,19 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             try {
                 db.execSQL("ALTER TABLE $TABLE_SOURCE_EVIDENCE ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'")
             } catch (_: Exception) {}
+        }
+        if (oldVersion < 4) {
+            val createUnrecognizedTable = """
+                CREATE TABLE IF NOT EXISTS $TABLE_UNRECOGNIZED_SMS (
+                    $COLUMN_UNRECOGNIZED_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    $COLUMN_UNRECOGNIZED_SENDER TEXT NOT NULL,
+                    $COLUMN_UNRECOGNIZED_RECEIVED_AT INTEGER NOT NULL,
+                    $COLUMN_UNRECOGNIZED_CONTENT_HASH TEXT UNIQUE NOT NULL,
+                    $COLUMN_UNRECOGNIZED_REASON TEXT NOT NULL,
+                    $COLUMN_UNRECOGNIZED_STATUS TEXT NOT NULL DEFAULT 'REVIEW'
+                )
+            """.trimIndent()
+            db.execSQL(createUnrecognizedTable)
         }
     }
 }

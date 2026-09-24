@@ -78,6 +78,53 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         )
     }
 
+    fun insertUnrecognizedSms(unrecognized: UnrecognizedSms): Long {
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_SENDER, unrecognized.sender)
+            put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_RECEIVED_AT, unrecognized.receivedAt)
+            put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_CONTENT_HASH, unrecognized.contentHash)
+            put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_REASON, unrecognized.reason)
+            put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS, unrecognized.status.name)
+        }
+
+        val rowId = db.insertWithOnConflict(
+            FinanceDatabaseHelper.TABLE_UNRECOGNIZED_SMS,
+            null,
+            values,
+            SQLiteDatabase.CONFLICT_IGNORE
+        )
+
+        if (rowId != -1L) {
+            Log.d("FinanceSource", "UNRECOGNIZED_SMS_RECORDED -> ID: $rowId, sender: ${unrecognized.sender}, reason: ${unrecognized.reason}")
+        }
+        return rowId
+    }
+
+    fun getUnrecognizedSmsByHash(contentHash: String): UnrecognizedSms? {
+        val db = dbHelper.readableDatabase
+        val cursor = db.query(
+            FinanceDatabaseHelper.TABLE_UNRECOGNIZED_SMS,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_CONTENT_HASH} = ?",
+            arrayOf(contentHash),
+            null, null, null
+        )
+        cursor.use {
+            if (it.moveToFirst()) {
+                return UnrecognizedSms(
+                    id = it.getLong(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_ID)),
+                    sender = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_SENDER)),
+                    receivedAt = it.getLong(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_RECEIVED_AT)),
+                    contentHash = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_CONTENT_HASH)),
+                    reason = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_REASON)),
+                    status = ReviewStatus.valueOf(it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS)))
+                )
+            }
+        }
+        return null
+    }
+
     fun getSourceEvidenceById(id: Long): SourceEvidence? {
         val db = dbHelper.readableDatabase
         val cursor = db.query(

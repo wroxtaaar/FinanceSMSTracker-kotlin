@@ -9,10 +9,13 @@ class GenericSmsParser : SmsParser {
         if (lowerBody.contains("otp") || lowerBody.contains("one time password") || 
             lowerBody.contains("verification code") || lowerBody.contains("promotional") ||
             lowerBody.contains("offer") || lowerBody.contains("discount") ||
-            lowerBody.contains("win") || lowerBody.contains("cashback offer")) {
-            if (!lowerBody.contains("debited") && !lowerBody.contains("credited") && !lowerBody.contains("sent") && !lowerBody.contains("received")) {
-                return ParserResult(isTransaction = false)
-            }
+            lowerBody.contains("win") || lowerBody.contains("cashback offer") ||
+            lowerBody.contains("failed") || lowerBody.contains("pending") ||
+            lowerBody.contains("scheduled") || lowerBody.contains("mandate") ||
+            lowerBody.contains("bonus") || lowerBody.contains("off") ||
+            lowerBody.contains("upgrade") || lowerBody.contains("pre-approved") ||
+            lowerBody.contains("loan")) {
+            return ParserResult(isTransaction = false)
         }
 
         val amountPaise = AmountParser.parseAmountToPaise(messageBody) ?: return null

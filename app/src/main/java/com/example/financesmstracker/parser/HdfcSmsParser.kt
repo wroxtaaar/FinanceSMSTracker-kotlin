@@ -12,8 +12,11 @@ class HdfcSmsParser : SmsParser {
         if (lowerBody.contains("otp") || lowerBody.contains("one time password") || 
             lowerBody.contains("verification code") || lowerBody.contains("promotional") ||
             lowerBody.contains("offer") || lowerBody.contains("reward points") ||
-            lowerBody.contains("congratulations") || lowerBody.contains("loan")) {
-            if (!lowerBody.contains("debited") && !lowerBody.contains("credited") && !lowerBody.contains("spent") && !lowerBody.contains("received")) {
+            lowerBody.contains("congratulations") || lowerBody.contains("loan") ||
+            lowerBody.contains("failed") || lowerBody.contains("pending") ||
+            lowerBody.contains("scheduled") || lowerBody.contains("mandate") ||
+            lowerBody.contains("bonus") || lowerBody.contains("off")) {
+            if (!lowerBody.contains("debited") && !lowerBody.contains("credited") && !lowerBody.contains("spent") && !lowerBody.contains("received") && !lowerBody.contains("transferred")) {
                 return ParserResult(isTransaction = false)
             }
         }
@@ -28,11 +31,16 @@ class HdfcSmsParser : SmsParser {
                       lowerBody.contains("spent") || lowerBody.contains("paid") || 
                       lowerBody.contains("charged") || lowerBody.contains("sent") || 
                       lowerBody.contains("dr") || lowerBody.contains("used for") ||
-                      lowerBody.contains("atm wdl") || lowerBody.contains("withdrawn")
+                      lowerBody.contains("atm wdl") || lowerBody.contains("withdrawn") ||
+                      lowerBody.contains("transferred") || lowerBody.contains("transfer")
+
+        if (!isCredit && !isDebit) {
+            return null
+        }
 
         val transactionType = when {
             isCredit && !isDebit -> TransactionType.CREDIT
-            isDebit || lowerBody.contains("used for") || lowerBody.contains("atm wdl") || lowerBody.contains("withdrawn") -> TransactionType.DEBIT
+            isDebit -> TransactionType.DEBIT
             else -> TransactionType.UNKNOWN
         }
 

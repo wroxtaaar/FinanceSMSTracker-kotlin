@@ -11,8 +11,12 @@ class AxisSmsParser : SmsParser {
         val lowerBody = messageBody.lowercase()
         if (lowerBody.contains("otp") || lowerBody.contains("one time password") || 
             lowerBody.contains("verification code") || lowerBody.contains("promotional") ||
-            lowerBody.contains("offer")) {
-            if (!lowerBody.contains("debited") && !lowerBody.contains("credited")) {
+            lowerBody.contains("offer") || lowerBody.contains("failed") || 
+            lowerBody.contains("pending") || lowerBody.contains("scheduled") || 
+            lowerBody.contains("mandate") || lowerBody.contains("bonus") || 
+            lowerBody.contains("off") || lowerBody.contains("upgrade") || 
+            lowerBody.contains("pre-approved") || lowerBody.contains("loan")) {
+            if (!lowerBody.contains("debited") && !lowerBody.contains("credited") && !lowerBody.contains("transferred")) {
                 return ParserResult(isTransaction = false)
             }
         }
@@ -21,11 +25,15 @@ class AxisSmsParser : SmsParser {
         val currency = AmountParser.parseCurrency(messageBody)
 
         val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") || lowerBody.contains("added") || lowerBody.contains("refund")
-        val isDebit = lowerBody.contains("debited") || lowerBody.contains("deducted") || lowerBody.contains("spent") || lowerBody.contains("paid") || lowerBody.contains("charged")
+        val isDebit = lowerBody.contains("debited") || lowerBody.contains("deducted") || lowerBody.contains("spent") || lowerBody.contains("paid") || lowerBody.contains("charged") || lowerBody.contains("transferred") || lowerBody.contains("transfer")
+
+        if (!isCredit && !isDebit) {
+            return null
+        }
 
         val transactionType = when {
             isCredit && !isDebit -> TransactionType.CREDIT
-            isDebit || lowerBody.contains("spent") || lowerBody.contains("paid") -> TransactionType.DEBIT
+            isDebit -> TransactionType.DEBIT
             else -> TransactionType.UNKNOWN
         }
 

@@ -10,10 +10,13 @@ import com.example.financesmstracker.categorizer.TransactionCategorizer
 import com.example.financesmstracker.data.FinanceDatabaseHelper
 import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.data.TransactionRepository
+import com.example.financesmstracker.data.UnrecognizedSms
 import com.example.financesmstracker.evidence.CrossSourceMatchCoordinator
 import com.example.financesmstracker.evidence.EvidenceStatus
 import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
+import com.example.financesmstracker.parser.SenderTrustManager
+import com.example.financesmstracker.parser.SenderTrustStatus
 import com.example.financesmstracker.parser.SmsParserManager
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.util.HashUtil
@@ -34,13 +37,15 @@ class SmsReceiver : BroadcastReceiver() {
                     val timestamp = messages[0].timestampMillis
                     val fullBody = messages.joinToString(separator = "") { it.messageBody ?: "" }
 
+                    val trustStatus = SenderTrustManager.classifySender(sender)
                     val parserManager = SmsParserManager()
                     val parserResult = parserManager.parse(sender, fullBody)
-                    if (parserResult.isTransaction) {
-                        val dbHelper = FinanceDatabaseHelper(context)
-                        val repository = TransactionRepository(dbHelper)
 
-                        val smsHash = HashUtil.sha256(fullBody)
+                    val dbHelper = FinanceDatabaseHelper(context)
+                    val repository = TransactionRepository(dbHelper)
+                    val smsHash = HashUtil.sha256(fullBody)
+
+                    if (parserResult.isTransaction) {
                         val memoryKey = CategoryMemoryKey.from(parserResult)
                         val rememberedCategory = memoryKey?.let { repository.getCategoryForMemoryKey(it) }
                         val category = rememberedCategory ?: TransactionCategorizer.categorize(parserResult, fullBody)
@@ -84,7 +89,6 @@ class SmsReceiver : BroadcastReceiver() {
                                 Log.d("FinanceSource", "SMS_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: $rowId, amount: ${parserResult.amountPaise}, currency: ${parserResult.currency}, direction: ${if (parserResult.transactionType == TransactionType.CREDIT) "CREDIT" else "DEBIT"}, bank: ${parserResult.bank}, timestamp: $timestamp, status: ${EvidenceStatus.MATCHED}")
                             }
 
-                            // Event-driven matching: evaluate any unmatched/ambiguous Truecaller evidence against this new canonical transaction
                             val coordinator = CrossSourceMatchCoordinator(repository)
                             coordinator.onCanonicalTransactionCreated(rowId)
 
@@ -95,7 +99,6 @@ class SmsReceiver : BroadcastReceiver() {
                             Log.d(TAG, "Successfully persisted multipart transaction ID: $rowId, Amount: $amountFormatted, Category: $category")
                             Log.d("FinanceSource", "SMS_TRANSACTION_SAVED -> ID: $rowId, Amount: ${parserResult.amountPaise}, Currency: ${parserResult.currency}, Type: ${parserResult.transactionType}, Bank: ${parserResult.bank}, Timestamp: $timestamp")
 
-                            // Notify UI that new transaction data was saved
                             val updateIntent = Intent(ACTION_TRANSACTION_DATA_CHANGED).apply {
                                 setPackage(context.packageName)
                             }
@@ -103,8 +106,19 @@ class SmsReceiver : BroadcastReceiver() {
                         } else {
                             Log.d(TAG, "Duplicate SMS skipped (hash already exists): $smsHash")
                         }
-                        dbHelper.close()
+                    } else {
+                        // Parser failed or not a transaction - check if financial-looking from unknown/untrusted sender for review
+                        if (trustStatus != SenderTrustStatus.TRUSTED && SenderTrustManager.isFinancialLooking(fullBody)) {
+                            val unrecognized = UnrecognizedSms(
+                                sender = sender,
+                                receivedAt = timestamp,
+                                contentHash = smsHash,
+                                reason = "UNRECOGNIZED_FINANCIAL_SMS_FROM_UNKNOWN_SENDER"
+                            )
+                            repository.insertUnrecognizedSms(unrecognized)
+                        }
                     }
+                    dbHelper.close()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing received SMS pipeline", e)
