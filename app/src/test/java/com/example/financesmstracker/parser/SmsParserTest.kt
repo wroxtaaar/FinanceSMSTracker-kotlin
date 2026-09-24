@@ -7,6 +7,184 @@ class SmsParserTest {
     private val manager = SmsParserManager()
 
     @Test
+    fun testHdfcCreditWithVpaFixture() {
+        val sms = "Credit Alert!\nRs.1000.00 credited to HDFC Bank A/c XX9591 on 11-09-26 from VPA ansarnsari53@okaxis (UPI 62497)"
+        val result = manager.parse("JD-HDFCBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(100000L, result.amountPaise)
+        assertEquals(TransactionType.CREDIT, result.transactionType)
+        assertEquals(PaymentMethod.UPI, result.paymentMethod)
+        assertEquals(AccountType.BANK_ACCOUNT, result.accountType)
+        assertEquals("HDFC", result.bank)
+        assertEquals("9591", result.accountLastFour)
+        assertEquals("ansarnsari53@okaxis", result.payeeId)
+    }
+
+    @Test
+    fun testHdfcCreditWithDifferentVpaFormatFixture() {
+        val sms = "Credit Alert!\nRs.1.00 credited to HDFC Bank A/c XX9591 on 24-09-26 from VPA 9209637864@axl (UPI 96385)"
+        val result = manager.parse("JD-HDFCBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(100L, result.amountPaise)
+        assertEquals(TransactionType.CREDIT, result.transactionType)
+        assertEquals(PaymentMethod.UPI, result.paymentMethod)
+        assertEquals("HDFC", result.bank)
+        assertEquals("9591", result.accountLastFour)
+        assertEquals("9209637864@axl", result.payeeId)
+    }
+
+    @Test
+    fun testHdfcUpiDebitWithPayeeNameFixture() {
+        val sms = """
+            Sent Rs.280.00
+            From HDFC Bank A/C *9591
+            To 82184053ptyes
+            On 11/09/26
+            Ref 291049325
+            Not You?
+            Call 18002586161/SMS BLOCK UPI to 730808
+        """.trimIndent()
+        val result = manager.parse("JD-HDFCBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(28000L, result.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(PaymentMethod.UPI, result.paymentMethod)
+        assertEquals("HDFC", result.bank)
+        assertEquals("9591", result.accountLastFour)
+        assertEquals("82184053ptyes", result.merchantName)
+        assertNull(result.payeeId)
+        assertEquals("291049325", result.refNumber)
+    }
+
+    @Test
+    fun testHdfcUpiDebitWithMerchantNameAjayFixture() {
+        val sms = """
+            Sent Rs.400.00
+            From HDFC Bank A/C *9591
+            To AJAY MECAL STORE
+            On 13/09/26
+            Ref 625674065
+            Not You?
+            Call 18002586161/SMS BLOCK UPI to 7308080808
+        """.trimIndent()
+        val result = manager.parse("JD-HDFCBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(40000L, result.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(PaymentMethod.UPI, result.paymentMethod)
+        assertEquals("HDFC", result.bank)
+        assertEquals("9591", result.accountLastFour)
+        assertEquals("AJAY MECAL STORE", result.merchantName)
+        assertNull(result.payeeId)
+        assertEquals("625674065", result.refNumber)
+    }
+
+    @Test
+    fun testHdfcUpiDebitWithMerchantNameTahirFixture() {
+        val sms = """
+            Sent Rs.120.00
+            From HDFC Bank A/C *9591
+            To Tahir confectionery
+            On 23/09/26
+            Ref 663261247
+            Not You?
+            Call 18002586161/SMS BLOCK UPI to 7308080808
+        """.trimIndent()
+        val result = manager.parse("JD-HDFCBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(12000L, result.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(PaymentMethod.UPI, result.paymentMethod)
+        assertEquals("HDFC", result.bank)
+        assertEquals("9591", result.accountLastFour)
+        assertEquals("Tahir confectionery", result.merchantName)
+        assertNull(result.payeeId)
+        assertEquals("663261247", result.refNumber)
+    }
+
+    @Test
+    fun testAxisCreditCardDebitSanjeevFixture() {
+        val sms = """
+            Spent INR 300
+            Axis Bank Card no. XX9206
+            23-09-26 13:14:54 IST
+            SANJEEV
+            Avl Limit: INR 193034.78
+            Not you? SMS BLOCK 9206 to 919951860002
+        """.trimIndent()
+        val result = manager.parse("AD-AXISBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(30000L, result.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(PaymentMethod.CARD, result.paymentMethod)
+        assertEquals(AccountType.CREDIT_CARD, result.accountType)
+        assertEquals("AXIS", result.bank)
+        assertEquals("9206", result.accountLastFour)
+        assertEquals("SANJEEV", result.merchantName)
+    }
+
+    @Test
+    fun testAxisCardSpendAirtelPaymeFixture() {
+        val sms = """
+            Spent INR 487.64
+            Axis Bank Card no. XX9206
+            24-09-26 10:00:08 IST
+            AIRTELPAYME
+            Avl Limit: INR 192.14
+            Not you? SMS BLOCK 9206 to 91990002
+        """.trimIndent()
+
+        val result = manager.parse("AD-AXISBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(48764L, result.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(PaymentMethod.CARD, result.paymentMethod)
+        assertEquals(AccountType.CREDIT_CARD, result.accountType)
+        assertEquals("AXIS", result.bank)
+        assertEquals("9206", result.accountLastFour)
+        assertEquals("AIRTELPAYME", result.merchantName)
+    }
+
+    @Test
+    fun testAxisCreditCardReversalForeignCurrencySgd() {
+        val sms = """
+            Txn reversal of SGD 1.38 at ORACLE SIN was successful.
+            Card no. XX1175
+            22-09-26 15:03:45 IST
+            Avl Limit: INR 194024.78
+            Axis Bank
+        """.trimIndent()
+        val result = manager.parse("AD-AXISBK-S", sms)
+        assertFalse(result.isTransaction)
+    }
+
+    @Test
+    fun testAxisCreditCardPaymentFixture() {
+        val sms = "Payment of INR 25000 has been received towards your Axis Bank Credit Card XX1175 on 21-09-26 - Axis Bank"
+        val result = manager.parse("AD-AXISBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(2500000L, result.amountPaise)
+        assertEquals(TransactionType.CREDIT, result.transactionType)
+        assertEquals(PaymentMethod.CARD, result.paymentMethod)
+        assertEquals(AccountType.CREDIT_CARD, result.accountType)
+        assertEquals("AXIS", result.bank)
+        assertEquals("1175", result.accountLastFour)
+    }
+
+    @Test
+    fun testAxisBankAccountCreditUpiP2aFixture() {
+        val sms = "INR 11100.00 credited\nA/c no. XX3370\n05-09-26, 20:00:59 IST\nUPI/P2A/466262378869/ABDUL WAS/HDFC/Paym - Axis Bank"
+        val result = manager.parse("AD-AXISBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(1110000L, result.amountPaise)
+        assertEquals(TransactionType.CREDIT, result.transactionType)
+        assertEquals(PaymentMethod.UPI, result.paymentMethod)
+        assertEquals("AXIS", result.bank)
+        assertEquals("3370", result.accountLastFour)
+        assertEquals("ABDUL WAS", result.merchantName)
+    }
+
+    @Test
     fun testHdfcDebit() {
         val result = manager.parse(
             "JD-HDFCBK-S",

@@ -44,7 +44,7 @@ class AxisSmsParser : SmsParser {
             else -> AccountType.UNKNOWN
         }
 
-        val accMatcher = Pattern.compile("(?:a/c|account|ac)\\s*(?:no\\.)?\\s*(?:x+|XXXX|\\*+)?([0-9]{4})", Pattern.CASE_INSENSITIVE).matcher(messageBody)
+        val accMatcher = Pattern.compile("(?:a/c|account|ac|card)\\s*(?:no\\.)?\\s*(?:[xX]+|XXXX|\\*+)?([0-9]{4})", Pattern.CASE_INSENSITIVE).matcher(messageBody)
         val accountLastFour = if (accMatcher.find()) accMatcher.group(1) else null
 
         val (merchantName, payeeId) = MerchantParser.extractMerchantAndVpa(messageBody)

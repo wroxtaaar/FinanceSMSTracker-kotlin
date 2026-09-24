@@ -41,6 +41,15 @@ object MerchantParser {
         if (upiPathMatcher.find()) {
             merchant = upiPathMatcher.group(1)?.trim()
             vpa = upiPathMatcher.group(2)?.trim()
+        } else {
+            // Check multi-segment UPI/P2A/ref/merchant/...
+            val multiUpiMatcher = Pattern.compile("UPI/P2A/[^/]+/([^/]+)/", Pattern.CASE_INSENSITIVE).matcher(messageBody)
+            if (multiUpiMatcher.find()) {
+                val candidate = multiUpiMatcher.group(1)?.trim()
+                if (candidate != null && !candidate.all { it.isDigit() }) {
+                    merchant = candidate
+                }
+            }
         }
 
         // 2. Standalone VPA
@@ -61,12 +70,23 @@ object MerchantParser {
             }
         }
 
-        // 3. Merchant name after "to", "paid to", "sent to", "towards", "at"
+        // 3. Axis card spend merchant pattern (timestamp \n MERCHANT \n Avl Limit)
+        if (merchant == null) {
+            val axisMerchantMatcher = Pattern.compile("(?:[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\s+[A-Z]+)?)\\s*\\r?\\n\\s*([A-Z0-9\\s._-]+?)\\s*\\r?\\n\\s*(?:Avl|Avbl|Available|Not\\s+you)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
+            if (axisMerchantMatcher.find()) {
+                val rawAxisMerchant = axisMerchantMatcher.group(1)?.trim()
+                if (!rawAxisMerchant.isNullOrBlank() && isValidMerchant(rawAxisMerchant)) {
+                    merchant = rawAxisMerchant
+                }
+            }
+        }
+
+        // 4. Merchant name after "to", "paid to", "sent to", "towards", "at"
         if (merchant == null) {
             val merchantMatcher = Pattern.compile("(?:to|paid\\s+to|sent\\s+to|towards|at)\\s+([a-zA-Z0-9\\s._-]+?)(?:\\s+(?:Ref|UPI|A/C|a/c|on|at|via|IMPS|NEFT|card|ending|\\*|\\d{2}-)|$)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
             if (merchantMatcher.find()) {
                 val rawMerchant = merchantMatcher.group(1)?.trim()
-                if (!rawMerchant.isNullOrBlank() && !rawMerchant.equals("UPI", ignoreCase = true)) {
+                if (!rawMerchant.isNullOrBlank() && !rawMerchant.equals("UPI", ignoreCase = true) && !rawMerchant.equals("P2A", ignoreCase = true)) {
                     if (isValidMerchant(rawMerchant)) {
                         merchant = rawMerchant
                     }
@@ -74,7 +94,7 @@ object MerchantParser {
             }
         }
 
-        // 4. Fallback for raw identifiers like "82184053ptyes"
+        // 5. Fallback for raw identifiers like "82184053ptyes"
         if (merchant == null && vpa == null) {
             val fallbackMatcher = Pattern.compile("(?:to|paid\\s+to|sent\\s+to|at)\\s+([a-zA-Z0-9._-]+)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
             if (fallbackMatcher.find()) {
