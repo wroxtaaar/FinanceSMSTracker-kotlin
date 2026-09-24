@@ -3,23 +3,27 @@ package com.example.financesmstracker.parser
 import java.util.regex.Pattern
 
 object AmountParser {
-    private val FOREIGN_CURRENCIES = listOf("sgd", "usd", "eur", "gbp", "aud", "cad", "jpy")
-
     private val PATTERNS = listOf(
-        // e.g. Rs. 1,234.50, Rs 500, INR 500, ₹ 500, ₹1,234.50, INR 11100.00, Rs.1000.00
-        Pattern.compile("(?:Rs\\.?|INR|₹)\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)", Pattern.CASE_INSENSITIVE),
-        // e.g. 500 INR, 500/-
-        Pattern.compile("([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*(?:INR|/-)", Pattern.CASE_INSENSITIVE)
+        // e.g. Rs. 1,234.50, Rs 500, INR 500, ₹ 500, ₹1,234.50, INR 11100.00, Rs.1000.00, SGD 1.38
+        Pattern.compile("(?:Rs\\.?|INR|₹|SGD|USD|EUR|GBP|AUD|CAD)\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)", Pattern.CASE_INSENSITIVE),
+        // e.g. 500 INR, 500/-, 1.38 SGD
+        Pattern.compile("([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*(?:INR|SGD|USD|EUR|GBP|AUD|CAD|/-)", Pattern.CASE_INSENSITIVE)
     )
 
-    fun parseAmountToPaise(text: String): Long? {
-        val lowerText = text.lowercase()
-        for (fc in FOREIGN_CURRENCIES) {
-            if (lowerText.contains(fc) && !lowerText.contains("inr") && !lowerText.contains("rs") && !lowerText.contains("₹")) {
-                return null
-            }
+    fun parseCurrency(text: String): String {
+        val upper = text.uppercase()
+        return when {
+            upper.contains("SGD") -> "SGD"
+            upper.contains("USD") -> "USD"
+            upper.contains("EUR") -> "EUR"
+            upper.contains("GBP") -> "GBP"
+            upper.contains("AUD") -> "AUD"
+            upper.contains("CAD") -> "CAD"
+            else -> "INR"
         }
+    }
 
+    fun parseAmountToPaise(text: String): Long? {
         for (pattern in PATTERNS) {
             val matcher = pattern.matcher(text)
             while (matcher.find()) {

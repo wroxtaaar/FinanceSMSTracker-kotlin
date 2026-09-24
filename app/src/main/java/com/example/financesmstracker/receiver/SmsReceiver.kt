@@ -47,6 +47,7 @@ class SmsReceiver : BroadcastReceiver() {
 
                         val transaction = Transaction(
                             amountPaise = parserResult.amountPaise,
+                            currency = parserResult.currency,
                             transactionType = parserResult.transactionType,
                             paymentMethod = parserResult.paymentMethod,
                             accountType = parserResult.accountType,
@@ -69,6 +70,7 @@ class SmsReceiver : BroadcastReceiver() {
                                 receivedAt = timestamp,
                                 transactionId = rowId,
                                 amountPaise = parserResult.amountPaise,
+                                currency = parserResult.currency,
                                 direction = if (parserResult.transactionType == TransactionType.CREDIT) "CREDIT" else "DEBIT",
                                 bankProvider = parserResult.bank,
                                 accountLastFour = parserResult.accountLastFour,
@@ -79,7 +81,7 @@ class SmsReceiver : BroadcastReceiver() {
                             )
                             val evidenceId = repository.insertSourceEvidence(evidence)
                             if (evidenceId != -1L) {
-                                Log.d("FinanceSource", "SMS_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: $rowId, amount: ${parserResult.amountPaise}, direction: ${if (parserResult.transactionType == TransactionType.CREDIT) "CREDIT" else "DEBIT"}, bank: ${parserResult.bank}, timestamp: $timestamp, status: ${EvidenceStatus.MATCHED}")
+                                Log.d("FinanceSource", "SMS_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: $rowId, amount: ${parserResult.amountPaise}, currency: ${parserResult.currency}, direction: ${if (parserResult.transactionType == TransactionType.CREDIT) "CREDIT" else "DEBIT"}, bank: ${parserResult.bank}, timestamp: $timestamp, status: ${EvidenceStatus.MATCHED}")
                             }
 
                             // Event-driven matching: evaluate any unmatched/ambiguous Truecaller evidence against this new canonical transaction
@@ -91,7 +93,7 @@ class SmsReceiver : BroadcastReceiver() {
                             val rupees = parserResult.amountPaise / 100.0
                             val amountFormatted = String.format(Locale.US, "₹%.2f (%d paise)", rupees, parserResult.amountPaise)
                             Log.d(TAG, "Successfully persisted multipart transaction ID: $rowId, Amount: $amountFormatted, Category: $category")
-                            Log.d("FinanceSource", "SMS_TRANSACTION_SAVED -> ID: $rowId, Amount: ${parserResult.amountPaise}, Type: ${parserResult.transactionType}, Bank: ${parserResult.bank}, Timestamp: $timestamp")
+                            Log.d("FinanceSource", "SMS_TRANSACTION_SAVED -> ID: $rowId, Amount: ${parserResult.amountPaise}, Currency: ${parserResult.currency}, Type: ${parserResult.transactionType}, Bank: ${parserResult.bank}, Timestamp: $timestamp")
 
                             // Notify UI that new transaction data was saved
                             val updateIntent = Intent(ACTION_TRANSACTION_DATA_CHANGED).apply {

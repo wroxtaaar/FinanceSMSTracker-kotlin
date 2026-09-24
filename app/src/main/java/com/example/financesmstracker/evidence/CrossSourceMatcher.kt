@@ -57,6 +57,14 @@ object CrossSourceMatcher {
         for (tx in transactions) {
             val reasons = mutableListOf<String>()
 
+            // 0. Currency check (must match exactly)
+            val txCurrency = tx.currency.trim().uppercase()
+            val evCurrency = evidence.currency.trim().uppercase()
+            if (txCurrency != evCurrency) {
+                continue
+            }
+            reasons.add("currency equal")
+
             // 1. Amount check (must match exactly)
             if (tx.amountPaise != evidence.amountPaise) {
                 continue

@@ -13,6 +13,7 @@ enum class PayeeIdentifierType {
 data class Transaction(
     val id: Long = 0L,
     val amountPaise: Long,
+    val currency: String = "INR",
     val transactionType: TransactionType,
     val paymentMethod: PaymentMethod,
     val accountType: AccountType,

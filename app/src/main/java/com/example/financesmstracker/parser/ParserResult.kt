@@ -3,6 +3,7 @@ package com.example.financesmstracker.parser
 data class ParserResult(
     val isTransaction: Boolean,
     val amountPaise: Long = 0L,
+    val currency: String = "INR",
     val transactionType: TransactionType = TransactionType.UNKNOWN,
     val paymentMethod: PaymentMethod = PaymentMethod.UNKNOWN,
     val accountType: AccountType = AccountType.UNKNOWN,

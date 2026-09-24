@@ -8,11 +8,12 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
 
     companion object {
         private const val DATABASE_NAME = "finance_tracker.db"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
 
         const val TABLE_TRANSACTIONS = "transactions"
         const val COLUMN_ID = "id"
         const val COLUMN_AMOUNT_PAISE = "amount_paise"
+        const val COLUMN_CURRENCY = "currency"
         const val COLUMN_TRANSACTION_TYPE = "transaction_type"
         const val COLUMN_PAYMENT_METHOD = "payment_method"
         const val COLUMN_ACCOUNT_TYPE = "account_type"
@@ -37,6 +38,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
         const val COLUMN_EVIDENCE_RECEIVED_AT = "received_at"
         const val COLUMN_EVIDENCE_TRANSACTION_ID = "transaction_id"
         const val COLUMN_EVIDENCE_AMOUNT_PAISE = "amount_paise"
+        const val COLUMN_EVIDENCE_CURRENCY = "currency"
         const val COLUMN_EVIDENCE_DIRECTION = "direction"
         const val COLUMN_EVIDENCE_BANK_PROVIDER = "bank_provider"
         const val COLUMN_EVIDENCE_ACCOUNT_LAST_FOUR = "account_last_four"
@@ -51,6 +53,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             CREATE TABLE $TABLE_TRANSACTIONS (
                 $COLUMN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
                 $COLUMN_AMOUNT_PAISE INTEGER NOT NULL,
+                $COLUMN_CURRENCY TEXT NOT NULL DEFAULT 'INR',
                 $COLUMN_TRANSACTION_TYPE TEXT NOT NULL,
                 $COLUMN_PAYMENT_METHOD TEXT NOT NULL,
                 $COLUMN_ACCOUNT_TYPE TEXT NOT NULL,
@@ -81,6 +84,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
                 $COLUMN_EVIDENCE_RECEIVED_AT INTEGER NOT NULL,
                 $COLUMN_EVIDENCE_TRANSACTION_ID INTEGER,
                 $COLUMN_EVIDENCE_AMOUNT_PAISE INTEGER NOT NULL,
+                $COLUMN_EVIDENCE_CURRENCY TEXT NOT NULL DEFAULT 'INR',
                 $COLUMN_EVIDENCE_DIRECTION TEXT NOT NULL,
                 $COLUMN_EVIDENCE_BANK_PROVIDER TEXT,
                 $COLUMN_EVIDENCE_ACCOUNT_LAST_FOUR TEXT,
@@ -113,6 +117,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
                     $COLUMN_EVIDENCE_RECEIVED_AT INTEGER NOT NULL,
                     $COLUMN_EVIDENCE_TRANSACTION_ID INTEGER,
                     $COLUMN_EVIDENCE_AMOUNT_PAISE INTEGER NOT NULL,
+                    $COLUMN_EVIDENCE_CURRENCY TEXT NOT NULL DEFAULT 'INR',
                     $COLUMN_EVIDENCE_DIRECTION TEXT NOT NULL,
                     $COLUMN_EVIDENCE_BANK_PROVIDER TEXT,
                     $COLUMN_EVIDENCE_ACCOUNT_LAST_FOUR TEXT,
@@ -129,6 +134,14 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             """.trimIndent()
             db.execSQL(createEvidenceTable)
             db.execSQL(createEvidenceIndex)
+        }
+        if (oldVersion < 3) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_TRANSACTIONS ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'")
+            } catch (_: Exception) {}
+            try {
+                db.execSQL("ALTER TABLE $TABLE_SOURCE_EVIDENCE ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'")
+            } catch (_: Exception) {}
         }
     }
 }

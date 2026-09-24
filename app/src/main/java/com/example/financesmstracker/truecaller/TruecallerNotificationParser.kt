@@ -11,8 +11,9 @@ object TruecallerNotificationParser {
 
         // Check non-financial rejection
         if (!lowerCombined.contains("rs") && !lowerCombined.contains("inr") && !lowerCombined.contains("₹") &&
+            !lowerCombined.contains("sgd") && !lowerCombined.contains("usd") && !lowerCombined.contains("eur") &&
             !lowerCombined.contains("credit") && !lowerCombined.contains("debit") && !lowerCombined.contains("spent") &&
-            !lowerCombined.contains("credited") && !lowerCombined.contains("debited")) {
+            !lowerCombined.contains("credited") && !lowerCombined.contains("debited") && !lowerCombined.contains("reversal")) {
             return ParsedNotification(isNotificationTransaction = false, timestamp = timestamp, contentHash = contentHash)
         }
 
@@ -21,9 +22,11 @@ object TruecallerNotificationParser {
             return ParsedNotification(isNotificationTransaction = false, timestamp = timestamp, contentHash = contentHash)
         }
 
+        val currency = AmountParser.parseCurrency(combined)
+
         val isCredit = lowerCombined.contains("credit") || lowerCombined.contains("credited") || 
                        lowerCombined.contains("received") || lowerCombined.contains("added") || 
-                       combined.contains("+")
+                       lowerCombined.contains("reversal") || combined.contains("+")
         val isDebit = lowerCombined.contains("debit") || lowerCombined.contains("debited") || 
                       lowerCombined.contains("spent") || lowerCombined.contains("paid") || 
                       lowerCombined.contains("charged") || combined.contains("−") || combined.contains("-")
@@ -40,6 +43,7 @@ object TruecallerNotificationParser {
         return ParsedNotification(
             isNotificationTransaction = true,
             amountPaise = amountPaise,
+            currency = currency,
             direction = direction,
             bankProvider = bankProvider,
             timestamp = timestamp,

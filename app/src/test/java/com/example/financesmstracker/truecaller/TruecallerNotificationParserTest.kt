@@ -13,6 +13,7 @@ class TruecallerNotificationParserTest {
 
         assertTrue(result.isNotificationTransaction)
         assertEquals(200L, result.amountPaise)
+        assertEquals("INR", result.currency)
         assertEquals(NotificationDirection.CREDIT, result.direction)
         assertEquals("HDFC Bank", result.bankProvider)
     }
@@ -25,6 +26,7 @@ class TruecallerNotificationParserTest {
 
         assertTrue(result.isNotificationTransaction)
         assertEquals(50000L, result.amountPaise)
+        assertEquals("INR", result.currency)
         assertEquals(NotificationDirection.DEBIT, result.direction)
     }
 
@@ -36,6 +38,7 @@ class TruecallerNotificationParserTest {
 
         assertTrue(result.isNotificationTransaction)
         assertEquals(30000L, result.amountPaise) // Should pick 300, not 193034.78
+        assertEquals("INR", result.currency)
         assertEquals(NotificationDirection.DEBIT, result.direction)
     }
 
@@ -60,7 +63,9 @@ class TruecallerNotificationParserTest {
         val text = "Txn reversal of SGD 1.38 at ORACLE SIN was successful."
         val result = TruecallerNotificationParser.parse(title, text, 1000L, "hash6")
 
-        // Foreign currency should be rejected / not treated as INR transaction amount
-        assertFalse(result.isNotificationTransaction)
+        // Foreign currency should be parsed correctly in SGD without becoming INR
+        assertTrue(result.isNotificationTransaction)
+        assertEquals(138L, result.amountPaise)
+        assertEquals("SGD", result.currency)
     }
 }

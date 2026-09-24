@@ -2,6 +2,7 @@ package com.example.financesmstracker.evidence
 
 import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.parser.AccountType
+import com.example.financesmstracker.parser.AmountParser
 import com.example.financesmstracker.parser.PaymentMethod
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.util.HashUtil
@@ -13,6 +14,7 @@ class CrossSourceMatchCoordinatorTest {
     private fun createDummyTx(
         id: Long = 1L,
         amountPaise: Long = 10000L,
+        currency: String = "INR",
         type: TransactionType = TransactionType.DEBIT,
         bank: String = "HDFC",
         timestamp: Long = 1000000L,
@@ -21,6 +23,7 @@ class CrossSourceMatchCoordinatorTest {
         return Transaction(
             id = id,
             amountPaise = amountPaise,
+            currency = currency,
             transactionType = type,
             paymentMethod = PaymentMethod.UPI,
             accountType = AccountType.BANK_ACCOUNT,
@@ -37,13 +40,14 @@ class CrossSourceMatchCoordinatorTest {
     }
 
     @Test
-    fun test1_TruecallerEvidenceAfterSmsTransactionIsMatched() {
-        val tx = createDummyTx(id = 1L, amountPaise = 15000L, timestamp = 1000000L)
+    fun test1_TruecallerAfterSmsTransactionIsMatched() {
+        val tx = createDummyTx(id = 1L, amountPaise = 15000L, currency = "INR", timestamp = 1000000L)
         val evidence = SourceEvidence(
             sourceType = SourceType.TRUECALLER,
             sourceKey = "tc_key_1",
             receivedAt = 1005000L,
             amountPaise = 15000L,
+            currency = "INR",
             direction = "DEBIT",
             bankProvider = "HDFC",
             contentHash = "hash1"
@@ -54,22 +58,21 @@ class CrossSourceMatchCoordinatorTest {
     }
 
     @Test
-    fun test2_TruecallerEvidenceBeforeSmsTransactionEvaluatesUnmatchedThenMatched() {
+    fun test2_TruecallerBeforeSmsTransactionBecomesMatchedLater() {
         val evidence = SourceEvidence(
             sourceType = SourceType.TRUECALLER,
             sourceKey = "tc_key_2",
             receivedAt = 1000000L,
             amountPaise = 20000L,
+            currency = "INR",
             direction = "DEBIT",
             bankProvider = "AXIS",
             contentHash = "hash2"
         )
-        // Before SMS arrival (no candidates)
         val initialResult = CrossSourceMatcher.match(evidence, emptyList())
         assertEquals(MatchOutcome.UNMATCHED, initialResult.outcome)
 
-        // After SMS arrival
-        val tx = createDummyTx(id = 2L, amountPaise = 20000L, bank = "AXIS", timestamp = 1005000L)
+        val tx = createDummyTx(id = 2L, amountPaise = 20000L, currency = "INR", bank = "AXIS", timestamp = 1005000L)
         val laterResult = CrossSourceMatcher.match(evidence, listOf(tx))
         assertEquals(MatchOutcome.MATCHED, laterResult.outcome)
         assertEquals(2L, laterResult.matchedTransactionId)
@@ -77,14 +80,15 @@ class CrossSourceMatchCoordinatorTest {
 
     @Test
     fun test3_AmbiguousCandidatesResultInAmbiguousStatus() {
-        val tx1 = createDummyTx(id = 3L, amountPaise = 25000L, timestamp = 1000000L, ref = "REF_A")
-        val tx2 = createDummyTx(id = 4L, amountPaise = 25000L, timestamp = 1010000L, ref = "REF_B")
+        val tx1 = createDummyTx(id = 3L, amountPaise = 25000L, currency = "INR", timestamp = 1000000L, ref = "REF_A")
+        val tx2 = createDummyTx(id = 4L, amountPaise = 25000L, currency = "INR", timestamp = 1010000L, ref = "REF_B")
 
         val evidence = SourceEvidence(
             sourceType = SourceType.TRUECALLER,
             sourceKey = "tc_key_3",
             receivedAt = 1005000L,
             amountPaise = 25000L,
+            currency = "INR",
             direction = "DEBIT",
             bankProvider = "HDFC",
             contentHash = "hash3"
@@ -100,6 +104,7 @@ class CrossSourceMatchCoordinatorTest {
             sourceKey = "tc_key_4",
             receivedAt = 1000000L,
             amountPaise = 99999L,
+            currency = "INR",
             direction = "DEBIT",
             bankProvider = "HDFC",
             contentHash = "hash4"
@@ -115,25 +120,26 @@ class CrossSourceMatchCoordinatorTest {
             sourceKey = "tc_key_5",
             receivedAt = 1000000L,
             amountPaise = 30000L,
+            currency = "INR",
             direction = "DEBIT",
             bankProvider = "HDFC",
             contentHash = "hash5",
             transactionId = 5L,
             status = EvidenceStatus.MATCHED
         )
-        // Coordinator / matcher logic check: if already matched, skipped
         assertTrue(evidence.status == EvidenceStatus.MATCHED && evidence.transactionId != null)
     }
 
     @Test
     fun test6_KnownDirectionConflictResultsInUnmatched() {
-        val tx = createDummyTx(id = 6L, amountPaise = 40000L, type = TransactionType.CREDIT, timestamp = 1000000L)
+        val tx = createDummyTx(id = 6L, amountPaise = 40000L, currency = "INR", type = TransactionType.CREDIT, timestamp = 1000000L)
         val evidence = SourceEvidence(
             sourceType = SourceType.TRUECALLER,
             sourceKey = "tc_key_6",
             receivedAt = 1000000L,
             amountPaise = 40000L,
-            direction = "DEBIT", // Conflict: Evidence is DEBIT, Transaction is CREDIT
+            currency = "INR",
+            direction = "DEBIT",
             bankProvider = "HDFC",
             contentHash = "hash6"
         )
@@ -143,12 +149,13 @@ class CrossSourceMatchCoordinatorTest {
 
     @Test
     fun test7_UnknownDirectionWithCompatibleCandidateResultsInMatched() {
-        val tx = createDummyTx(id = 7L, amountPaise = 50000L, type = TransactionType.DEBIT, timestamp = 1000000L)
+        val tx = createDummyTx(id = 7L, amountPaise = 50000L, currency = "INR", type = TransactionType.DEBIT, timestamp = 1000000L)
         val evidence = SourceEvidence(
             sourceType = SourceType.TRUECALLER,
             sourceKey = "tc_key_7",
             receivedAt = 1000000L,
             amountPaise = 50000L,
+            currency = "INR",
             direction = "UNKNOWN",
             bankProvider = "HDFC",
             contentHash = "hash7"
@@ -160,14 +167,15 @@ class CrossSourceMatchCoordinatorTest {
 
     @Test
     fun test8_UnknownBankWithCompatibleCandidateResultsInMatched() {
-        val tx = createDummyTx(id = 8L, amountPaise = 60000L, bank = "HDFC", timestamp = 1000000L)
+        val tx = createDummyTx(id = 8L, amountPaise = 60000L, currency = "INR", bank = "HDFC", timestamp = 1000000L)
         val evidence = SourceEvidence(
             sourceType = SourceType.TRUECALLER,
             sourceKey = "tc_key_8",
             receivedAt = 1000000L,
             amountPaise = 60000L,
+            currency = "INR",
             direction = "DEBIT",
-            bankProvider = null, // Unknown bank
+            bankProvider = null,
             contentHash = "hash8"
         )
         val result = CrossSourceMatcher.match(evidence, listOf(tx))
@@ -176,14 +184,16 @@ class CrossSourceMatchCoordinatorTest {
     }
 
     @Test
-    fun test9_DifferentCurrencyResultsInUnmatched() {
-        val tx = createDummyTx(id = 9L, amountPaise = 138L, timestamp = 1000000L)
+    fun test9_DifferentCurrencyCrossMatchUnmatched() {
+        val tx = createDummyTx(id = 9L, amountPaise = 10000L, currency = "INR", timestamp = 1000000L)
         val evidence = SourceEvidence(
             sourceType = SourceType.TRUECALLER,
             sourceKey = "tc_key_9",
             receivedAt = 1000000L,
-            amountPaise = 0L, // zero / different currency amount
-            direction = "CREDIT",
+            amountPaise = 10000L,
+            currency = "SGD", // Different currency!
+            direction = "DEBIT",
+            bankProvider = "HDFC",
             contentHash = "hash9"
         )
         val result = CrossSourceMatcher.match(evidence, listOf(tx))
@@ -191,20 +201,10 @@ class CrossSourceMatchCoordinatorTest {
     }
 
     @Test
-    fun test10_MultipleRapidCallbacksDeduplicatedByUniqueSourceKey() {
-        val evidenceKey = "tc_rapid_key"
-        val evidence1 = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = evidenceKey,
-            receivedAt = 1000000L,
-            amountPaise = 70000L,
-            direction = "DEBIT",
-            bankProvider = "HDFC",
-            contentHash = "hashA"
-        )
-        val evidence2 = evidence1.copy(contentHash = "hashB")
-
-        // Both share same sourceKey
-        assertEquals(evidence1.sourceKey, evidence2.sourceKey)
+    fun test10_ForeignCurrencySgdAmountPaise() {
+        val amount = AmountParser.parseAmountToPaise("SGD 1.38")
+        val currency = AmountParser.parseCurrency("SGD 1.38")
+        assertEquals(138L, amount)
+        assertEquals("SGD", currency)
     }
 }

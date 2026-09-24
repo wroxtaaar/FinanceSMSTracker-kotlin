@@ -18,6 +18,7 @@ data class SourceEvidence(
     val receivedAt: Long,
     val transactionId: Long? = null,
     val amountPaise: Long,
+    val currency: String = "INR",
     val direction: String,
     val bankProvider: String? = null,
     val accountLastFour: String? = null,

@@ -16,6 +16,7 @@ class GenericSmsParser : SmsParser {
         }
 
         val amountPaise = AmountParser.parseAmountToPaise(messageBody) ?: return null
+        val currency = AmountParser.parseCurrency(messageBody)
 
         val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") || 
                        lowerBody.contains("added") || lowerBody.contains("refund") || 
@@ -63,6 +64,7 @@ class GenericSmsParser : SmsParser {
         return ParserResult(
             isTransaction = true,
             amountPaise = amountPaise,
+            currency = currency,
             transactionType = transactionType,
             paymentMethod = paymentMethod,
             accountType = accountType,

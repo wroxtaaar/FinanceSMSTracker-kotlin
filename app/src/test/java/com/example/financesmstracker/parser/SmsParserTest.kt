@@ -155,7 +155,9 @@ class SmsParserTest {
             Axis Bank
         """.trimIndent()
         val result = manager.parse("AD-AXISBK-S", sms)
-        assertFalse(result.isTransaction)
+        assertTrue(result.isTransaction)
+        assertEquals(138L, result.amountPaise)
+        assertEquals("SGD", result.currency)
     }
 
     @Test

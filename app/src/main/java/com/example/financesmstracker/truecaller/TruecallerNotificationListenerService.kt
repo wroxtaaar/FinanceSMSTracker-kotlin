@@ -65,12 +65,12 @@ class TruecallerNotificationListenerService : NotificationListenerService() {
 
                 Log.d(
                     "FinanceSource",
-                    "DEDUP_RESULT: ${evaluation.result} | keyFP: ${evaluation.keyFingerprint}, id: $id, tag: ${tag ?: "null"}, postTime: $postTime, hashFP: ${evaluation.contentHashPrefix}, amount: ${parsed.amountPaise}, direction: ${parsed.direction}, bank: ${parsed.bankProvider ?: "null"}"
+                    "DEDUP_RESULT: ${evaluation.result} | keyFP: ${evaluation.keyFingerprint}, id: $id, tag: ${tag ?: "null"}, postTime: $postTime, hashFP: ${evaluation.contentHashPrefix}, amount: ${parsed.amountPaise}, currency: ${parsed.currency}, direction: ${parsed.direction}, bank: ${parsed.bankProvider ?: "null"}"
                 )
 
                 if (evaluation.result == DedupResult.NEW_NOTIFICATION || evaluation.result == DedupResult.KEPT_SEPARATE) {
-                    Log.d(TAG, "Observed Unique Truecaller Transaction -> Amount: ${parsed.amountPaise} paise, Direction: ${parsed.direction}, Bank: ${parsed.bankProvider}")
-                    Log.d("FinanceSource", "TRUECALLER_NOTIFICATION_PARSED -> Amount: ${parsed.amountPaise}, Direction: ${parsed.direction}, Bank: ${parsed.bankProvider}, Timestamp: $postTime")
+                    Log.d(TAG, "Observed Unique Truecaller Transaction -> Amount: ${parsed.amountPaise} ${parsed.currency}, Direction: ${parsed.direction}, Bank: ${parsed.bankProvider}")
+                    Log.d("FinanceSource", "TRUECALLER_NOTIFICATION_PARSED -> Amount: ${parsed.amountPaise}, Currency: ${parsed.currency}, Direction: ${parsed.direction}, Bank: ${parsed.bankProvider}, Timestamp: $postTime")
                     
                     // Persist SourceEvidence as UNMATCHED initially
                     val dbHelper = FinanceDatabaseHelper(applicationContext)
@@ -82,6 +82,7 @@ class TruecallerNotificationListenerService : NotificationListenerService() {
                         receivedAt = postTime,
                         transactionId = null,
                         amountPaise = parsed.amountPaise,
+                        currency = parsed.currency,
                         direction = parsed.direction.name,
                         bankProvider = parsed.bankProvider,
                         accountLastFour = null,
@@ -92,7 +93,7 @@ class TruecallerNotificationListenerService : NotificationListenerService() {
                     )
                     val evidenceId = repository.insertSourceEvidence(evidence)
                     if (evidenceId != -1L) {
-                        Log.d("FinanceSource", "TRUECALLER_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: null, amount: ${parsed.amountPaise}, direction: ${parsed.direction}, bank: ${parsed.bankProvider}, timestamp: $postTime, status: ${EvidenceStatus.UNMATCHED}")
+                        Log.d("FinanceSource", "TRUECALLER_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: null, amount: ${parsed.amountPaise}, currency: ${parsed.currency}, direction: ${parsed.direction}, bank: ${parsed.bankProvider}, timestamp: $postTime, status: ${EvidenceStatus.UNMATCHED}")
                         
                         // Event-driven matching: evaluate this new evidence immediately against existing canonical transactions
                         val coordinator = CrossSourceMatchCoordinator(repository)
