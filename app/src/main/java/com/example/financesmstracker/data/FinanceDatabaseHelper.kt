@@ -4,8 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class FinanceDatabaseHelper(context: Context) :
-    SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
         private const val DATABASE_NAME = "finance_tracker.db"
@@ -31,18 +30,23 @@ class FinanceDatabaseHelper(context: Context) :
         const val COLUMN_MEMORY_KEY = "memory_key"
         const val COLUMN_MEMORY_CATEGORY = "category"
 
-        // Kept only for migration compatibility.
-        private const val OLD_TABLE_PAYEE_MAPPINGS = "payee_category_mappings"
-        private const val OLD_COLUMN_PAYEE_ID = "payee_id"
-        private const val OLD_COLUMN_CATEGORY = "category"
+        const val TABLE_SOURCE_EVIDENCE = "source_evidence"
+        const val COLUMN_EVIDENCE_ID = "id"
+        const val COLUMN_EVIDENCE_SOURCE_TYPE = "source_type"
+        const val COLUMN_EVIDENCE_SOURCE_KEY = "source_key"
+        const val COLUMN_EVIDENCE_RECEIVED_AT = "received_at"
+        const val COLUMN_EVIDENCE_TRANSACTION_ID = "transaction_id"
+        const val COLUMN_EVIDENCE_AMOUNT_PAISE = "amount_paise"
+        const val COLUMN_EVIDENCE_DIRECTION = "direction"
+        const val COLUMN_EVIDENCE_BANK_PROVIDER = "bank_provider"
+        const val COLUMN_EVIDENCE_ACCOUNT_LAST_FOUR = "account_last_four"
+        const val COLUMN_EVIDENCE_REFERENCE = "reference"
+        const val COLUMN_EVIDENCE_CONTENT_HASH = "content_hash"
+        const val COLUMN_EVIDENCE_CONFIDENCE = "confidence"
+        const val COLUMN_EVIDENCE_STATUS = "status"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
-        createTransactionsTable(db)
-        createCategoryMemoryTable(db)
-    }
-
-    private fun createTransactionsTable(db: SQLiteDatabase) {
         val createTransactionsTable = """
             CREATE TABLE $TABLE_TRANSACTIONS (
                 $COLUMN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,49 +66,58 @@ class FinanceDatabaseHelper(context: Context) :
             )
         """.trimIndent()
 
-        db.execSQL(createTransactionsTable)
-    }
-
-    private fun createCategoryMemoryTable(db: SQLiteDatabase) {
-        val createCategoryMemoryTable = """
+        val createMemoryTable = """
             CREATE TABLE $TABLE_CATEGORY_MEMORY (
                 $COLUMN_MEMORY_KEY TEXT PRIMARY KEY,
                 $COLUMN_MEMORY_CATEGORY TEXT NOT NULL
             )
         """.trimIndent()
 
-        db.execSQL(createCategoryMemoryTable)
+        val createEvidenceTable = """
+            CREATE TABLE $TABLE_SOURCE_EVIDENCE (
+                $COLUMN_EVIDENCE_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                $COLUMN_EVIDENCE_SOURCE_TYPE TEXT NOT NULL,
+                $COLUMN_EVIDENCE_SOURCE_KEY TEXT UNIQUE NOT NULL,
+                $COLUMN_EVIDENCE_RECEIVED_AT INTEGER NOT NULL,
+                $COLUMN_EVIDENCE_TRANSACTION_ID INTEGER,
+                $COLUMN_EVIDENCE_AMOUNT_PAISE INTEGER NOT NULL,
+                $COLUMN_EVIDENCE_DIRECTION TEXT NOT NULL,
+                $COLUMN_EVIDENCE_BANK_PROVIDER TEXT,
+                $COLUMN_EVIDENCE_ACCOUNT_LAST_FOUR TEXT,
+                $COLUMN_EVIDENCE_REFERENCE TEXT,
+                $COLUMN_EVIDENCE_CONTENT_HASH TEXT NOT NULL,
+                $COLUMN_EVIDENCE_CONFIDENCE REAL NOT NULL,
+                $COLUMN_EVIDENCE_STATUS TEXT NOT NULL,
+                FOREIGN KEY($COLUMN_EVIDENCE_TRANSACTION_ID) REFERENCES $TABLE_TRANSACTIONS($COLUMN_ID) ON DELETE SET NULL
+            )
+        """.trimIndent()
+
+        db.execSQL(createTransactionsTable)
+        db.execSQL(createMemoryTable)
+        db.execSQL(createEvidenceTable)
     }
 
-    override fun onUpgrade(
-        db: SQLiteDatabase,
-        oldVersion: Int,
-        newVersion: Int
-    ) {
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
-            migratePayeeMappingsToCategoryMemory(db)
-        }
-    }
-
-    private fun migratePayeeMappingsToCategoryMemory(db: SQLiteDatabase) {
-        createCategoryMemoryTable(db)
-
-        // Preserve all existing VPA/payee mappings.
-        db.execSQL(
-            """
-            INSERT OR IGNORE INTO $TABLE_CATEGORY_MEMORY
-                ($COLUMN_MEMORY_KEY, $COLUMN_MEMORY_CATEGORY)
-            SELECT
-                'VPA|' || lower(trim($OLD_COLUMN_PAYEE_ID)),
-                $OLD_COLUMN_CATEGORY
-            FROM $OLD_TABLE_PAYEE_MAPPINGS
-            WHERE $OLD_COLUMN_PAYEE_ID IS NOT NULL
-              AND trim($OLD_COLUMN_PAYEE_ID) != ''
+            val createEvidenceTable = """
+                CREATE TABLE IF NOT EXISTS $TABLE_SOURCE_EVIDENCE (
+                    $COLUMN_EVIDENCE_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    $COLUMN_EVIDENCE_SOURCE_TYPE TEXT NOT NULL,
+                    $COLUMN_EVIDENCE_SOURCE_KEY TEXT UNIQUE NOT NULL,
+                    $COLUMN_EVIDENCE_RECEIVED_AT INTEGER NOT NULL,
+                    $COLUMN_EVIDENCE_TRANSACTION_ID INTEGER,
+                    $COLUMN_EVIDENCE_AMOUNT_PAISE INTEGER NOT NULL,
+                    $COLUMN_EVIDENCE_DIRECTION TEXT NOT NULL,
+                    $COLUMN_EVIDENCE_BANK_PROVIDER TEXT,
+                    $COLUMN_EVIDENCE_ACCOUNT_LAST_FOUR TEXT,
+                    $COLUMN_EVIDENCE_REFERENCE TEXT,
+                    $COLUMN_EVIDENCE_CONTENT_HASH TEXT NOT NULL,
+                    $COLUMN_EVIDENCE_CONFIDENCE REAL NOT NULL,
+                    $COLUMN_EVIDENCE_STATUS TEXT NOT NULL,
+                    FOREIGN KEY($COLUMN_EVIDENCE_TRANSACTION_ID) REFERENCES $TABLE_TRANSACTIONS($COLUMN_ID) ON DELETE SET NULL
+                )
             """.trimIndent()
-        )
-
-        db.execSQL(
-            "DROP TABLE IF EXISTS $OLD_TABLE_PAYEE_MAPPINGS"
-        )
+            db.execSQL(createEvidenceTable)
+        }
     }
 }

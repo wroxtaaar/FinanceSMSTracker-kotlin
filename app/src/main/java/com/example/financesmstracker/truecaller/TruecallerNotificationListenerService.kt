@@ -4,6 +4,11 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.example.financesmstracker.data.FinanceDatabaseHelper
+import com.example.financesmstracker.data.TransactionRepository
+import com.example.financesmstracker.evidence.EvidenceStatus
+import com.example.financesmstracker.evidence.SourceEvidence
+import com.example.financesmstracker.evidence.SourceType
 import com.example.financesmstracker.util.HashUtil
 import java.util.Collections
 import java.util.LinkedList
@@ -64,6 +69,33 @@ class TruecallerNotificationListenerService : NotificationListenerService() {
 
                 if (evaluation.result == DedupResult.NEW_NOTIFICATION || evaluation.result == DedupResult.KEPT_SEPARATE) {
                     Log.d(TAG, "Observed Unique Truecaller Transaction -> Amount: ${parsed.amountPaise} paise, Direction: ${parsed.direction}, Bank: ${parsed.bankProvider}")
+                    Log.d("FinanceSource", "TRUECALLER_NOTIFICATION_PARSED -> Amount: ${parsed.amountPaise}, Direction: ${parsed.direction}, Bank: ${parsed.bankProvider}, Timestamp: $postTime")
+                    
+                    // Persist SourceEvidence as UNMATCHED (no transaction created)
+                    val dbHelper = FinanceDatabaseHelper(applicationContext)
+                    val repository = TransactionRepository(dbHelper)
+                    val sourceKey = sbn.key ?: "tc_${sbn.packageName}_$postTime"
+                    val evidence = SourceEvidence(
+                        sourceType = SourceType.TRUECALLER,
+                        sourceKey = sourceKey,
+                        receivedAt = postTime,
+                        transactionId = null,
+                        amountPaise = parsed.amountPaise,
+                        direction = parsed.direction.name,
+                        bankProvider = parsed.bankProvider,
+                        accountLastFour = null,
+                        reference = null,
+                        contentHash = contentHash,
+                        confidence = 0.90f,
+                        status = EvidenceStatus.UNMATCHED
+                    )
+                    val evidenceId = repository.insertSourceEvidence(evidence)
+                    if (evidenceId != -1L) {
+                        Log.d("FinanceSource", "TRUECALLER_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: null, amount: ${parsed.amountPaise}, direction: ${parsed.direction}, bank: ${parsed.bankProvider}, timestamp: $postTime, status: ${EvidenceStatus.UNMATCHED}")
+                    }
+                    repository.logNewestEvidenceSummary()
+                    dbHelper.close()
+
                     observedNotifications.add(parsed)
                     if (observedNotifications.size > 50) {
                         observedNotifications.removeAt(0)

@@ -10,7 +10,11 @@ import com.example.financesmstracker.categorizer.TransactionCategorizer
 import com.example.financesmstracker.data.FinanceDatabaseHelper
 import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.data.TransactionRepository
+import com.example.financesmstracker.evidence.EvidenceStatus
+import com.example.financesmstracker.evidence.SourceEvidence
+import com.example.financesmstracker.evidence.SourceType
 import com.example.financesmstracker.parser.SmsParserManager
+import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.util.HashUtil
 import java.util.Locale
 
@@ -58,6 +62,26 @@ class SmsReceiver : BroadcastReceiver() {
 
                         val rowId = repository.insertTransaction(transaction)
                         if (rowId != -1L) {
+                            val evidence = SourceEvidence(
+                                sourceType = SourceType.SMS,
+                                sourceKey = smsHash,
+                                receivedAt = timestamp,
+                                transactionId = rowId,
+                                amountPaise = parserResult.amountPaise,
+                                direction = if (parserResult.transactionType == TransactionType.CREDIT) "CREDIT" else "DEBIT",
+                                bankProvider = parserResult.bank,
+                                accountLastFour = parserResult.accountLastFour,
+                                reference = parserResult.refNumber,
+                                contentHash = smsHash,
+                                confidence = parserResult.confidence,
+                                status = EvidenceStatus.MATCHED
+                            )
+                            val evidenceId = repository.insertSourceEvidence(evidence)
+                            if (evidenceId != -1L) {
+                                Log.d("FinanceSource", "SMS_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: $rowId, amount: ${parserResult.amountPaise}, direction: ${if (parserResult.transactionType == TransactionType.CREDIT) "CREDIT" else "DEBIT"}, bank: ${parserResult.bank}, timestamp: $timestamp, status: ${EvidenceStatus.MATCHED}")
+                            }
+                            repository.logNewestEvidenceSummary()
+
                             val rupees = parserResult.amountPaise / 100.0
                             val amountFormatted = String.format(Locale.US, "₹%.2f (%d paise)", rupees, parserResult.amountPaise)
                             Log.d(TAG, "Successfully persisted multipart transaction ID: $rowId, Amount: $amountFormatted, Category: $category")
