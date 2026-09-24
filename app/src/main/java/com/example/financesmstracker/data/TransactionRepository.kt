@@ -3,6 +3,7 @@ package com.example.financesmstracker.data
 import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import android.util.Log
 import com.example.financesmstracker.parser.AccountType
 import com.example.financesmstracker.parser.PaymentMethod
 import com.example.financesmstracker.parser.TransactionType
@@ -28,12 +29,18 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
             put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, transaction.parserConfidence)
         }
 
-        return db.insertWithOnConflict(
+        val rowId = db.insertWithOnConflict(
             FinanceDatabaseHelper.TABLE_TRANSACTIONS,
             null,
             values,
             SQLiteDatabase.CONFLICT_IGNORE
         )
+
+        if (rowId != -1L) {
+            Log.d("FinanceSource", "TRANSACTION_REPOSITORY_INSERT -> RowID: $rowId, Amount: ${transaction.amountPaise}, Type: ${transaction.transactionType}, Bank: ${transaction.bank}, Timestamp: ${transaction.timestamp}")
+        }
+
+        return rowId
     }
 
     fun getTransactionById(id: Long): Transaction? {

@@ -7,7 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Bundle
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.ArrayAdapter
@@ -31,6 +33,7 @@ import com.example.financesmstracker.data.TransactionRepository
 import com.example.financesmstracker.parser.ParserResult
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.receiver.SmsReceiver
+import com.example.financesmstracker.truecaller.NotificationAccessHelper
 import com.example.financesmstracker.ui.TransactionAdapter
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,6 +46,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: TransactionAdapter
     private lateinit var recyclerView: RecyclerView
     private lateinit var textViewEmpty: TextView
+    private lateinit var textViewNotificationStatus: TextView
+    private lateinit var buttonOpenNotificationSettings: Button
 
     private val categories = listOf(
         "FOOD", "GROCERIES", "SHOPPING", "FUEL", "TRAVEL",
@@ -105,6 +110,8 @@ class MainActivity : AppCompatActivity() {
 
         recyclerView = findViewById(R.id.recyclerViewTransactions)
         textViewEmpty = findViewById(R.id.textViewEmpty)
+        textViewNotificationStatus = findViewById(R.id.textViewNotificationStatus)
+        buttonOpenNotificationSettings = findViewById(R.id.buttonOpenNotificationSettings)
 
         recyclerView.layoutManager = LinearLayoutManager(this)
 
@@ -113,6 +120,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         recyclerView.adapter = adapter
+
+        buttonOpenNotificationSettings.setOnClickListener {
+            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            startActivity(intent)
+        }
 
         checkAndRequestSmsPermission()
     }
@@ -131,6 +143,23 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         unregisterReceiver(transactionDataChangedReceiver)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        loadTransactions()
+        updateNotificationAccessStatus()
+    }
+
+    private fun updateNotificationAccessStatus() {
+        val granted = NotificationAccessHelper.isNotificationAccessGranted(this)
+        if (granted) {
+            textViewNotificationStatus.text = "Notification Access: Granted"
+            textViewNotificationStatus.setTextColor(Color.parseColor("#2E7D32")) // Green
+        } else {
+            textViewNotificationStatus.text = "Notification Access: Disabled (Tap button above to enable)"
+            textViewNotificationStatus.setTextColor(Color.parseColor("#C62828")) // Red
+        }
     }
 
     private fun showTransactionDetailDialog(tx: Transaction) {
@@ -325,11 +354,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        loadTransactions()
     }
 
     private fun loadTransactions() {
