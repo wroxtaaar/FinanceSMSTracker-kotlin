@@ -6,6 +6,7 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.example.financesmstracker.data.FinanceDatabaseHelper
 import com.example.financesmstracker.data.TransactionRepository
+import com.example.financesmstracker.evidence.CrossSourceMatchCoordinator
 import com.example.financesmstracker.evidence.EvidenceStatus
 import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
@@ -71,7 +72,7 @@ class TruecallerNotificationListenerService : NotificationListenerService() {
                     Log.d(TAG, "Observed Unique Truecaller Transaction -> Amount: ${parsed.amountPaise} paise, Direction: ${parsed.direction}, Bank: ${parsed.bankProvider}")
                     Log.d("FinanceSource", "TRUECALLER_NOTIFICATION_PARSED -> Amount: ${parsed.amountPaise}, Direction: ${parsed.direction}, Bank: ${parsed.bankProvider}, Timestamp: $postTime")
                     
-                    // Persist SourceEvidence as UNMATCHED (no transaction created)
+                    // Persist SourceEvidence as UNMATCHED initially
                     val dbHelper = FinanceDatabaseHelper(applicationContext)
                     val repository = TransactionRepository(dbHelper)
                     val sourceKey = sbn.key ?: "tc_${sbn.packageName}_$postTime"
@@ -92,6 +93,10 @@ class TruecallerNotificationListenerService : NotificationListenerService() {
                     val evidenceId = repository.insertSourceEvidence(evidence)
                     if (evidenceId != -1L) {
                         Log.d("FinanceSource", "TRUECALLER_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: null, amount: ${parsed.amountPaise}, direction: ${parsed.direction}, bank: ${parsed.bankProvider}, timestamp: $postTime, status: ${EvidenceStatus.UNMATCHED}")
+                        
+                        // Event-driven matching: evaluate this new evidence immediately against existing canonical transactions
+                        val coordinator = CrossSourceMatchCoordinator(repository)
+                        coordinator.onSourceEvidenceCreated(evidenceId)
                     }
                     repository.logNewestEvidenceSummary()
                     dbHelper.close()

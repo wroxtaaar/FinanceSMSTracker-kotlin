@@ -4,7 +4,10 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
+import com.example.financesmstracker.evidence.CrossSourceMatcher
 import com.example.financesmstracker.evidence.EvidenceStatus
+import com.example.financesmstracker.evidence.MatchOutcome
+import com.example.financesmstracker.evidence.MatchResult
 import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
 import com.example.financesmstracker.parser.AccountType
@@ -73,6 +76,116 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         )
     }
 
+    fun getSourceEvidenceById(id: Long): SourceEvidence? {
+        val db = dbHelper.readableDatabase
+        val cursor = db.query(
+            FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_ID} = ?",
+            arrayOf(id.toString()),
+            null,
+            null,
+            null
+        )
+        cursor.use {
+            if (it.moveToFirst()) {
+                return cursorToEvidence(it)
+            }
+        }
+        return null
+    }
+
+    fun applyMatchResult(evidenceId: Long, result: MatchResult) {
+        val db = dbHelper.writableDatabase
+        db.beginTransaction()
+        try {
+            when (result.outcome) {
+                MatchOutcome.MATCHED -> {
+                    if (result.matchedTransactionId != null) {
+                        updateSourceEvidenceMatchInternal(db, evidenceId, result.matchedTransactionId, EvidenceStatus.MATCHED)
+                        Log.d("FinanceSource", "CROSS_SOURCE_MATCH -> evidenceId: $evidenceId, transactionId: ${result.matchedTransactionId}, result: MATCHED, reasons: ${result.reasons}")
+                    }
+                }
+                MatchOutcome.AMBIGUOUS -> {
+                    updateSourceEvidenceStatusInternal(db, evidenceId, EvidenceStatus.AMBIGUOUS)
+                    Log.d("FinanceSource", "CROSS_SOURCE_MATCH -> evidenceId: $evidenceId, transactionId: null, result: AMBIGUOUS, reasons: ${result.reasons}")
+                }
+                MatchOutcome.UNMATCHED -> {
+                    updateSourceEvidenceStatusInternal(db, evidenceId, EvidenceStatus.UNMATCHED)
+                    Log.d("FinanceSource", "CROSS_SOURCE_MATCH -> evidenceId: $evidenceId, transactionId: null, result: UNMATCHED, reasons: ${result.reasons}")
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun getTransactionsByAmount(amountPaise: Long): List<Transaction> {
+        val list = mutableListOf<Transaction>()
+        val db = dbHelper.readableDatabase
+        val cursor = db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE} = ?",
+            arrayOf(amountPaise.toString()),
+            null,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_TIMESTAMP} DESC"
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                list.add(cursorToTransaction(it))
+            }
+        }
+        return list
+    }
+
+    fun getUnmatchedOrAmbiguousEvidenceByAmount(amountPaise: Long): List<SourceEvidence> {
+        val list = mutableListOf<SourceEvidence>()
+        val db = dbHelper.readableDatabase
+        val cursor = db.query(
+            FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_AMOUNT_PAISE} = ? AND ${FinanceDatabaseHelper.COLUMN_EVIDENCE_STATUS} != ?",
+            arrayOf(amountPaise.toString(), EvidenceStatus.MATCHED.name),
+            null,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_RECEIVED_AT} DESC"
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                list.add(cursorToEvidence(it))
+            }
+        }
+        return list
+    }
+
+    private fun updateSourceEvidenceMatchInternal(db: SQLiteDatabase, id: Long, transactionId: Long, status: EvidenceStatus) {
+        val values = ContentValues().apply {
+            put(FinanceDatabaseHelper.COLUMN_EVIDENCE_TRANSACTION_ID, transactionId)
+            put(FinanceDatabaseHelper.COLUMN_EVIDENCE_STATUS, status.name)
+        }
+        db.update(
+            FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+            values,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_ID} = ?",
+            arrayOf(id.toString())
+        )
+    }
+
+    private fun updateSourceEvidenceStatusInternal(db: SQLiteDatabase, id: Long, status: EvidenceStatus) {
+        val values = ContentValues().apply {
+            put(FinanceDatabaseHelper.COLUMN_EVIDENCE_STATUS, status.name)
+        }
+        db.update(
+            FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+            values,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_ID} = ?",
+            arrayOf(id.toString())
+        )
+    }
+
     fun getSourceEvidenceByKey(sourceKey: String): SourceEvidence? {
         val db = dbHelper.readableDatabase
         val cursor = db.query(
@@ -92,7 +205,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         return null
     }
 
-    fun updateSourceEvidenceMatch(id: Long, transactionId: Long, status: EvidenceStatus): Int {
+    fun updateSourceEvidenceMatchPublic(id: Long, transactionId: Long, status: EvidenceStatus): Int {
         val db = dbHelper.writableDatabase
         val values = ContentValues().apply {
             put(FinanceDatabaseHelper.COLUMN_EVIDENCE_TRANSACTION_ID, transactionId)

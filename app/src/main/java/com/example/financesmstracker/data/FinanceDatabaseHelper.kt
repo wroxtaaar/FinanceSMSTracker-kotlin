@@ -92,9 +92,15 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             )
         """.trimIndent()
 
+        val createEvidenceIndex = """
+            CREATE INDEX IF NOT EXISTS idx_source_evidence_status_amount 
+            ON $TABLE_SOURCE_EVIDENCE($COLUMN_EVIDENCE_STATUS, $COLUMN_EVIDENCE_AMOUNT_PAISE)
+        """.trimIndent()
+
         db.execSQL(createTransactionsTable)
         db.execSQL(createMemoryTable)
         db.execSQL(createEvidenceTable)
+        db.execSQL(createEvidenceIndex)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -117,7 +123,12 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
                     FOREIGN KEY($COLUMN_EVIDENCE_TRANSACTION_ID) REFERENCES $TABLE_TRANSACTIONS($COLUMN_ID) ON DELETE SET NULL
                 )
             """.trimIndent()
+            val createEvidenceIndex = """
+                CREATE INDEX IF NOT EXISTS idx_source_evidence_status_amount 
+                ON $TABLE_SOURCE_EVIDENCE($COLUMN_EVIDENCE_STATUS, $COLUMN_EVIDENCE_AMOUNT_PAISE)
+            """.trimIndent()
             db.execSQL(createEvidenceTable)
+            db.execSQL(createEvidenceIndex)
         }
     }
 }

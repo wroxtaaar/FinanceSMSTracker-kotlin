@@ -10,6 +10,7 @@ import com.example.financesmstracker.categorizer.TransactionCategorizer
 import com.example.financesmstracker.data.FinanceDatabaseHelper
 import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.data.TransactionRepository
+import com.example.financesmstracker.evidence.CrossSourceMatchCoordinator
 import com.example.financesmstracker.evidence.EvidenceStatus
 import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
@@ -80,6 +81,11 @@ class SmsReceiver : BroadcastReceiver() {
                             if (evidenceId != -1L) {
                                 Log.d("FinanceSource", "SMS_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: $rowId, amount: ${parserResult.amountPaise}, direction: ${if (parserResult.transactionType == TransactionType.CREDIT) "CREDIT" else "DEBIT"}, bank: ${parserResult.bank}, timestamp: $timestamp, status: ${EvidenceStatus.MATCHED}")
                             }
+
+                            // Event-driven matching: evaluate any unmatched/ambiguous Truecaller evidence against this new canonical transaction
+                            val coordinator = CrossSourceMatchCoordinator(repository)
+                            coordinator.onCanonicalTransactionCreated(rowId)
+
                             repository.logNewestEvidenceSummary()
 
                             val rupees = parserResult.amountPaise / 100.0
