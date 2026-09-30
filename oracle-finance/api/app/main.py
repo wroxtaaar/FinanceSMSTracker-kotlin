@@ -89,6 +89,19 @@ def create_receivable(payload:ReceivableRequest,x_sync_token:str=Header(default=
                     "currency":payload.currency,"splitwise_expense_id":payload.splitwiseExpenseId})
     return {"status":"ok"}
 
+@app.get("/api/v1/splitwise/receivables")
+def get_receivables(currency:str="INR",x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    with connection() as conn:
+        rows=conn.execute(
+            """SELECT id,description,amount_minor,currency,splitwise_expense_id,status,created_at
+               FROM splitwise_receivables
+               WHERE status='OPEN' AND currency=?
+               ORDER BY created_at DESC""",
+            (currency,)
+        ).fetchall()
+    return {"receivables":[dict(row) for row in rows]}
+
 @app.get("/api/v1/summary")
 def summary(currency:str="INR",x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return true_available(currency)
