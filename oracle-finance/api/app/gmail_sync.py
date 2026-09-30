@@ -20,8 +20,23 @@ def parse_bank_email(message):
     amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
     direction="CREDIT" if re.search(r"(?i)credited|credit alert|payment.*received",combined) else (
         "DEBIT" if re.search(r"(?i)debited|spent|sent|purchase|withdrawn",combined) else None)
-    bank="HDFC" if re.search(r"(?i)HDFC",combined) else ("AXIS" if re.search(r"(?i)Axis Bank|Axis",combined) else None)
-    lm=re.search(r"(?i)(?:A/c|Card(?: no\.)?|account)[^\dXx]*(?:X{2}|\*+)(\d{4})",combined)
+    bank=None
+    for candidate, pattern in (
+        ("HDFC", r"(?i)HDFC"),
+        ("AXIS", r"(?i)Axis Bank|\bAxis\b"),
+        ("ICICI", r"(?i)ICICI"),
+        ("HSBC", r"(?i)HSBC"),
+        ("INDUSIND", r"(?i)IndusInd|IndusInd Bank"),
+        ("SBI", r"(?i)State Bank of India|\bSBI\b"),
+    ):
+        if re.search(pattern, combined):
+            bank=candidate
+            break
+    lm=re.search(
+        r"(?i)(?:A/c|account|card(?: no\.?)?)[^\d]{0,20}"
+        r"(?:X{0,4}|\*{0,6}|[#\- ]*)?(\d{4})(?!\d)",
+        combined
+    )
     last4=lm.group(1) if lm else None
     rm=re.search(r"(?i)(?:Ref|reference|transaction)[^A-Za-z0-9]*([A-Z0-9-]{5,})",combined)
     reference=rm.group(1) if rm else None
