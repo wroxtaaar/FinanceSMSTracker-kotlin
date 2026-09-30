@@ -1,7 +1,7 @@
 import base64, hashlib, os, re, time
 from email.utils import parseaddr
 from .db import connection
-from .ledger import sync_transaction,sync_evidence,add_review
+from .ledger import sync_transaction,sync_evidence,add_review,apply_transaction_to_account
 from .main_models import SyncTransactionModel,SyncEvidenceModel
 
 GMAIL_READONLY_SCOPE="https://www.googleapis.com/auth/gmail.readonly"
@@ -65,8 +65,8 @@ def ingest_messages(service,query="newer_than:30d"):
             reconcile_duplicate_transaction(t.id)
             with connection() as conn:
                 row=conn.execute("SELECT * FROM transactions WHERE id=?",(t.id,)).fetchone()
-            if row and not row["duplicate_of"]:
-                apply_transaction_to_account(conn=None if False else __import__("builtins").None, t, 0)
+                if row and not row["duplicate_of"]:
+                    apply_transaction_to_account(conn, t, int(time.time()*1000))
             created+=1
         else:
             h=_headers(message.get("payload",{}))
