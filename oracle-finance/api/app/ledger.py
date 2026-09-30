@@ -13,7 +13,7 @@ def sync_transaction(t):
         (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,t.reference,
          t.timestamp,t.category,t.confidence,None,created_at))
 
-        if before is None:
+        if before is None and not str(t.id).startswith("gmail:"):
             apply_transaction_to_account(conn, t, created_at)
 
         return before is None
@@ -72,10 +72,24 @@ def balances():
 
 def set_balance(account_id,name,currency,account_type,bank,last4,balance_minor):
     with connection() as conn:
-        conn.execute("""INSERT INTO accounts(id,name,currency,account_type,bank,last4,balance_minor,updated_at)
-        VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,currency=excluded.currency,
-        account_type=excluded.account_type,bank=excluded.bank,last4=excluded.last4,balance_minor=excluded.balance_minor,
-        updated_at=excluded.updated_at""",(account_id,name,currency,account_type,bank,last4,balance_minor,now_ms()))
+        adjustment_total=conn.execute(
+            "SELECT COALESCE(SUM(delta_minor),0) value FROM balance_adjustments WHERE account_id=?",
+            (account_id,)
+        ).fetchone()["value"]
+        opening_balance=balance_minor-adjustment_total
+        conn.execute("""INSERT INTO accounts(
+            id,name,currency,account_type,bank,last4,opening_balance_minor,balance_minor,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET
+            name=excluded.name,
+            currency=excluded.currency,
+            account_type=excluded.account_type,
+            bank=excluded.bank,
+            last4=excluded.last4,
+            opening_balance_minor=excluded.opening_balance_minor,
+            balance_minor=excluded.balance_minor,
+            updated_at=excluded.updated_at""",
+        (account_id,name,currency,account_type,bank,last4,opening_balance,balance_minor,now_ms()))
 
 def add_receivable(item):
     with connection() as conn:
