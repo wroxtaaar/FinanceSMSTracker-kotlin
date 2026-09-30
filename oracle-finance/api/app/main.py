@@ -50,8 +50,10 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
     new_t=sum(sync_transaction(t) for t in payload.transactions)
     new_e=sum(sync_evidence(e) for e in payload.evidence)
     for t in payload.transactions:
+        reconcile_duplicate_transaction(t.id)
+    for t in payload.transactions:
         row=next((x for x in list_transactions(1000) if x["id"]==t.id),None)
-        if row: create_for_transaction(row)
+        if row and not row.get("duplicate_of"): create_for_transaction(row)
     reconcile_all()
     return {"acceptedTransactions":new_t,"acceptedEvidence":new_e,
             "duplicateTransactions":len(payload.transactions)-new_t,
