@@ -94,6 +94,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:text="Refresh Oracle Ledger" />
+
+        <Button
+            android:id="@+id/buttonViewAccounts"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="View Accounts" />
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
