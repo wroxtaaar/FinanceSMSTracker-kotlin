@@ -48,18 +48,15 @@ object FinanceSyncPayload {
             out.append(",\"observedAt\":").append(e.receivedAt)
             appendNullableString(out, "transactionId", e.localTransactionId?.toString())
             appendNullableString(out, "matchedTransactionId", e.localTransactionId?.toString())
-            if (e.amountMinor != 0L) out.append(",\"amountMinor\":").append(e.amountMinor)
+            out.append(",\"amountMinor\":").append(e.amountMinor)
             appendNullableString(out, "currency", e.currency)
             appendNullableString(out, "direction", e.direction)
             appendNullableString(out, "bankProvider", e.bankProvider)
             appendNullableString(out, "accountLast4", e.accountLastFour)
             appendNullableString(out, "reference", e.reference)
             appendNullableString(out, "contentHash", e.contentHash)
-            if (e.confidence.isFinite()) {
-                out.append(",\"confidence\":").append(e.confidence)
-            } else {
-                throw IllegalArgumentException("evidence confidence must be finite")
-            }
+            require(e.confidence.isFinite()) { "evidence confidence must be finite" }
+            out.append(",\"confidence\":").append(e.confidence)
             out.append("}")
         }
         out.append("]")
