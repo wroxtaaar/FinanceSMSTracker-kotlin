@@ -30,6 +30,14 @@ CREATE TABLE IF NOT EXISTS evidence (
   observed_at INTEGER NOT NULL,
   transaction_id TEXT,
   matched_transaction_id TEXT,
+  amount_minor INTEGER,
+  currency TEXT,
+  direction TEXT,
+  bank_provider TEXT,
+  account_last4 TEXT,
+  reference TEXT,
+  content_hash TEXT,
+  confidence REAL,
   created_at INTEGER NOT NULL,
   UNIQUE(source_type, source_id)
 );
