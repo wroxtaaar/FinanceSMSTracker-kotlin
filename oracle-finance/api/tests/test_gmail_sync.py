@@ -37,26 +37,24 @@ def _message(message_id, body, subject="HDFC Bank Transaction Alert", internal_d
 class _Messages:
     def __init__(self, messages):
         self._messages = messages
+        self._mode = "list"
 
     def list(self, **kwargs):
+        self._mode = "list"
         return self
 
     def get(self, **kwargs):
+        self._mode = "get"
         return self
 
     def execute(self):
-        if hasattr(self, "_get_message"):
-            return self._get_message
+        if self._mode == "get":
+            return self._messages[0]
         return {"messages": [{"id": m["id"]} for m in self._messages]}
-
-    def set_get_message(self, message):
-        self._get_message = message
-        return self
 
 
 class _Users:
     def __init__(self, messages):
-        self._messages_data = messages
         self._messages = _Messages(messages)
 
     def messages(self):
@@ -69,7 +67,6 @@ class FakeService:
 
     def users(self):
         return self._users
-
 
 def test_gmail_parser_supports_card_and_supported_banks():
     message = _message(
@@ -95,10 +92,6 @@ def test_gmail_unique_transaction_updates_balance_once():
     )
     service = FakeService([message])
 
-    # Patch the get() response because the tiny fake keeps list/get state
-    # separate while matching Gmail's fluent API.
-    service._users._messages.set_get_message(message)
-
     set_balance("gmail-unique", "Gmail Unique", "INR", "BANK_ACCOUNT", "HDFC", "9591", 100000)
     created = ingest_messages(service, query="newer_than:30d")
 
@@ -116,7 +109,6 @@ def test_gmail_unique_transaction_updates_balance_once():
 
 
 def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
-    sms_body = "HDFC Bank A/c XX9591 debited INR 250.00. Ref DUP-12345."
     gmail_body = "HDFC Bank A/c XX9591 debited INR 250.00. Ref DUP-12345."
 
     gmail_message = _message(
@@ -147,7 +139,6 @@ def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
     # The parser/ingestor should recognize the Gmail copy as the same
     # transaction and avoid a second balance adjustment.
     service = FakeService([gmail_message])
-    service._users._messages.set_get_message(gmail_message)
     ingest_messages(service, query="newer_than:30d")
 
     with connection() as conn:
