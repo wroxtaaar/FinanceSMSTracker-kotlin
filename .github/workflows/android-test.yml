@@ -1,0 +1,23 @@
+name: Android tests
+
+on:
+  push:
+    branches:
+      - main
+      - finance-system-integration
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Run unit tests
+        run: ./gradlew test
