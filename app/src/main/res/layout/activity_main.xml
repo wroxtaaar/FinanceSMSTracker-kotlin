@@ -39,6 +39,63 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/buttonOpenNotificationSettings" />
 
+    <LinearLayout
+        android:id="@+id/oracleLedgerPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="vertical"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/textViewNotificationStatus">
+
+        <TextView
+            android:id="@+id/textViewOracleStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Oracle ledger: Loading..."
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textViewTrueAvailable"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="True available: —"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textViewBankCash"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Bank cash: —"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/textViewCardOutstanding"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Card outstanding: —"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/textViewSplitwiseReceivable"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Splitwise receivable: —"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/buttonRefreshOracle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Refresh Oracle Ledger" />
+    </LinearLayout>
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerViewTransactions"
         android:layout_width="0dp"
@@ -47,7 +104,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/textViewNotificationStatus"
+        app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel"
         tools:listitem="@layout/item_transaction" />
 
     <TextView
@@ -60,6 +117,6 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/textViewNotificationStatus" />
+        app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
