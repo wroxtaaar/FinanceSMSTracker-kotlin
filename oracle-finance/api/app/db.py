@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS evidence (
 );
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL, account_type TEXT NOT NULL,
-  bank TEXT, last4 TEXT, balance_minor INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
+  bank TEXT, last4 TEXT, opening_balance_minor INTEGER NOT NULL DEFAULT 0, balance_minor INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS splitwise_receivables (
   id TEXT PRIMARY KEY, description TEXT NOT NULL, amount_minor INTEGER NOT NULL, currency TEXT NOT NULL,
@@ -83,6 +83,23 @@ def init_db():
         }
         if "duplicate_of" not in transaction_columns:
             conn.execute("ALTER TABLE transactions ADD COLUMN duplicate_of TEXT")
+
+        account_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()
+        }
+        if "opening_balance_minor" not in account_columns:
+            conn.execute("ALTER TABLE accounts ADD COLUMN opening_balance_minor INTEGER")
+
+        # Existing accounts predate the opening-balance field. Reconstruct the
+        # opening snapshot from their current balance and already-applied
+        # transaction adjustments so upgrades preserve the live balance.
+        conn.execute(
+            """UPDATE accounts
+               SET opening_balance_minor = balance_minor - COALESCE(
+                   (SELECT SUM(delta_minor) FROM balance_adjustments WHERE account_id=accounts.id), 0
+               )
+             WHERE opening_balance_minor IS NULL"""
+        )
 
         evidence_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(evidence)").fetchall()
