@@ -49,8 +49,8 @@ class FinanceSyncClient(
 class SyncSettings(context: Context) {
     private val prefs = context.getSharedPreferences("finance_sync", Context.MODE_PRIVATE)
 
-    fun baseUrl(): String = prefs.getString(KEY_BASE_URL, "") ?: ""
-    fun token(): String = prefs.getString(KEY_TOKEN, "") ?: ""
+    fun baseUrl(): String = prefs.getString(KEY_BASE_URL, null) ?: BuildConfig.FINANCE_SYNC_URL
+    fun token(): String = prefs.getString(KEY_TOKEN, null) ?: BuildConfig.FINANCE_SYNC_TOKEN
 
     fun save(baseUrl: String, token: String) {
         prefs.edit()
