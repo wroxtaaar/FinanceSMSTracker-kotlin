@@ -110,7 +110,7 @@ def test_gmail_unique_transaction_updates_balance_once():
 
 
 def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
-    gmail_body = "HDFC Bank A/c XX9591 debited INR 250.00. Ref DUP-12345."
+    gmail_body = "HDFC Bank A/c XX7777 debited INR 250.00. Ref DUP-12345."
 
     gmail_message = _message(
         "duplicate-1",
@@ -118,7 +118,7 @@ def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
         internal_date="1950000000000",
     )
 
-    set_balance("gmail-dedupe", "Gmail Dedupe", "INR", "BANK_ACCOUNT", "HDFC", "9591", 100000)
+    set_balance("gmail-dedupe", "Gmail Dedupe", "INR", "BANK_ACCOUNT", "HDFC", "7777", 100000)
 
     class T:
         id = "sms-canonical"
@@ -129,7 +129,7 @@ def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
         accountType = "BANK_ACCOUNT"
         bank = "HDFC"
         merchantOrPayee = "TEST"
-        accountLast4 = "9591"
+        accountLast4 = "7777"
         reference = "DUP-12345"
         timestamp = 1950000000000
         category = "OTHER"
