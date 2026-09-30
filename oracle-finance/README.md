@@ -25,16 +25,22 @@ The API listens on port 8090. Restrict Oracle Cloud ingress to your own network 
 Set the app Oracle base URL and the same sync token. The Android queue retries failed delivery and the server is idempotent.
 
 ## Accounts
-Set current bank/card balances through the balance endpoint. Bank accounts are summed as cash; credit-card accounts are summed as liabilities and subtracted.
+Set the current balance for each bank/card through the balance endpoint. The backend stores an opening snapshot separately from transaction adjustments. New canonical transactions for a seeded account update its live balance exactly once, and re-seeding an account recalibrates the opening snapshot without replaying existing adjustments.
+
+Bank accounts are summed as cash; credit-card accounts are summed as liabilities and subtracted. Bank debits reduce cash and credits increase cash. Credit-card debits increase outstanding and credits reduce outstanding.
 
 ## Internal transfers
 A transfer is only linked when both events are bank-account transactions, directions are opposite, amount/currency are identical, timestamps are within 10 minutes, and the accounts are distinct. It is deliberately conservative.
 
 ## Splitwise
-Splitwise is optional. Set SPLITWISE_ACCESS_TOKEN and enable it. Add a merchant rule before automatic expense creation. Transactions without a rule are not automatically pushed.
+Splitwise is optional. Set SPLITWISE_ACCESS_TOKEN and enable it. Add a merchant rule before automatic expense creation. Transactions without a rule are not automatically pushed. The receivables endpoint exposes only positive balances owed to you; those open receivables are included in true available.
 
 ## Gmail
 The worker uses the read-only Gmail scope. Put the Google OAuth client JSON at ./secrets/credentials.json and persist the token at ./secrets/gmail-token.json. Gmail is an evidence source and parsing is conservative.
+
+For a private Oracle deployment, use an SSH port forward for OAuth instead of exposing the finance API publicly. Register `http://localhost:8090/api/v1/gmail/callback` as the OAuth redirect URI, set `GMAIL_REDIRECT_URI` to that value, then start an SSH tunnel from the desktop with `ssh -L 8090:127.0.0.1:8090 ubuntu@<oracle-host>`. Open the generated Gmail authorization URL in the same desktop browser; Google redirects to localhost and the SSH tunnel carries the callback to Oracle.
+
+Gmail transactions are reconciled against existing SMS/Truecaller transactions before their balance adjustment is applied, so one real-world payment cannot be counted twice.
 
 ## Telegram
 Enable with: docker compose --profile telegram up -d --build
