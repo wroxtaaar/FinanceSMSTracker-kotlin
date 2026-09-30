@@ -3,6 +3,7 @@ package com.example.financesmstracker.integration
 import com.example.financesmstracker.BuildConfig
 
 import android.content.Context
+import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -18,6 +19,45 @@ class FinanceSyncClient(
     private val baseUrl: String = SyncSettings(context).baseUrl(),
     private val token: String = SyncSettings(context).token()
 ) {
+    fun fetchSummary(): Result<OracleLedgerSummary> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+
+        return get("/api/v1/summary").map { body ->
+            val json = JSONObject(body)
+            OracleLedgerSummary(
+                currency = json.optString("currency", "INR"),
+                bankCashMinor = json.getLong("bankCashMinor"),
+                splitwiseReceivableMinor = json.getLong("splitwiseReceivableMinor"),
+                creditCardOutstandingMinor = json.getLong("creditCardOutstandingMinor"),
+                trueAvailableMinor = json.getLong("trueAvailableMinor")
+            )
+        }
+    }
+
+    private fun get(path: String): Result<String> {
+        return runCatching {
+            val endpoint = baseUrl.trimEnd('/') + path
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 10_000
+                readTimeout = 20_000
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("X-Sync-Token", token)
+            }
+
+            try {
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) throw IOException("Oracle request HTTP $code: $body")
+                body
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
     fun send(jsonBody: String): Result<String> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
@@ -47,6 +87,14 @@ class FinanceSyncClient(
         }
     }
 }
+
+data class OracleLedgerSummary(
+    val currency: String,
+    val bankCashMinor: Long,
+    val splitwiseReceivableMinor: Long,
+    val creditCardOutstandingMinor: Long,
+    val trueAvailableMinor: Long
+)
 
 class SyncSettings(context: Context) {
     private val prefs = context.getSharedPreferences("finance_sync", Context.MODE_PRIVATE)
