@@ -20,7 +20,8 @@ def _request(method,path,payload=None):
         raise RuntimeError(f"Splitwise HTTP {e.code}: {e.read().decode(errors='replace')}") from e
 
 def current_user(): return _request("GET","/get_current_user")
-def groups(): return _request("GET","/get_groups")\ndef friends(): return _request("GET","/get_friends")
+def groups(): return _request("GET","/get_groups")
+def friends(): return _request("GET","/get_friends")\ndef friends(): return _request("GET","/get_friends")
 
 def _money(minor):
     return str((Decimal(minor)/Decimal(100)).quantize(Decimal("0.01"),rounding=ROUND_HALF_UP))
@@ -72,5 +73,30 @@ def sync_receivables():
                     ON CONFLICT(id) DO UPDATE SET description=excluded.description,amount_minor=excluded.amount_minor,
                     currency=excluded.currency,status='OPEN'""",
                     (rid,f"Splitwise: {name}",minor,currency,now_ms()))
+                items.append({"id":rid,"name":name,"amountMinor":minor,"currency":currency})
+    return items
+
+def sync_receivables():
+    from .db import connection
+    from .ledger import now_ms
+    data=friends()
+    items=[]
+    with connection() as conn:
+        conn.execute("UPDATE splitwise_receivables SET status='CLOSED' WHERE id LIKE 'splitwise:friend:%'")
+        for friend in data.get("friends",[]):
+            friend_id=friend.get("id")
+            name=((friend.get("first_name") or "")+" "+(friend.get("last_name") or "")).strip() or str(friend_id)
+            for balance in friend.get("balance",[]) or []:
+                amount=Decimal(str(balance.get("amount","0")))
+                currency=balance.get("currency_code") or "INR"
+                if amount <= 0: continue
+                minor=int((amount*100).quantize(Decimal("1"),rounding=ROUND_HALF_UP))
+                rid=f"splitwise:friend:{friend_id}:{currency}"
+                conn.execute("""INSERT INTO splitwise_receivables
+                    (id,description,amount_minor,currency,splitwise_expense_id,status,created_at)
+                    VALUES(?,?,?,?,NULL,'OPEN',?)
+                    ON CONFLICT(id) DO UPDATE SET description=excluded.description,
+                    amount_minor=excluded.amount_minor,currency=excluded.currency,status='OPEN'""",
+                    (rid,"Splitwise: "+name,minor,currency,now_ms()))
                 items.append({"id":rid,"name":name,"amountMinor":minor,"currency":currency})
     return items
