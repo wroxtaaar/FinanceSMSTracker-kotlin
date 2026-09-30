@@ -15,6 +15,7 @@ import com.example.financesmstracker.evidence.CrossSourceMatchCoordinator
 import com.example.financesmstracker.evidence.EvidenceStatus
 import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
+import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.parser.SenderTrustManager
 import com.example.financesmstracker.parser.SenderTrustStatus
 import com.example.financesmstracker.parser.SmsParserManager
@@ -85,11 +86,30 @@ class SmsReceiver : BroadcastReceiver() {
                                 status = EvidenceStatus.MATCHED
                             )
                             val evidenceId = repository.insertSourceEvidence(evidence)
+                            val persistedEvidence = if (evidenceId != -1L) {
+                                repository.getSourceEvidenceById(evidenceId)
+                            } else {
+                                null
+                            }
                             if (evidenceId != -1L) {
                                 Log.d("FinanceSource", "SMS_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: $rowId, amount: ${parserResult.amountPaise}, currency: ${parserResult.currency}, direction: ${if (parserResult.transactionType == TransactionType.CREDIT) "CREDIT" else "DEBIT"}, bank: ${parserResult.bank}, timestamp: $timestamp, status: ${EvidenceStatus.MATCHED}")
                             }
 
-                            val coordinator = CrossSourceMatchCoordinator(repository)
+                            val canonicalTransaction = repository.getTransactionById(rowId)
+                            if (canonicalTransaction != null) {
+                                FinanceSyncBridge.enqueueCanonical(
+                                    context = context,
+                                    transaction = canonicalTransaction,
+                                    evidence = persistedEvidence
+                                )
+                            }
+
+                            val coordinator = CrossSourceMatchCoordinator(
+                                repository = repository,
+                                onEvidenceReconciled = { reconciledEvidence ->
+                                    FinanceSyncBridge.enqueueEvidence(context, reconciledEvidence)
+                                }
+                            )
                             coordinator.onCanonicalTransactionCreated(rowId)
 
                             repository.logNewestEvidenceSummary()
