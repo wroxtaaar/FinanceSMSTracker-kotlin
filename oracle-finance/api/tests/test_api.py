@@ -25,3 +25,17 @@ def test_summary_shape():
     response = client.get("/api/v1/summary", headers=HEADERS)
     assert response.status_code == 200
     assert "trueAvailableMinor" in response.json()
+
+def test_sync_with_token_accepts_transaction():
+    payload={"version":1,"transactions":[{
+        "id":"t-api-1","amountMinor":10000,"currency":"INR","type":"DEBIT",
+        "paymentMethod":"UPI","accountType":"BANK_ACCOUNT","bank":"HDFC",
+        "merchantOrPayee":"TEST","accountLast4":"9591","reference":"REF100",
+        "timestamp":1700000000000,"category":"OTHER","confidence":0.9
+    }],"evidence":[]}
+    response=client.post("/api/v1/sync",headers=HEADERS,json=payload)
+    assert response.status_code==200
+    assert response.json()["acceptedTransactions"]==1
+
+def test_wrong_token_rejected():
+    assert client.get("/api/v1/summary",headers={"X-Sync-Token":"wrong"}).status_code==401
