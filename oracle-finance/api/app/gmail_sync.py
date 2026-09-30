@@ -1,7 +1,7 @@
 import base64, hashlib, os, re, time
 from email.utils import parseaddr
 from .db import connection
-from .ledger import sync_transaction,sync_evidence,add_review,apply_transaction_to_account
+from .ledger import sync_transaction,sync_evidence,add_review,apply_transaction_to_account,reconcile_duplicate_transaction
 from .main_models import SyncTransactionModel,SyncEvidenceModel
 
 GMAIL_READONLY_SCOPE="https://www.googleapis.com/auth/gmail.readonly"
