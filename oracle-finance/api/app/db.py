@@ -73,7 +73,7 @@ def init_db():
     with connection() as conn:
         conn.executescript(SCHEMA)
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(evidence)").fetchall()}
-        migrations = {"amount_minor":"INTEGER","currency":"TEXT","direction":"TEXT","bank_provider":"TEXT",
+        migrations = {"duplicate_of":"TEXT","amount_minor":"INTEGER","currency":"TEXT","direction":"TEXT","bank_provider":"TEXT",
                       "account_last4":"TEXT","reference":"TEXT","content_hash":"TEXT","confidence":"REAL"}
         for name, sql_type in migrations.items():
             if name not in columns:
