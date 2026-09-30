@@ -8,7 +8,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
 
     companion object {
         private const val DATABASE_NAME = "finance_tracker.db"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 5
 
         const val TABLE_TRANSACTIONS = "transactions"
         const val COLUMN_ID = "id"
@@ -175,6 +175,36 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
                 )
             """.trimIndent()
             db.execSQL(createUnrecognizedTable)
+        }
+        if (oldVersion < 5) {
+            // Some installs reached an older schema version without the evidence
+            // table actually being present. Re-create it idempotently during
+            // upgrade so existing transaction data is preserved.
+            val createEvidenceTable = """
+                CREATE TABLE IF NOT EXISTS $TABLE_SOURCE_EVIDENCE (
+                    $COLUMN_EVIDENCE_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    $COLUMN_EVIDENCE_SOURCE_TYPE TEXT NOT NULL,
+                    $COLUMN_EVIDENCE_SOURCE_KEY TEXT UNIQUE NOT NULL,
+                    $COLUMN_EVIDENCE_RECEIVED_AT INTEGER NOT NULL,
+                    $COLUMN_EVIDENCE_TRANSACTION_ID INTEGER,
+                    $COLUMN_EVIDENCE_AMOUNT_PAISE INTEGER NOT NULL,
+                    $COLUMN_EVIDENCE_CURRENCY TEXT NOT NULL DEFAULT 'INR',
+                    $COLUMN_EVIDENCE_DIRECTION TEXT NOT NULL,
+                    $COLUMN_EVIDENCE_BANK_PROVIDER TEXT,
+                    $COLUMN_EVIDENCE_ACCOUNT_LAST_FOUR TEXT,
+                    $COLUMN_EVIDENCE_REFERENCE TEXT,
+                    $COLUMN_EVIDENCE_CONTENT_HASH TEXT NOT NULL,
+                    $COLUMN_EVIDENCE_CONFIDENCE REAL NOT NULL,
+                    $COLUMN_EVIDENCE_STATUS TEXT NOT NULL,
+                    FOREIGN KEY($COLUMN_EVIDENCE_TRANSACTION_ID) REFERENCES $TABLE_TRANSACTIONS($COLUMN_ID) ON DELETE SET NULL
+                )
+            """.trimIndent()
+            val createEvidenceIndex = """
+                CREATE INDEX IF NOT EXISTS idx_source_evidence_status_amount
+                ON $TABLE_SOURCE_EVIDENCE($COLUMN_EVIDENCE_STATUS, $COLUMN_EVIDENCE_AMOUNT_PAISE)
+            """.trimIndent()
+            db.execSQL(createEvidenceTable)
+            db.execSQL(createEvidenceIndex)
         }
     }
 }
