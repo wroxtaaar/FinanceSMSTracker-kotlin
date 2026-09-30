@@ -6,12 +6,54 @@ def now_ms(): return int(time.time()*1000)
 def sync_transaction(t):
     with connection() as conn:
         before=conn.execute("SELECT id FROM transactions WHERE id=?",(t.id,)).fetchone()
+        created_at=now_ms()
         conn.execute("""INSERT OR IGNORE INTO transactions
         (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,created_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,t.reference,
-         t.timestamp,t.category,t.confidence,None,now_ms()))
+         t.timestamp,t.category,t.confidence,None,created_at))
+
+        if before is None:
+            apply_transaction_to_account(conn, t, created_at)
+
         return before is None
+
+def apply_transaction_to_account(conn, t, applied_at):
+    if t.accountType not in ("BANK_ACCOUNT", "CREDIT_CARD"):
+        return
+
+    bank=(t.bank or "").strip().upper()
+    last4=(t.accountLast4 or "").strip()
+
+    query="""
+        SELECT id, balance_minor
+        FROM accounts
+        WHERE account_type=?
+          AND currency=?
+          AND UPPER(TRIM(COALESCE(bank,'')))=?
+          AND TRIM(COALESCE(last4,''))=?
+        LIMIT 1
+    """
+    account=conn.execute(query,(t.accountType,t.currency,bank,last4)).fetchone()
+    if not account:
+        return
+
+    if t.accountType=="BANK_ACCOUNT":
+        delta=-t.amountMinor if t.type=="DEBIT" else t.amountMinor
+    else:
+        delta=t.amountMinor if t.type=="DEBIT" else -t.amountMinor
+
+    inserted=conn.execute(
+        """INSERT OR IGNORE INTO balance_adjustments
+           (transaction_id,account_id,delta_minor,applied_at)
+           VALUES(?,?,?,?)""",
+        (t.id,account["id"],delta,applied_at)
+    )
+    if inserted.rowcount:
+        conn.execute(
+            "UPDATE accounts SET balance_minor=balance_minor+?, updated_at=? WHERE id=?",
+            (delta,applied_at,account["id"])
+        )
 
 def sync_evidence(e):
     with connection() as conn:
