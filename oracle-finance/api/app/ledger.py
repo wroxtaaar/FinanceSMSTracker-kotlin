@@ -8,7 +8,7 @@ def sync_transaction(t):
         before=conn.execute("SELECT id FROM transactions WHERE id=?",(t.id,)).fetchone()
         conn.execute("""INSERT OR IGNORE INTO transactions
         (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,t.reference,
          t.timestamp,t.category,t.confidence,None,now_ms()))
         return before is None
