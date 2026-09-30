@@ -6,7 +6,18 @@ from pydantic import BaseModel, Field
 from .db import init_db
 from .ledger import *
 from .reconcile import reconcile_all
-from .splitwise import create_for_transaction, enabled as splitwise_enabled, current_user as splitwise_user, groups as splitwise_groups, sync_receivables\nfrom .gmail_auth import auth_url as gmail_auth_url, finish_callback as gmail_finish, sync as gmail_sync
+from .splitwise import (
+    create_for_transaction,
+    enabled as splitwise_enabled,
+    current_user as splitwise_user,
+    groups as splitwise_groups,
+    sync_receivables,
+)
+from .gmail_auth import (
+    auth_url as gmail_auth_url,
+    finish_callback as gmail_finish,
+    sync as gmail_sync,
+)
 
 app=FastAPI(title="Oracle Finance API",version="1.0.0")
 init_db()
@@ -126,7 +137,7 @@ def gmail_callback(code:str="",state:str="",error:str="",x_sync_token:str=Header
     require_token(x_sync_token)
     if error: raise HTTPException(400,error)
     try:
-        gmail_finish(str(__import__("os").environ.get("GMAIL_REDIRECT_URI","")) + "?code=" + code + "&state=" + state)
+        gmail_finish(str(os.environ.get("GMAIL_REDIRECT_URI","")) + "?code=" + code + "&state=" + state)
         return {"status":"authorized"}
     except Exception as exc: raise HTTPException(400,str(exc))
 
