@@ -195,8 +195,8 @@ class IMAPService:
                 pass
             raise
 
-        status, uidvalidity_data = self._imap.response("UIDVALIDITY")
-        if status == "OK" and uidvalidity_data:
+        response_code, uidvalidity_data = self._imap.response("UIDVALIDITY")
+        if response_code == "UIDVALIDITY" and uidvalidity_data:
             self.uidvalidity = uidvalidity_data[-1].decode(errors="replace")
         else:
             self.uidvalidity = "0"
