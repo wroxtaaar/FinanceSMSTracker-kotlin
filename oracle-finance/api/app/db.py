@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS gmail_messages (
   id TEXT PRIMARY KEY, thread_id TEXT, internal_date INTEGER, sender TEXT, subject TEXT,
   fingerprint TEXT UNIQUE, status TEXT NOT NULL DEFAULT 'SEEN', created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS balance_adjustments (
+  transaction_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, delta_minor INTEGER NOT NULL,
+  applied_at INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_transactions_match ON transactions(amount_minor,currency,timestamp);
 CREATE INDEX IF NOT EXISTS idx_evidence_transaction ON evidence(transaction_id);
@@ -54,6 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_evidence_match ON evidence(amount_minor,currency,
 CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(account_type);
 CREATE INDEX IF NOT EXISTS idx_splitwise_status ON splitwise_receivables(status);
 CREATE INDEX IF NOT EXISTS idx_review_status ON review_queue(status);
+CREATE INDEX IF NOT EXISTS idx_balance_adjustments_account ON balance_adjustments(account_id);
 """
 
 @contextmanager
