@@ -30,9 +30,11 @@ class SmsReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        Log.d(TAG, "SMS_RECEIVER_ENTERED -> action=${intent.action}")
         if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION) {
             try {
                 val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
+                Log.d(TAG, "SMS_RECEIVER_PARSED_INTENT -> messageParts=${messages?.size ?: 0}")
                 if (!messages.isNullOrEmpty()) {
                     val sender = messages[0].originatingAddress ?: "UNKNOWN"
                     val timestamp = messages[0].timestampMillis
