@@ -4,7 +4,13 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "oracle-finance/**"
+      - ".github/workflows/oracle-deploy.yml"
   pull_request:
+    paths-ignore:
+      - "oracle-finance/**"
+      - ".github/workflows/oracle-deploy.yml"
 
 jobs:
   test:
