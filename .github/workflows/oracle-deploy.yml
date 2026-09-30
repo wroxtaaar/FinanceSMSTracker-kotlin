@@ -9,6 +9,8 @@ on:
       - ".github/workflows/oracle-deploy.yml"
   workflow_dispatch:
 
+# Only the newest Oracle deployment should remain active.
+# A new push/workflow run cancels an older run in this deployment group.
 concurrency:
   group: oracle-finance-deploy
   cancel-in-progress: true
