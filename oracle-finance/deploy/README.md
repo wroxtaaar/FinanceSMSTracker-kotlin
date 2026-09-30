@@ -8,7 +8,7 @@
    docker compose up -d --build
 6. Verify locally:
    curl http://127.0.0.1:8090/health
-7. Do not expose port 8090 directly to the internet. Put it behind the VPS reverse proxy/TLS layer.
+7. If port 8090 is exposed, restrict the Oracle Cloud security-list ingress to your own IP/network where possible; the API also requires SYNC_API_TOKEN.
 8. Back up the SQLite database regularly with deploy/backup.sh.
 
 The API currently exposes:
@@ -17,6 +17,6 @@ The API currently exposes:
 - GET /api/v1/accounts
 - PUT /api/v1/accounts/{account_id}/balance
 - POST /api/v1/splitwise/receivables
-- GET /api/v1/summary
+- GET /api/v1/summary\n- GET /api/v1/transactions\n- GET /api/v1/reviews\n- GET /api/v1/transfers\n- POST /api/v1/reconcile\n- Splitwise rules/status/groups/sync endpoints\n- Gmail authorization/sync endpoints
 
 Android must use HTTPS and the sync token once the reverse-proxy endpoint is ready.
