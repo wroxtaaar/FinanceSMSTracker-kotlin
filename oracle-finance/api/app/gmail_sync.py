@@ -1,0 +1,60 @@
+import base64, hashlib, os, re, time
+from email.utils import parseaddr
+from .db import connection
+from .ledger import sync_transaction,sync_evidence,add_review
+from .main_models import SyncTransactionModel,SyncEvidenceModel
+
+GMAIL_READONLY_SCOPE="https://www.googleapis.com/auth/gmail.readonly"
+
+def _decode(payload):
+    data=payload.get("body",{}).get("data")
+    if data: return base64.urlsafe_b64decode(data+"="*(-len(data)%4)).decode(errors="replace")
+    return "".join(_decode(p) for p in payload.get("parts",[]) or [])
+
+def _headers(payload): return {h["name"].lower():h["value"] for h in payload.get("headers",[])}
+
+def parse_bank_email(message):
+    payload=message.get("payload",{}); headers=_headers(payload); text=_decode(payload)
+    combined=f"{headers.get('subject','')}\n{text}"
+    m=re.search(r"(?i)(?:INR|Rs\.?)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)",combined)
+    amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
+    direction="CREDIT" if re.search(r"(?i)credited|credit alert|payment.*received",combined) else (
+        "DEBIT" if re.search(r"(?i)debited|spent|sent|purchase|withdrawn",combined) else None)
+    bank="HDFC" if re.search(r"(?i)HDFC",combined) else ("AXIS" if re.search(r"(?i)Axis Bank|Axis",combined) else None)
+    lm=re.search(r"(?i)(?:A/c|Card(?: no\.)?|account)[^\dXx]*(?:X{2}|\*+)(\d{4})",combined)
+    last4=lm.group(1) if lm else None
+    rm=re.search(r"(?i)(?:Ref|reference|transaction)[^A-Za-z0-9]*([A-Z0-9-]{5,})",combined)
+    reference=rm.group(1) if rm else None
+    if amount is None or direction is None: return None
+    account_type="CREDIT_CARD" if re.search(r"(?i)card",combined) else "BANK_ACCOUNT"
+    tx_id="gmail:"+hashlib.sha256((message["id"]+":"+str(amount)+":"+direction).encode()).hexdigest()[:32]
+    ev_id="gmail-evidence:"+message["id"]
+    t=SyncTransactionModel(id=tx_id,amountMinor=amount,currency="INR",type=direction,
+       paymentMethod="CARD" if account_type=="CREDIT_CARD" else "UPI",accountType=account_type,
+       bank=bank,merchantOrPayee=None,accountLast4=last4,reference=reference,
+       timestamp=int(message.get("internalDate","0")),category="OTHER",confidence=0.75)
+    e=SyncEvidenceModel(id=ev_id,sourceType="GMAIL",sourceId=message["id"],status="UNMATCHED",
+       observedAt=int(message.get("internalDate","0")),transactionId=tx_id,amountMinor=amount,currency="INR",
+       direction=direction,bankProvider=bank,accountLast4=last4,reference=reference,
+       contentHash=hashlib.sha256(combined.encode()).hexdigest(),confidence=0.75)
+    return t,e
+
+def ingest_messages(service,query="newer_than:30d"):
+    result=service.users().messages().list(userId="me",q=query,maxResults=100).execute()
+    created=0
+    for item in result.get("messages",[]):
+        msg_id=item["id"]
+        with connection() as conn:
+            if conn.execute("SELECT 1 FROM gmail_messages WHERE id=?",(msg_id,)).fetchone(): continue
+        message=service.users().messages().get(userId="me",id=msg_id,format="full").execute()
+        parsed=parse_bank_email(message)
+        with connection() as conn:
+            h=_headers(message.get("payload",{})); sender=parseaddr(h.get("from",""))[1]
+            conn.execute("""INSERT OR IGNORE INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES(?,?,?,?,?,?,?,?)""",(msg_id,message.get("threadId"),int(message.get("internalDate","0")),sender,h.get("subject"),
+            hashlib.sha256((msg_id+h.get("subject","")).encode()).hexdigest(),"PARSED",int(time.time()*1000)))
+        if parsed:
+            t,e=parsed; sync_transaction(t); sync_evidence(e); created+=1
+        else: add_review("GMAIL","unrecognized bank email",evidence_id="gmail-evidence:"+msg_id)
+    return created
