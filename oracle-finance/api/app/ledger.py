@@ -123,3 +123,28 @@ def splitwise_expense_for(transaction_id):
     with connection() as conn:
         row=conn.execute("SELECT * FROM splitwise_expenses WHERE transaction_id=?",(transaction_id,)).fetchone()
         return dict(row) if row else None
+
+def reconcile_duplicate_transaction(transaction_id):
+    with connection() as conn:
+        tx=conn.execute("SELECT * FROM transactions WHERE id=?",(transaction_id,)).fetchone()
+        if not tx or tx["duplicate_of"]: return None
+        if tx["id"].startswith("gmail:") is False: return None
+        candidates=conn.execute(
+            """SELECT * FROM transactions WHERE id<>? AND duplicate_of IS NULL
+               AND id NOT LIKE 'gmail:%' AND amount_minor=? AND currency=?
+               AND ABS(timestamp-?)<=86400000 ORDER BY ABS(timestamp-?) LIMIT 5""",
+            (tx["id"],tx["amount_minor"],tx["currency"],tx["timestamp"],tx["timestamp"])).fetchall()
+        strong=[]
+        for c in candidates:
+            score=0
+            if tx["bank"] and c["bank"] and tx["bank"]==c["bank"]: score+=2
+            if tx["account_last4"] and c["account_last4"] and tx["account_last4"]==c["account_last4"]: score+=2
+            if tx["reference"] and c["reference"] and tx["reference"]==c["reference"]: score+=4
+            if tx["type"]==c["type"]: score+=1
+            if score>=3: strong.append((score,c))
+        if len(strong)==1:
+            canonical=strong[0][1]
+            conn.execute("UPDATE transactions SET duplicate_of=? WHERE id=?",(canonical["id"],tx["id"]))
+            conn.execute("UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",(canonical["id"],tx["id"]))
+            return {"duplicate":tx["id"],"canonical":canonical["id"],"score":strong[0][0]}
+    return None
