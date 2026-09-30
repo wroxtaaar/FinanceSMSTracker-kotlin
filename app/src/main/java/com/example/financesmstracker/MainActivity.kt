@@ -77,6 +77,7 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == SmsReceiver.ACTION_TRANSACTION_DATA_CHANGED) {
                 loadTransactions()
+                loadOracleSummary()
             }
         }
     }
