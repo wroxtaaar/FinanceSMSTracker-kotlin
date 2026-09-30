@@ -3,7 +3,17 @@ services:
     build: ./api
     env_file: .env
     ports:
-      - "127.0.0.1:8090:8090"
+      - "0.0.0.0:8090:8090"
+    volumes:
+      - ./data:/app/data
+      - ./secrets:/app/secrets:ro
+    restart: unless-stopped
+
+  finance-telegram:
+    build: ./api
+    env_file: .env
+    command: ["python","-m","app.telegram_bot"]
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    profiles: ["telegram"]
