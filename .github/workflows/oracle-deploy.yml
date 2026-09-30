@@ -45,6 +45,28 @@ jobs:
             git reset --hard origin/main
             git log -1 --oneline
 
+      - name: 3. Configure Tailscale private access
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          ORACLE_TAILSCALE_AUTHKEY: ${{ secrets.ORACLE_TAILSCALE_AUTHKEY }}
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          envs: ORACLE_TAILSCALE_AUTHKEY
+          script: |
+            set -e
+            if ! command -v tailscale >/dev/null 2>&1; then
+              curl -fsSL https://tailscale.com/install.sh | sh
+            fi
+            if ! sudo tailscale status >/dev/null 2>&1; then
+              sudo tailscale up --auth-key="$ORACLE_TAILSCALE_AUTHKEY" --hostname=oracle-finance
+            fi
+            sudo tailscale serve --bg 127.0.0.1:8090
+            echo "Tailscale private endpoint:"
+            sudo tailscale serve status
+
       - name: 3. Stop current finance API
         uses: appleboy/ssh-action@v1.2.2
         with:
@@ -57,7 +79,7 @@ jobs:
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
             docker compose down
 
-      - name: 4. Build finance API
+      - name: 5. Build finance API
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
@@ -69,7 +91,7 @@ jobs:
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
             docker compose build --no-cache finance-api
 
-      - name: 5. Start finance API
+      - name: 6. Start finance API
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
@@ -81,7 +103,7 @@ jobs:
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
             docker compose up -d
 
-      - name: 6. Health check
+      - name: 7. Health check
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
