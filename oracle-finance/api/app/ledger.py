@@ -27,10 +27,13 @@ def sync_evidence(e):
         conn.execute(
             """INSERT OR IGNORE INTO evidence
             (id, source_type, source_id, status, observed_at, transaction_id,
-             matched_transaction_id, created_at)
-            VALUES (?,?,?,?,?,?,?,?)""",
+             matched_transaction_id, amount_minor, currency, direction,
+             bank_provider, account_last4, reference, content_hash, confidence, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (e.id, e.sourceType, e.sourceId, e.status, e.observedAt,
-             e.transactionId, e.matchedTransactionId, now_ms()),
+             e.transactionId, e.matchedTransactionId, e.amountMinor, e.currency,
+             e.direction, e.bankProvider, e.accountLast4, e.reference,
+             e.contentHash, e.confidence, now_ms()),
         )
         return before is None
 
