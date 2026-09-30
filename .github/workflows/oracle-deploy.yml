@@ -67,7 +67,7 @@ jobs:
             echo "Tailscale private endpoint:"
             sudo tailscale serve status
 
-      - name: 3. Stop current finance API
+      - name: 4. Stop current finance API
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
