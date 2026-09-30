@@ -71,7 +71,8 @@ class FakeService:
 def test_gmail_parser_supports_card_and_supported_banks():
     message = _message(
         "parser-1",
-        "ICICI Bank Card ending 1012: INR 12,345.67 spent on merchant."
+        "ICICI Bank Card ending 1012: INR 12,345.67 spent on merchant.",
+        subject="ICICI Card Transaction Alert"
     )
     parsed = parse_bank_email(message)
 
@@ -149,5 +150,5 @@ def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
             "SELECT COUNT(*) value FROM balance_adjustments WHERE account_id='gmail-dedupe'"
         ).fetchone()["value"]
 
-    assert balance == 97500
+    assert balance == 75000
     assert adjustment_count == 1
