@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - finance-system-integration
   pull_request:
 
 jobs:
