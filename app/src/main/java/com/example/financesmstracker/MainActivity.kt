@@ -48,6 +48,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textViewEmpty: TextView
     private lateinit var textViewNotificationStatus: TextView
     private lateinit var buttonOpenNotificationSettings: Button
+    private lateinit var textViewOracleStatus: TextView
+    private lateinit var textViewTrueAvailable: TextView
+    private lateinit var textViewBankCash: TextView
+    private lateinit var textViewCardOutstanding: TextView
+    private lateinit var textViewSplitwiseReceivable: TextView
+    private lateinit var buttonRefreshOracle: Button
+
+    private val oracleExecutor = Executors.newSingleThreadExecutor()
 
     private val categories = listOf(
         "FOOD", "GROCERIES", "SHOPPING", "FUEL", "TRAVEL",
@@ -112,6 +120,16 @@ class MainActivity : AppCompatActivity() {
         textViewEmpty = findViewById(R.id.textViewEmpty)
         textViewNotificationStatus = findViewById(R.id.textViewNotificationStatus)
         buttonOpenNotificationSettings = findViewById(R.id.buttonOpenNotificationSettings)
+        textViewOracleStatus = findViewById(R.id.textViewOracleStatus)
+        textViewTrueAvailable = findViewById(R.id.textViewTrueAvailable)
+        textViewBankCash = findViewById(R.id.textViewBankCash)
+        textViewCardOutstanding = findViewById(R.id.textViewCardOutstanding)
+        textViewSplitwiseReceivable = findViewById(R.id.textViewSplitwiseReceivable)
+        buttonRefreshOracle = findViewById(R.id.buttonRefreshOracle)
+
+        buttonRefreshOracle.setOnClickListener {
+            loadOracleSummary()
+        }
 
         recyclerView.layoutManager = LinearLayoutManager(this)
 
@@ -149,6 +167,35 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         loadTransactions()
         updateNotificationAccessStatus()
+        loadOracleSummary()
+    }
+
+    private fun loadOracleSummary() {
+        textViewOracleStatus.text = "Oracle ledger: Loading..."
+
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).fetchSummary()
+
+            runOnUiThread {
+                result.onSuccess { summary ->
+                    renderOracleSummary(summary)
+                }.onFailure { error ->
+                    textViewOracleStatus.text = "Oracle ledger: " + (error.message ?: "Unavailable")
+                }
+            }
+        }
+    }
+
+    private fun renderOracleSummary(summary: OracleLedgerSummary) {
+        textViewOracleStatus.text = "Oracle ledger: Connected"
+        textViewTrueAvailable.text = "True available: " + formatMinor(summary.trueAvailableMinor)
+        textViewBankCash.text = "Bank cash: " + formatMinor(summary.bankCashMinor)
+        textViewCardOutstanding.text = "Card outstanding: " + formatMinor(summary.creditCardOutstandingMinor)
+        textViewSplitwiseReceivable.text = "Splitwise receivable: " + formatMinor(summary.splitwiseReceivableMinor)
+    }
+
+    private fun formatMinor(minor: Long): String {
+        return String.format(Locale.getDefault(), "₹%,.2f", minor / 100.0)
     }
 
     private fun updateNotificationAccessStatus() {
@@ -371,6 +418,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        oracleExecutor.shutdownNow()
         super.onDestroy()
         dbHelper.close()
     }
