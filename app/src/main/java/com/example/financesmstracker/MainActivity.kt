@@ -38,6 +38,7 @@ import com.example.financesmstracker.ui.TransactionAdapter
 
 import com.example.financesmstracker.integration.FinanceSyncClient
 import com.example.financesmstracker.integration.OracleLedgerSummary
+import com.example.financesmstracker.integration.OracleAccount
 import java.util.concurrent.Executors
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -58,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textViewCardOutstanding: TextView
     private lateinit var textViewSplitwiseReceivable: TextView
     private lateinit var buttonRefreshOracle: Button
+    private lateinit var buttonViewAccounts: Button
 
     private val oracleExecutor = Executors.newSingleThreadExecutor()
 
@@ -131,9 +133,14 @@ class MainActivity : AppCompatActivity() {
         textViewCardOutstanding = findViewById(R.id.textViewCardOutstanding)
         textViewSplitwiseReceivable = findViewById(R.id.textViewSplitwiseReceivable)
         buttonRefreshOracle = findViewById(R.id.buttonRefreshOracle)
+        buttonViewAccounts = findViewById(R.id.buttonViewAccounts)
 
         buttonRefreshOracle.setOnClickListener {
             loadOracleSummary()
+        }
+
+        buttonViewAccounts.setOnClickListener {
+            loadOracleAccounts()
         }
 
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -173,6 +180,77 @@ class MainActivity : AppCompatActivity() {
         loadTransactions()
         updateNotificationAccessStatus()
         loadOracleSummary()
+    }
+
+    private fun loadOracleAccounts() {
+        buttonViewAccounts.isEnabled = false
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).fetchAccounts()
+
+            runOnUiThread {
+                buttonViewAccounts.isEnabled = true
+                result.onSuccess { accounts ->
+                    showAccountsDialog(accounts)
+                }.onFailure { error ->
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Could not load accounts: " + (error.message ?: "Unavailable"),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun showAccountsDialog(accounts: List<OracleAccount>) {
+        if (accounts.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Accounts")
+                .setMessage("No accounts configured on Oracle.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        val banks = accounts.filter { it.accountType == "BANK_ACCOUNT" }
+        val cards = accounts.filter { it.accountType == "CREDIT_CARD" }
+        val other = accounts.filter { it.accountType != "BANK_ACCOUNT" && it.accountType != "CREDIT_CARD" }
+
+        val message = buildString {
+            appendAccountSection("Banks", banks)
+            appendAccountSection("Credit Cards", cards)
+            appendAccountSection("Other", other)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Oracle Accounts")
+            .setMessage(message.trim())
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun StringBuilder.appendAccountSection(
+        title: String,
+        accounts: List<OracleAccount>
+    ) {
+        if (accounts.isEmpty()) return
+        append(title).append("\n")
+        accounts.forEach { account ->
+            val suffix = account.last4?.let { " ••••" + it }.orEmpty()
+            val amountLabel = if (account.accountType == "CREDIT_CARD") {
+                "Outstanding"
+            } else {
+                "Balance"
+            }
+            append(account.name)
+                .append(suffix)
+                .append("\n  ")
+                .append(amountLabel)
+                .append(": ")
+                .append(formatMinor(account.balanceMinor))
+                .append("\n")
+        }
+        append("\n")
     }
 
     private fun loadOracleSummary() {
