@@ -1,6 +1,7 @@
 import os
 import tempfile
 os.environ["DATABASE_PATH"] = os.path.join(tempfile.gettempdir(), "oracle-finance-test.db")
+os.environ["SYNC_API_TOKEN"] = "test-token"
 from fastapi.testclient import TestClient
 from app.main import app
 client = TestClient(app)
