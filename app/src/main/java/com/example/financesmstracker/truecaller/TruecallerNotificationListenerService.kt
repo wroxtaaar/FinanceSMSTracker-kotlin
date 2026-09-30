@@ -10,6 +10,7 @@ import com.example.financesmstracker.evidence.CrossSourceMatchCoordinator
 import com.example.financesmstracker.evidence.EvidenceStatus
 import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
+import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.util.HashUtil
 import java.util.Collections
 import java.util.LinkedList
@@ -96,7 +97,15 @@ class TruecallerNotificationListenerService : NotificationListenerService() {
                         Log.d("FinanceSource", "TRUECALLER_EVIDENCE_CREATED -> evidenceId: $evidenceId, transactionId: null, amount: ${parsed.amountPaise}, currency: ${parsed.currency}, direction: ${parsed.direction}, bank: ${parsed.bankProvider}, timestamp: $postTime, status: ${EvidenceStatus.UNMATCHED}")
                         
                         // Event-driven matching: evaluate this new evidence immediately against existing canonical transactions
-                        val coordinator = CrossSourceMatchCoordinator(repository)
+                        val coordinator = CrossSourceMatchCoordinator(
+                            repository = repository,
+                            onEvidenceReconciled = { reconciledEvidence ->
+                                // Truecaller is evidence only. It enters the Oracle
+                                // ledger after it has been matched to a canonical
+                                // Android transaction.
+                                FinanceSyncBridge.enqueueEvidence(applicationContext, reconciledEvidence)
+                            }
+                        )
                         coordinator.onSourceEvidenceCreated(evidenceId)
                     }
                     repository.logNewestEvidenceSummary()
