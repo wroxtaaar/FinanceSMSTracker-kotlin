@@ -19,6 +19,32 @@ class FinanceSyncClient(
     private val baseUrl: String = SyncSettings(context).baseUrl(),
     private val token: String = SyncSettings(context).token()
 ) {
+    fun fetchAccounts(): Result<List<OracleAccount>> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+
+        return get("/api/v1/accounts").map { body ->
+            val accounts = JSONObject(body).getJSONArray("accounts")
+            buildList(accounts.length()) {
+                for (index in 0 until accounts.length()) {
+                    val item = accounts.getJSONObject(index)
+                    add(
+                        OracleAccount(
+                            id = item.optString("id"),
+                            name = item.optString("name"),
+                            currency = item.optString("currency", "INR"),
+                            accountType = item.optString("account_type"),
+                            bank = item.optString("bank").takeIf { it.isNotBlank() },
+                            last4 = item.optString("last4").takeIf { it.isNotBlank() },
+                            openingBalanceMinor = item.optLong("opening_balance_minor"),
+                            balanceMinor = item.getLong("balance_minor")
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     fun fetchSummary(): Result<OracleLedgerSummary> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
@@ -87,6 +113,17 @@ class FinanceSyncClient(
         }
     }
 }
+
+data class OracleAccount(
+    val id: String,
+    val name: String,
+    val currency: String,
+    val accountType: String,
+    val bank: String?,
+    val last4: String?,
+    val openingBalanceMinor: Long,
+    val balanceMinor: Long
+)
 
 data class OracleLedgerSummary(
     val currency: String,
