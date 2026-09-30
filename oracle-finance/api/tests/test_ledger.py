@@ -1,20 +1,16 @@
 import os
-import sqlite3
-import tempfile
+import pytest
 
-DB_FILE = os.path.join(tempfile.gettempdir(), "oracle-finance-ledger-test.db")
-try:
-    os.remove(DB_FILE)
-except FileNotFoundError:
-    pass
-
-os.environ["DATABASE_PATH"] = DB_FILE
-
-from app.db import init_db, connection
+from app import db
+from app.db import connection
 from app.ledger import set_balance, add_receivable, true_available
 
-init_db()
 
+@pytest.fixture(autouse=True)
+def isolated_database(tmp_path, monkeypatch):
+    path = str(tmp_path / "finance-test.db")
+    monkeypatch.setattr(db, "DB_PATH", path)
+    db.init_db()
 
 def test_true_available_formula():
     set_balance("bank-1", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "9591", 100000)
