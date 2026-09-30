@@ -3,7 +3,10 @@ package com.example.financesmstracker.evidence
 import android.util.Log
 import com.example.financesmstracker.data.TransactionRepository
 
-class CrossSourceMatchCoordinator(private val repository: TransactionRepository) {
+class CrossSourceMatchCoordinator(
+    private val repository: TransactionRepository,
+    private val onEvidenceReconciled: ((SourceEvidence) -> Unit)? = null
+) {
 
     fun onSourceEvidenceCreated(evidenceId: Long) {
         val evidence = repository.getSourceEvidenceById(evidenceId) ?: return
@@ -16,6 +19,7 @@ class CrossSourceMatchCoordinator(private val repository: TransactionRepository)
         val result = CrossSourceMatcher.match(evidence, candidateTransactions)
 
         repository.applyMatchResult(evidence.id, result)
+        notifyIfReconciled(evidence.id)
     }
 
     fun onCanonicalTransactionCreated(transactionId: Long) {
@@ -32,6 +36,14 @@ class CrossSourceMatchCoordinator(private val repository: TransactionRepository)
             val result = CrossSourceMatcher.match(evidence, candidateTransactions)
 
             repository.applyMatchResult(evidence.id, result)
+            notifyIfReconciled(evidence.id)
+        }
+    }
+
+    private fun notifyIfReconciled(evidenceId: Long) {
+        val updated = repository.getSourceEvidenceById(evidenceId) ?: return
+        if (updated.status == EvidenceStatus.MATCHED && updated.transactionId != null) {
+            onEvidenceReconciled?.invoke(updated)
         }
     }
 }
