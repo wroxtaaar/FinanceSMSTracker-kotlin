@@ -8,9 +8,9 @@ class FinanceSyncPayloadTest {
     @Test
     fun emptyPayloadHasVersionAndArrays() {
         val payload = FinanceSyncPayload.build(emptyList(), emptyList())
-        assertTrue(payload.contains(""version":1"))
-        assertTrue(payload.contains(""transactions":[]"))
-        assertTrue(payload.contains(""evidence":[]"))
+        assertTrue(payload.contains("\"version\":1"))
+        assertTrue(payload.contains("\"transactions\":[]"))
+        assertTrue(payload.contains("\"evidence\":[]"))
     }
 
     @Test
