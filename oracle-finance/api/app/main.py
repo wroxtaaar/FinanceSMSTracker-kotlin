@@ -1,123 +1,120 @@
+import hmac, os
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from .db import init_db
-from .ledger import sync_transaction, sync_evidence, balances, set_balance, add_receivable, true_available
+from .ledger import *
+from .reconcile import reconcile_all
+from .splitwise import create_for_transaction, enabled as splitwise_enabled, current_user as splitwise_user, groups as splitwise_groups
 
-app = FastAPI(title="Oracle Finance API", version="0.2.0")
+app=FastAPI(title="Oracle Finance API",version="1.0.0")
 init_db()
 
 class SyncTransaction(BaseModel):
-    id: str
-    amountMinor: int
-    currency: str
-    type: str
-    paymentMethod: str
-    accountType: str
-    bank: Optional[str] = None
-    merchantOrPayee: Optional[str] = None
-    accountLast4: Optional[str] = None
-    reference: Optional[str] = None
-    timestamp: int
-    category: str
-    confidence: float
+    id:str; amountMinor:int; currency:str; type:str; paymentMethod:str; accountType:str
+    bank:Optional[str]=None; merchantOrPayee:Optional[str]=None; accountLast4:Optional[str]=None
+    reference:Optional[str]=None; timestamp:int; category:str; confidence:float
 
 class SyncEvidence(BaseModel):
-    id: str
-    sourceType: str
-    sourceId: str
-    status: str
-    observedAt: int
-    transactionId: Optional[str] = None
-    matchedTransactionId: Optional[str] = None
-    amountMinor: Optional[int] = None
-    currency: Optional[str] = None
-    direction: Optional[str] = None
-    bankProvider: Optional[str] = None
-    accountLast4: Optional[str] = None
-    reference: Optional[str] = None
-    contentHash: Optional[str] = None
-    confidence: Optional[float] = None
+    id:str; sourceType:str; sourceId:str; status:str; observedAt:int
+    transactionId:Optional[str]=None; matchedTransactionId:Optional[str]=None
+    amountMinor:Optional[int]=None; currency:Optional[str]=None; direction:Optional[str]=None
+    bankProvider:Optional[str]=None; accountLast4:Optional[str]=None; reference:Optional[str]=None
+    contentHash:Optional[str]=None; confidence:Optional[float]=None
 
 class SyncRequest(BaseModel):
-    version: int = Field(ge=1)
-    transactions: list[SyncTransaction] = []
-    evidence: list[SyncEvidence] = []
-
-class SyncResponse(BaseModel):
-    acceptedTransactions: int
-    acceptedEvidence: int
-    duplicateTransactions: int
-    duplicateEvidence: int
-    serverTime: int
+    version:int=Field(ge=1); transactions:list[SyncTransaction]=[]; evidence:list[SyncEvidence]=[]
 
 class BalanceRequest(BaseModel):
-    id: str
-    name: str
-    currency: str = "INR"
-    accountType: str
-    bank: Optional[str] = None
-    last4: Optional[str] = None
-    balanceMinor: int
+    id:str; name:str; currency:str="INR"; accountType:str; bank:Optional[str]=None; last4:Optional[str]=None; balanceMinor:int
 
 class ReceivableRequest(BaseModel):
-    id: str
-    description: str
-    amountMinor: int
-    currency: str = "INR"
-    splitwiseExpenseId: Optional[str] = None
+    id:str; description:str; amountMinor:int; currency:str="INR"; splitwiseExpenseId:Optional[str]=None
 
-def require_sync_token(token: str):
-    if not token:
-        raise HTTPException(status_code=401, detail="missing sync token")
+class RuleRequest(BaseModel):
+    id:str; merchantPattern:str; groupId:int; splitMode:str="EQUAL"; userSharesJson:Optional[str]=None; enabled:bool=True
+
+def require_token(token:str):
+    expected=os.getenv("SYNC_API_TOKEN","").strip()
+    if not expected or not token or not hmac.compare_digest(token,expected):
+        raise HTTPException(status_code=401,detail="unauthorized")
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "service": "oracle-finance"}
+def health(): return {"status":"ok","service":"oracle-finance","version":"1.0.0"}
 
-@app.post("/api/v1/sync", response_model=SyncResponse)
-def sync(payload: SyncRequest, x_sync_token: str = Header(default="")):
-    require_sync_token(x_sync_token)
-    if payload.version != 1:
-        raise HTTPException(status_code=400, detail="unsupported sync contract version")
-    new_t = sum(sync_transaction(t) for t in payload.transactions)
-    new_e = sum(sync_evidence(e) for e in payload.evidence)
-    return SyncResponse(
-        acceptedTransactions=new_t,
-        acceptedEvidence=new_e,
-        duplicateTransactions=len(payload.transactions)-new_t,
-        duplicateEvidence=len(payload.evidence)-new_e,
-        serverTime=int(datetime.now(timezone.utc).timestamp() * 1000),
-    )
+@app.post("/api/v1/sync")
+def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    if payload.version!=1: raise HTTPException(400,"unsupported sync contract version")
+    new_t=sum(sync_transaction(t) for t in payload.transactions)
+    new_e=sum(sync_evidence(e) for e in payload.evidence)
+    for t in payload.transactions:
+        row=next((x for x in list_transactions(1000) if x["id"]==t.id),None)
+        if row: create_for_transaction(row)
+    reconcile_all()
+    return {"acceptedTransactions":new_t,"acceptedEvidence":new_e,
+            "duplicateTransactions":len(payload.transactions)-new_t,
+            "duplicateEvidence":len(payload.evidence)-new_e,
+            "serverTime":int(datetime.now(timezone.utc).timestamp()*1000)}
 
 @app.get("/api/v1/accounts")
-def get_accounts(x_sync_token: str = Header(default="")):
-    require_sync_token(x_sync_token)
-    return {"accounts": balances()}
+def get_accounts(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return {"accounts":balances()}
 
 @app.put("/api/v1/accounts/{account_id}/balance")
-def update_balance(account_id: str, payload: BalanceRequest, x_sync_token: str = Header(default="")):
-    require_sync_token(x_sync_token)
-    if account_id != payload.id:
-        raise HTTPException(status_code=400, detail="account id mismatch")
-    set_balance(payload.id, payload.name, payload.currency, payload.accountType,
-                payload.bank, payload.last4, payload.balanceMinor)
-    return {"status": "ok"}
+def update_balance(account_id:str,payload:BalanceRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    if account_id!=payload.id: raise HTTPException(400,"account id mismatch")
+    set_balance(payload.id,payload.name,payload.currency,payload.accountType,payload.bank,payload.last4,payload.balanceMinor)
+    return {"status":"ok"}
 
 @app.post("/api/v1/splitwise/receivables")
-def create_receivable(payload: ReceivableRequest, x_sync_token: str = Header(default="")):
-    require_sync_token(x_sync_token)
-    add_receivable({
-        "id": payload.id,
-        "description": payload.description,
-        "amount_minor": payload.amountMinor,
-        "currency": payload.currency,
-        "splitwise_expense_id": payload.splitwiseExpenseId,
-    })
-    return {"status": "ok"}
+def create_receivable(payload:ReceivableRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    add_receivable({"id":payload.id,"description":payload.description,"amount_minor":payload.amountMinor,
+                    "currency":payload.currency,"splitwise_expense_id":payload.splitwiseExpenseId})
+    return {"status":"ok"}
 
 @app.get("/api/v1/summary")
-def summary(currency: str = "INR", x_sync_token: str = Header(default="")):
-    require_sync_token(x_sync_token)
-    return true_available(currency)
+def summary(currency:str="INR",x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return true_available(currency)
+
+@app.get("/api/v1/transactions")
+def transactions(limit:int=100,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return {"transactions":list_transactions(max(1,min(limit,1000)))}
+
+@app.get("/api/v1/reviews")
+def reviews(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return {"reviews":list_review_queue()}
+
+@app.get("/api/v1/transfers")
+def transfers(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return {"transfers":list_transfers()}
+
+@app.post("/api/v1/reconcile")
+def reconcile(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return reconcile_all()
+
+@app.post("/api/v1/splitwise/rules")
+def save_rule(payload:RuleRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    upsert_splitwise_rule({"id":payload.id,"merchant_pattern":payload.merchantPattern,"group_id":payload.groupId,
+                           "split_mode":payload.splitMode,"user_shares_json":payload.userSharesJson,"enabled":payload.enabled})
+    return {"status":"ok"}
+
+@app.get("/api/v1/splitwise/rules")
+def rules(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return {"rules":list_splitwise_rules()}
+
+@app.get("/api/v1/splitwise/status")
+def splitwise_status(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    if not splitwise_enabled(): return {"enabled":False}
+    return {"enabled":True,"user":splitwise_user()}
+
+@app.get("/api/v1/splitwise/groups")
+def get_splitwise_groups(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    if not splitwise_enabled(): raise HTTPException(400,"Splitwise is not enabled")
+    return splitwise_groups()
