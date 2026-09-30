@@ -1,5 +1,7 @@
 package com.example.financesmstracker.integration
 
+import com.example.financesmstracker.BuildConfig
+
 import android.content.Context
 import java.io.IOException
 import java.net.HttpURLConnection
