@@ -31,6 +31,14 @@ class SyncEvidence(BaseModel):
     observedAt: int
     transactionId: Optional[str] = None
     matchedTransactionId: Optional[str] = None
+    amountMinor: Optional[int] = None
+    currency: Optional[str] = None
+    direction: Optional[str] = None
+    bankProvider: Optional[str] = None
+    accountLast4: Optional[str] = None
+    reference: Optional[str] = None
+    contentHash: Optional[str] = None
+    confidence: Optional[float] = None
 
 class SyncRequest(BaseModel):
     version: int = Field(ge=1)
