@@ -1,0 +1,36 @@
+name: Deploy Oracle Finance
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "oracle-finance/**"
+      - ".github/workflows/oracle-deploy.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Oracle VPS
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          script_stop: true
+          script: |
+            set -e
+            cd ~/FinanceSMSTracker-kotlin
+            git fetch origin
+            git reset --hard origin/main
+            cd oracle-finance
+            docker compose down
+            docker compose build --no-cache finance-api
+            docker compose up -d
+            sleep 3
+            curl --fail http://127.0.0.1:8090/health
+            docker compose ps
