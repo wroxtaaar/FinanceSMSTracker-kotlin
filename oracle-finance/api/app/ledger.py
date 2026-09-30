@@ -7,10 +7,10 @@ def sync_transaction(t):
     with connection() as conn:
         before=conn.execute("SELECT id FROM transactions WHERE id=?",(t.id,)).fetchone()
         conn.execute("""INSERT OR IGNORE INTO transactions
-        (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,created_at)
+        (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,created_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,t.reference,
-         t.timestamp,t.category,t.confidence,now_ms()))
+         t.timestamp,t.category,t.confidence,None,now_ms()))
         return before is None
 
 def sync_evidence(e):
@@ -51,7 +51,7 @@ def true_available(currency="INR"):
 
 def list_transactions(limit=100):
     with connection() as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM transactions ORDER BY timestamp DESC LIMIT ?",(limit,)).fetchall()]
+        return [dict(r) for r in conn.execute("SELECT * FROM transactions WHERE duplicate_of IS NULL ORDER BY timestamp DESC LIMIT ?",(limit,)).fetchall()]
 
 def list_review_queue():
     with connection() as conn:
