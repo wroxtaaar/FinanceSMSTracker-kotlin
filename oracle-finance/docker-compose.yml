@@ -17,3 +17,13 @@ services:
       - ./data:/app/data
     restart: unless-stopped
     profiles: ["telegram"]
+
+  finance-worker:
+    build: ./api
+    env_file: .env
+    command: ["python","-m","app.worker"]
+    volumes:
+      - ./data:/app/data
+      - ./secrets:/app/secrets:ro
+    restart: unless-stopped
+    profiles: ["worker"]
