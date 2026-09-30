@@ -1,53 +1,106 @@
 package com.example.financesmstracker.integration
 
-import org.json.JSONArray
-import org.json.JSONObject
-
+/**
+ * Builds the versioned sync payload without depending on Android's org.json
+ * implementation.
+ *
+ * Keeping serialization pure Kotlin makes the contract deterministic in both
+ * Android runtime and JVM unit tests.
+ */
 object FinanceSyncPayload {
     fun build(
         transactions: List<SyncTransaction>,
         evidence: List<SyncEvidence>
     ): String {
-        val root = JSONObject()
-            .put("version", FinanceSyncContract.VERSION)
-            .put("transactions", JSONArray().also { array ->
-                transactions.forEach { t ->
-                    array.put(JSONObject()
-                        .put("id", t.localTransactionId.toString())
-                        .put("amountMinor", t.amountMinor)
-                        .put("currency", t.currency)
-                        .put("type", t.transactionType.name)
-                        .put("paymentMethod", t.paymentMethod.name)
-                        .put("accountType", t.accountType.name)
-                        .put("bank", t.bank)
-                        .put("merchantOrPayee", t.merchantName ?: t.payeeId)
-                        .put("accountLast4", t.accountLastFour)
-                        .put("reference", t.reference)
-                        .put("timestamp", t.timestamp)
-                        .put("category", t.category ?: "OTHER")
-                        .put("confidence", t.parserConfidence))
+        val out = StringBuilder(256)
+        out.append("{")
+        out.append("\"version\":").append(FinanceSyncContract.VERSION)
+        out.append(",\"transactions\":[")
+        transactions.forEachIndexed { index, t ->
+            if (index > 0) out.append(",")
+            out.append("{")
+            out.append("\"id\":").append(jsonString(t.localTransactionId.toString()))
+            out.append(",\"amountMinor\":").append(t.amountMinor)
+            out.append(",\"currency\":").append(jsonString(t.currency))
+            out.append(",\"type\":").append(jsonString(t.transactionType.name))
+            out.append(",\"paymentMethod\":").append(jsonString(t.paymentMethod.name))
+            out.append(",\"accountType\":").append(jsonString(t.accountType.name))
+            appendNullableString(out, "bank", t.bank)
+            appendNullableString(out, "merchantOrPayee", t.merchantName ?: t.payeeId)
+            appendNullableString(out, "accountLast4", t.accountLastFour)
+            appendNullableString(out, "reference", t.reference)
+            out.append(",\"timestamp\":").append(t.timestamp)
+            out.append(",\"category\":").append(jsonString(t.category ?: "OTHER"))
+            require(t.parserConfidence.isFinite()) { "parserConfidence must be finite" }
+            out.append(",\"confidence\":").append(t.parserConfidence)
+            out.append("}")
+        }
+        out.append("]")
+
+        out.append(",\"evidence\":[")
+        evidence.forEachIndexed { index, e ->
+            if (index > 0) out.append(",")
+            out.append("{")
+            out.append("\"id\":").append(jsonString(e.localEvidenceId.toString()))
+            out.append(",\"sourceType\":").append(jsonString(e.sourceType.name))
+            out.append(",\"sourceId\":").append(jsonString(e.sourceKey))
+            out.append(",\"status\":").append(jsonString(e.status.name))
+            out.append(",\"observedAt\":").append(e.receivedAt)
+            appendNullableString(out, "transactionId", e.localTransactionId?.toString())
+            appendNullableString(out, "matchedTransactionId", e.localTransactionId?.toString())
+            if (e.amountMinor != 0L) out.append(",\"amountMinor\":").append(e.amountMinor)
+            appendNullableString(out, "currency", e.currency)
+            appendNullableString(out, "direction", e.direction)
+            appendNullableString(out, "bankProvider", e.bankProvider)
+            appendNullableString(out, "accountLast4", e.accountLastFour)
+            appendNullableString(out, "reference", e.reference)
+            appendNullableString(out, "contentHash", e.contentHash)
+            if (e.confidence.isFinite()) {
+                out.append(",\"confidence\":").append(e.confidence)
+            } else {
+                throw IllegalArgumentException("evidence confidence must be finite")
+            }
+            out.append("}")
+        }
+        out.append("]")
+        out.append("}")
+        return out.toString()
+    }
+
+    private fun appendNullableString(
+        out: StringBuilder,
+        name: String,
+        value: String?
+    ) {
+        if (value != null) {
+            out.append(",\"").append(name).append("\":")
+                .append(jsonString(value))
+        }
+    }
+
+    private fun jsonString(value: String): String {
+        val out = StringBuilder(value.length + 2)
+        out.append('\"')
+        value.forEach { ch ->
+            when (ch) {
+                '\\' -> out.append("\\\\")
+                '\"' -> out.append("\\\"")
+                '\b' -> out.append("\\b")
+                '\u000C' -> out.append("\\f")
+                '\n' -> out.append("\\n")
+                '\r' -> out.append("\\r")
+                '\t' -> out.append("\\t")
+                else -> {
+                    if (ch.code < 0x20) {
+                        out.append("\\u")
+                            .append(ch.code.toString(16).padStart(4, '0'))
+                    } else {
+                        out.append(ch)
+                    }
                 }
-            })
-            .put("evidence", JSONArray().also { array ->
-                evidence.forEach { e ->
-                    array.put(JSONObject()
-                        .put("id", e.localEvidenceId.toString())
-                        .put("sourceType", e.sourceType.name)
-                        .put("sourceId", e.sourceKey)
-                        .put("status", e.status.name)
-                        .put("observedAt", e.receivedAt)
-                        .put("amountMinor", e.amountMinor)
-                        .put("currency", e.currency)
-                        .put("direction", e.direction)
-                        .put("bankProvider", e.bankProvider)
-                        .put("accountLast4", e.accountLastFour)
-                        .put("reference", e.reference)
-                        .put("contentHash", e.contentHash)
-                        .put("confidence", e.confidence)
-                        .put("transactionId", e.localTransactionId?.toString())
-                        .put("matchedTransactionId", e.localTransactionId?.toString()))
-                }
-            })
-        return root.toString()
+            }
+        }
+        out.append('\"')
+        return out.toString()
     }
 }
