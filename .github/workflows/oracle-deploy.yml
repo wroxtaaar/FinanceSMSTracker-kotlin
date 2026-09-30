@@ -14,23 +14,79 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to Oracle VPS
+      - name: 1. Check Oracle VPS
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
-          script_stop: true
+          script: |
+            set -e
+            echo "Oracle VPS connection OK"
+            docker --version
+            docker compose version
+
+      - name: 2. Sync code from GitHub
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
           script: |
             set -e
             cd ~/FinanceSMSTracker-kotlin
             git fetch origin
             git reset --hard origin/main
-            cd oracle-finance
+            git log -1 --oneline
+
+      - name: 3. Stop current finance API
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          script: |
+            set -e
+            cd ~/FinanceSMSTracker-kotlin/oracle-finance
             docker compose down
+
+      - name: 4. Build finance API
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          script: |
+            set -e
+            cd ~/FinanceSMSTracker-kotlin/oracle-finance
             docker compose build --no-cache finance-api
+
+      - name: 5. Start finance API
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          script: |
+            set -e
+            cd ~/FinanceSMSTracker-kotlin/oracle-finance
             docker compose up -d
+
+      - name: 6. Health check
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          script: |
+            set -e
+            cd ~/FinanceSMSTracker-kotlin/oracle-finance
             sleep 3
             curl --fail http://127.0.0.1:8090/health
             docker compose ps
