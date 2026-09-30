@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from .db import init_db
 from .ledger import *
 from .reconcile import reconcile_all
-from .splitwise import create_for_transaction, enabled as splitwise_enabled, current_user as splitwise_user, groups as splitwise_groups\nfrom .gmail_auth import auth_url as gmail_auth_url, finish_callback as gmail_finish, sync as gmail_sync
+from .splitwise import create_for_transaction, enabled as splitwise_enabled, current_user as splitwise_user, groups as splitwise_groups, sync_receivables\nfrom .gmail_auth import auth_url as gmail_auth_url, finish_callback as gmail_finish, sync as gmail_sync
 
 app=FastAPI(title="Oracle Finance API",version="1.0.0")
 init_db()
@@ -134,6 +134,13 @@ def gmail_callback(code:str="",state:str="",error:str="",x_sync_token:str=Header
 def gmail_sync_now(query:Optional[str]=None,x_sync_token:str=Header(default="")):
     require_token(x_sync_token)
     try: return {"createdEvidence":gmail_sync(query)}
+    except Exception as exc: raise HTTPException(400,str(exc))
+
+@app.post("/api/v1/splitwise/sync")
+def sync_splitwise(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    if not splitwise_enabled(): raise HTTPException(400,"Splitwise is not enabled")
+    try: return {"receivables":sync_receivables()}
     except Exception as exc: raise HTTPException(400,str(exc))
 
 @app.get("/api/v1/splitwise/groups")
