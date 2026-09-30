@@ -55,6 +55,38 @@ def ingest_messages(service,query="newer_than:30d"):
             VALUES(?,?,?,?,?,?,?,?)""",(msg_id,message.get("threadId"),int(message.get("internalDate","0")),sender,h.get("subject"),
             hashlib.sha256((msg_id+h.get("subject","")).encode()).hexdigest(),"PARSED",int(time.time()*1000)))
         if parsed:
-            t,e=parsed; sync_transaction(t); sync_evidence(e); created+=1
-        else: add_review("GMAIL","unrecognized bank email",evidence_id="gmail-evidence:"+msg_id)
+            t,e=parsed
+            sync_transaction(t)
+            sync_evidence(e)
+
+            # Gmail can be a second source for an SMS transaction. Delay its
+            # balance adjustment until after duplicate reconciliation so one
+            # real-world transaction never changes the balance twice.
+            reconcile_duplicate_transaction(t.id)
+            with connection() as conn:
+                row=conn.execute("SELECT * FROM transactions WHERE id=?",(t.id,)).fetchone()
+            if row and not row["duplicate_of"]:
+                apply_transaction_to_account(conn=None if False else __import__("builtins").None, t, 0)
+            created+=1
+        else:
+            h=_headers(message.get("payload",{}))
+            combined=f"{h.get('subject','')}\n{_decode(message.get('payload',{}))}"
+            e=SyncEvidenceModel(
+                id="gmail-evidence:"+msg_id,
+                sourceType="GMAIL",
+                sourceId=msg_id,
+                status="UNMATCHED",
+                observedAt=int(message.get("internalDate","0")),
+                transactionId=None,
+                amountMinor=None,
+                currency="INR",
+                direction=None,
+                bankProvider=None,
+                accountLast4=None,
+                reference=None,
+                contentHash=hashlib.sha256(combined.encode()).hexdigest(),
+                confidence=0.0,
+            )
+            sync_evidence(e)
+            add_review("GMAIL","unrecognized bank email",evidence_id=e.id)
     return created
