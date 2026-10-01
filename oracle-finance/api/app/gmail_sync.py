@@ -48,8 +48,8 @@ _TRANSACTION_SIGNAL = re.compile(
 )
 _BANK_SENDER_DOMAINS = {
     "HDFC": ("hdfcbank.net", "hdfcbank.bank.in"),
-    "AXIS": ("axisbank.com",),
-    "ICICI": ("icicibank.com",),
+    "AXIS": ("axisbank.com", "axis.bank.in"),
+    "ICICI": ("icicibank.com", "icici.bank.in"),
     "SBI": ("sbi.co.in",),
     "HSBC": ("hsbc.co.in", "hsbc.com"),
     "INDUSIND": ("indusind.com",),
@@ -117,6 +117,11 @@ def _reference(combined):
         r"\s*[:#-]?\s*([A-Z0-9][A-Z0-9/-]*\d[A-Z0-9/-]*)",
         combined,
     )
+    if not match:
+        match = re.search(
+            r"(?i)Transaction\s+Info\s*:\s*([^\s<]{6,120})",
+            combined,
+        )
     token = match.group(1).rstrip(".,;:)") if match else None
     return token or None
 
