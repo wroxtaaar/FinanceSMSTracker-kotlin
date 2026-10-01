@@ -324,6 +324,22 @@ def _repair_legacy_gmail_account_classifications():
     return repaired
 
 
+def _gmail_message_id_from_source_id(source_id):
+    """Normalize stored IMAP evidence IDs for Gmail/IMAP message lookup.
+
+    IMAP evidence is stored as imap:<folder>:<uidvalidity>:<uid>, while
+    IMAPService message lookup expects only <uidvalidity>:<uid>. OAuth Gmail
+    message IDs are already in the required form and pass through.
+    """
+    if not source_id.startswith("imap:"):
+        return source_id
+
+    match = re.match(r"^imap:.*:(\d+):(\d+)$", source_id)
+    if not match:
+        raise ValueError(f"Unsupported IMAP source id: {source_id!r}")
+    return f"{match.group(1)}:{match.group(2)}"
+
+
 def _repair_legacy_icici_credit_card_classifications(service):
     """Reparse legacy ICICI Gmail rows that were stored as bank accounts.
 
@@ -373,9 +389,16 @@ def _repair_legacy_icici_credit_card_classifications(service):
         ).fetchall()
 
         for row in rows:
+            try:
+                message_id = _gmail_message_id_from_source_id(row["source_id"])
+            except ValueError:
+                # Do not fail the entire Gmail sync because one legacy evidence
+                # row has an unexpected source-id shape.
+                continue
+
             message = service.users().messages().get(
                 userId="me",
-                id=row["source_id"],
+                id=message_id,
                 format="full",
             ).execute()
             parsed = parse_bank_email(message)
