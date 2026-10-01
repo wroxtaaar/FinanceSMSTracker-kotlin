@@ -146,7 +146,11 @@ def parse_bank_email(message):
     m=re.search(r"(?i)(?:INR|Rs\.?)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)",combined)
     amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
     direction="CREDIT" if re.search(r"(?i)credited|credit alert|payment.*received|refund",combined) else (
-        "DEBIT" if re.search(r"(?i)debited|spent|sent|purchase|withdrawn|payment.*successful",combined) else None)
+        "DEBIT" if re.search(
+            r"(?i)debited|spent|sent|purchase|withdrawn|payment.*successful|"
+            r"used\s+for\s+(?:a\s+)?transaction",
+            combined,
+        ) else None)
     bank=_recognized_bank(combined, sender)
     last4=_account_last4(combined)
 
@@ -161,7 +165,16 @@ def parse_bank_email(message):
         score += 0.10
     if re.search(r"(?i)(transaction|debit|credit|payment)\s+(alert|confirmation|notification)|transaction alert", subject):
         score += 0.05
-    if re.search(r"(?i)(debited from|credited to|transaction of|purchase of|withdrawn|payment of)", combined):
+    if re.search(
+        r"(?i)(debited from|credited to|transaction of|purchase of|withdrawn|"
+        r"payment of|spent\s+on|used\s+for\s+(?:a\s+)?transaction)",
+        combined,
+    ):
+        score += 0.05
+    # An explicit bank name in the message is an additional identity signal
+    # for test fixtures and real emails whose sender address is not in our
+    # trusted-domain allowlist.
+    if bank and re.search(rf"(?i)\b{re.escape(bank)}\b", combined):
         score += 0.05
 
     if score < 0.90:
