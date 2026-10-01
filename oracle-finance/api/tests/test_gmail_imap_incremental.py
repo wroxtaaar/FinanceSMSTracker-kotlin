@@ -38,6 +38,7 @@ def test_incremental_imap_uses_sender_scoped_searches_only():
     service = IMAPService.__new__(IMAPService)
     service._imap = FakeIMAP()
     service.uidvalidity = "7"
+    service.folder = "[Gmail]/All Mail"
     service._last_synced_since = lambda: datetime(
         2026, 10, 1, tzinfo=timezone.utc
     )
