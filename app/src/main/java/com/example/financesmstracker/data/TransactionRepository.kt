@@ -488,8 +488,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
                 FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
                 FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
                 FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE + " = ? AND " +
                 "LOWER(TRIM(COALESCE(" + FinanceDatabaseHelper.COLUMN_BANK + ",''))) = LOWER(TRIM(COALESCE(?,''))) AND " +
                 "TRIM(COALESCE(" + FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR + ",'')) = TRIM(COALESCE(?,'')) AND " +
                 "ABS(" + FinanceDatabaseHelper.COLUMN_TIMESTAMP + " - ?) <= ?",
@@ -499,8 +497,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
                 transaction.amountMinor.toString(),
                 transaction.currency,
                 transaction.transactionType,
-                transaction.paymentMethod,
-                transaction.accountType,
                 transaction.bank ?: "",
                 transaction.accountLast4 ?: "",
                 transaction.timestamp.toString(),
