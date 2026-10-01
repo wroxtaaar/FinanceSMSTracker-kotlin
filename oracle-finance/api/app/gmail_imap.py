@@ -219,13 +219,32 @@ class IMAPService:
             raise RuntimeError("Gmail IMAP search failed")
 
         raw_uids = data[0].split() if data and data[0] else []
-        # Gmail API defaults to 100 messages and permits up to 500. For IMAP,
-        # use the configured bounded window so a manual Android check does not
-        # spend tens of seconds fetching hundreds of full messages.
+        # Keep the newest general messages bounded, but also include recent
+        # messages from our supported bank sender domains. This matters when
+        # the inbox is busy: a bank alert can be older than the newest 100
+        # messages and would otherwise never reach the parser.
         imap_limit = min(max_results, self.max_results)
-        uids = [uid.decode("ascii") for uid in raw_uids[-imap_limit:]]
-        uids.reverse()
+        uid_set = {uid.decode("ascii") for uid in raw_uids[-imap_limit:]}
 
+        bank_domains = (
+            "hdfcbank.net", "hdfcbank.bank.in",
+            "axisbank.com", "axis.bank.in",
+            "icicibank.com", "icici.bank.in",
+            "sbi.co.in",
+            "hsbc.co.in", "hsbc.com",
+            "indusind.com",
+        )
+        for domain in bank_domains:
+            status, bank_data = self._imap.uid(
+                "SEARCH", None, f'(FROM "{domain}" {search_criteria[1:-1]})'
+                if search_criteria.startswith("(") and search_criteria.endswith(")")
+                else f'FROM "{domain}"',
+            )
+            if status == "OK" and bank_data and bank_data[0]:
+                bank_uids = [uid.decode("ascii") for uid in bank_data[0].split()]
+                uid_set.update(bank_uids[-50:])
+
+        uids = sorted(uid_set, key=lambda value: int(value), reverse=True)
         messages = []
         if not uids:
             return {"messages": messages}
