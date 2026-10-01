@@ -324,6 +324,175 @@ def _repair_legacy_gmail_account_classifications():
     return repaired
 
 
+def _repair_legacy_icici_credit_card_classifications(service):
+    """Reparse legacy ICICI Gmail rows that were stored as bank accounts.
+
+    Older parser versions could misclassify an ICICI credit-card alert because
+    the footer mentions paying the card bill from a bank account. Re-fetch the
+    original Gmail message using the stored evidence source ID and let the
+    current parser supply the corrected account type, payment method, merchant,
+    and reference. The balance adjustment is then applied exactly once.
+    """
+    repaired = 0
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                t.id,
+                t.amount_minor,
+                t.type,
+                t.currency,
+                t.bank,
+                t.account_type,
+                t.account_last4,
+                t.status,
+                t.duplicate_of,
+                t.payment_method,
+                e.source_id
+            FROM transactions t
+            JOIN evidence e
+              ON e.transaction_id = t.id
+             AND e.source_type = 'GMAIL'
+            JOIN gmail_messages gm
+              ON (
+                   gm.id = e.source_id
+                   OR e.source_id LIKE 'imap:%:' || gm.id
+                 )
+            WHERE t.id LIKE 'gmail:%'
+              AND t.status = 'ACTIVE'
+              AND t.duplicate_of IS NULL
+              AND UPPER(TRIM(COALESCE(t.bank,''))) = 'ICICI'
+              AND UPPER(TRIM(COALESCE(t.account_type,''))) = 'BANK_ACCOUNT'
+              AND LOWER(TRIM(COALESCE(gm.sender,''))) IN (
+                    'credit_cards@icici.bank.in',
+                    'credit_cards@icicibank.com'
+              )
+              AND LOWER(COALESCE(gm.subject,'')) LIKE '%transaction alert%'
+            ORDER BY t.timestamp ASC
+            """
+        ).fetchall()
+
+        for row in rows:
+            message = service.users().messages().get(
+                userId="me",
+                id=row["source_id"],
+                format="full",
+            ).execute()
+            parsed = parse_bank_email(message)
+            if not parsed:
+                continue
+
+            parsed_t, parsed_e = parsed
+
+            # Only mutate the legacy row when the current parser resolves the
+            # same transaction identity. This prevents an unrelated email
+            # format change from rewriting an existing ledger entry.
+            if parsed_t.id != row["id"]:
+                continue
+            if (
+                parsed_t.amountMinor != row["amount_minor"]
+                or parsed_t.currency != row["currency"]
+                or parsed_t.type != row["type"]
+                or parsed_t.bank != row["bank"]
+                or parsed_t.accountLast4 != row["account_last4"]
+                or parsed_t.accountType != "CREDIT_CARD"
+            ):
+                continue
+
+            now = int(time.time() * 1000)
+            target_account = conn.execute(
+                """
+                SELECT id
+                FROM accounts
+                WHERE account_type=?
+                  AND currency=?
+                  AND UPPER(TRIM(COALESCE(bank,'')))=?
+                  AND TRIM(COALESCE(last4,''))=?
+                LIMIT 1
+                """,
+                (
+                    parsed_t.accountType,
+                    parsed_t.currency,
+                    parsed_t.bank,
+                    parsed_t.accountLast4,
+                ),
+            ).fetchone()
+            if not target_account:
+                continue
+
+            adjustment = conn.execute(
+                "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
+                (row["id"],),
+            ).fetchone()
+
+            # Move an old adjustment to the corrected account if necessary.
+            if adjustment and adjustment["account_id"] != target_account["id"]:
+                conn.execute(
+                    "UPDATE accounts SET balance_minor=balance_minor-?, updated_at=? WHERE id=?",
+                    (adjustment["delta_minor"], now, adjustment["account_id"]),
+                )
+                conn.execute(
+                    "DELETE FROM balance_adjustments WHERE transaction_id=?",
+                    (row["id"],),
+                )
+                adjustment = None
+
+            conn.execute(
+                """
+                UPDATE transactions
+                   SET payment_method=?,
+                       account_type=?,
+                       merchant_or_payee=?,
+                       reference=?,
+                       confidence=?
+                 WHERE id=?
+                """,
+                (
+                    parsed_t.paymentMethod,
+                    parsed_t.accountType,
+                    parsed_t.merchantOrPayee,
+                    parsed_t.reference,
+                    parsed_t.confidence,
+                    row["id"],
+                ),
+            )
+
+            conn.execute(
+                """
+                UPDATE evidence
+                   SET status=?,
+                       amount_minor=?,
+                       currency=?,
+                       direction=?,
+                       bank_provider=?,
+                       account_last4=?,
+                       reference=?,
+                       content_hash=?,
+                       confidence=?
+                 WHERE source_type='GMAIL' AND source_id=?
+                """,
+                (
+                    parsed_e.status,
+                    parsed_e.amountMinor,
+                    parsed_e.currency,
+                    parsed_e.direction,
+                    parsed_e.bankProvider,
+                    parsed_e.accountLast4,
+                    parsed_e.reference,
+                    parsed_e.contentHash,
+                    parsed_e.confidence,
+                    row["source_id"],
+                ),
+            )
+
+            if adjustment is None:
+                apply_transaction_to_account(conn, parsed_t, now)
+
+            repaired += 1
+
+    return repaired
+
+
 def parse_bank_email(message):
     payload=message.get("payload",{})
     headers=_headers(payload)
@@ -400,7 +569,10 @@ def ingest_messages(service,query="newer_than:30d"):
         "gmailDiagnostics":None,
     }
 
-    stats["repairedTransactions"] = _repair_legacy_gmail_account_classifications()
+    stats["repairedTransactions"] = (
+        _repair_legacy_gmail_account_classifications()
+        + _repair_legacy_icici_credit_card_classifications(service)
+    )
 
     # Gmail's API is paginated. IMAPService intentionally exposes only one
     # result page, so this loop also works with IMAP while consuming every
