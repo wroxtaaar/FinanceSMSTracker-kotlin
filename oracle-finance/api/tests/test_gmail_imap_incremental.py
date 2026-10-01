@@ -102,6 +102,40 @@ def test_axis_credit_email_parser_handles_real_format():
     assert evidence.sourceType == "GMAIL"
 
 
+def test_axis_credit_email_parser_handles_html_table_account_number():
+    message = _payload(
+        "Axis Bank Alerts <alerts@axis.bank.in>",
+        "INR 1.00 was credited to your A/c.",
+        """
+        <table>
+          <tr>
+            <td style="padding:3px 0px;font-family:Arial;">Account Number: </td>
+            <td style="padding:3px 0px;">XX3370</td>
+          </tr>
+          <tr>
+            <td>Amount Credited: </td>
+            <td>INR 1.00</td>
+          </tr>
+          <tr>
+            <td>Transaction Info: </td>
+            <td>UPI/P2A/183835801167/ABDUL WAS/HDFC/Paym</td>
+          </tr>
+        </table>
+        Never share your OTP, URN, CVV or password with anyone.
+        """,
+    )
+
+    parsed = parse_bank_email(message)
+    assert parsed is not None
+    transaction, evidence = parsed
+    assert transaction.bank == "AXIS"
+    assert transaction.type == "CREDIT"
+    assert transaction.accountLast4 == "3370"
+    assert transaction.amountMinor == 100
+    assert transaction.accountType == "BANK_ACCOUNT"
+    assert evidence.sourceType == "GMAIL"
+
+
 def test_icici_credit_card_email_parser_handles_real_format():
     message = _payload(
         "ICICI Bank <credit_cards@icici.bank.in>",
