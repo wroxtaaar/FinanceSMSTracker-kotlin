@@ -110,7 +110,7 @@
         android:layout_marginTop="4dp"
         android:text="Review &amp; Reconcile"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/buttonReviewReconcile" />
+        app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerViewTransactions"
@@ -120,7 +120,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel"
+        app:layout_constraintTop_toBottomOf="@id/buttonReviewReconcile"
         tools:listitem="@layout/item_transaction" />
 
     <TextView
@@ -133,6 +133,6 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel" />
+        app:layout_constraintTop_toTopOf="@id/recyclerViewTransactions" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
