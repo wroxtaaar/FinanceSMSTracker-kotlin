@@ -48,7 +48,7 @@ def test_incremental_imap_uses_sender_scoped_searches_only():
     assert searches
     assert all("SINCE 01-Oct-2026" in s for s in searches)
     assert any('FROM "alerts@axis.bank.in"' in s for s in searches)
-    assert not any("FROM \"hdfcbank" in s.lower() for s in searches)
+    assert not any("hdfcbank.net" in s.lower() or "hdfcbank.bank.in" in s.lower() for s in searches)
     assert not any("@axis.bank.in" in s and s.count("FROM") > 1 for s in searches)
     assert len(result["messages"]) == 2
 
