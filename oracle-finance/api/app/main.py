@@ -43,6 +43,10 @@ class BalanceRequest(BaseModel):
 class ReceivableRequest(BaseModel):
     id:str; description:str; amountMinor:int; currency:str="INR"; splitwiseExpenseId:Optional[str]=None
 
+class ManualSplitwiseTotalRequest(BaseModel):
+    amountMinor:int=Field(ge=0)
+    currency:str="INR"
+
 class RuleRequest(BaseModel):
     id:str; merchantPattern:str; groupId:int; splitMode:str="EQUAL"; userSharesJson:Optional[str]=None; enabled:bool=True
 
@@ -88,6 +92,18 @@ def create_receivable(payload:ReceivableRequest,x_sync_token:str=Header(default=
     add_receivable({"id":payload.id,"description":payload.description,"amount_minor":payload.amountMinor,
                     "currency":payload.currency,"splitwise_expense_id":payload.splitwiseExpenseId})
     return {"status":"ok"}
+
+@app.get("/api/v1/splitwise/manual-total")
+def get_manual_splitwise_total_api(currency:str="INR",x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    value=get_manual_splitwise_total(currency)
+    return {"currency":currency,"amountMinor":0 if value is None else value}
+
+@app.put("/api/v1/splitwise/manual-total")
+def update_manual_splitwise_total(payload:ManualSplitwiseTotalRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    set_manual_splitwise_total(payload.currency, payload.amountMinor)
+    return {"status":"ok","currency":payload.currency,"amountMinor":payload.amountMinor}
 
 @app.get("/api/v1/splitwise/receivables")
 def get_receivables(currency:str="INR",x_sync_token:str=Header(default="")):
