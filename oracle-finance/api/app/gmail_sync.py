@@ -1014,11 +1014,20 @@ def ingest_messages(service,query="newer_than:30d"):
                         int(time.time()*1000),
                     ),
                 )
-                if statement_stats["attachmentsParsed"] > 0:
+
+            # A statement email is not itself a transaction. Once its PDF was
+            # parsed, finish here so the statement does not create a noisy
+            # Gmail review item. On a PDF error, leave the message pending so
+            # the next Gmail sync retries the attachment.
+            if not parsed and statement_stats["attachmentsParsed"] > 0:
+                continue
+            if not parsed and statement_hint and statement_stats["attachmentsScanned"] > 0:
+                with connection() as conn:
                     conn.execute(
-                        "UPDATE gmail_messages SET status='PARSED' WHERE id=?",
+                        "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
                         (msg_id,),
                     )
+                continue
 
             if parsed:
                 t,e=parsed
