@@ -3,7 +3,7 @@ from .db import connection
 
 def now_ms(): return int(time.time()*1000)
 
-def sync_transaction(t):
+def sync_transaction(t, apply_balance=True):
     with connection() as conn:
         before=conn.execute("SELECT id FROM transactions WHERE id=?",(t.id,)).fetchone()
         created_at=now_ms()
@@ -13,7 +13,7 @@ def sync_transaction(t):
         (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,t.reference,
          t.timestamp,t.category,t.confidence,None,"ACTIVE",created_at))
 
-        if before is None and not str(t.id).startswith("gmail:"):
+        if before is None and apply_balance and not str(t.id).startswith("gmail:"):
             apply_transaction_to_account(conn, t, created_at)
 
         return before is None
