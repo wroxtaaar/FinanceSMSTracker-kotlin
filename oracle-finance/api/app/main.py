@@ -178,9 +178,13 @@ def gmail_callback(code:str="",state:str="",error:str="",x_sync_token:str=Header
     except Exception as exc: raise HTTPException(400,str(exc))
 
 @app.post("/api/v1/gmail/sync")
-def gmail_sync_now(query:Optional[str]=None,x_sync_token:str=Header(default="")):
+def gmail_sync_now(
+    query:Optional[str]=None,
+    historical:bool=False,
+    x_sync_token:str=Header(default="")
+):
     require_token(x_sync_token)
-    try: return gmail_sync(query)
+    try: return gmail_sync(query, historical=historical)
     except Exception as exc: raise HTTPException(400,str(exc))
 
 @app.post("/api/v1/splitwise/sync")
