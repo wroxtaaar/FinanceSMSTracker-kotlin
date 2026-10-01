@@ -64,11 +64,16 @@ def _sender_domain_is_known_bank(bank, sender):
                for allowed in _BANK_SENDER_DOMAINS.get(bank, ()))
 def _hard_reject_email(subject, text):
     combined = f"{subject}\n{text}"
+    # "Available balance/limit" is often included in genuine transaction
+    # alerts. Treat it as informational only when the message has no
+    # transaction signal at all; otherwise it must not veto the transaction.
+    info_only = _REJECT_INFO_ONLY.search(combined)
+    has_transaction_signal = _TRANSACTION_SIGNAL.search(combined)
     return bool(
         _REJECT_OTP.search(combined) or
         _REJECT_PROMO.search(combined) or
         _REJECT_NOT_COMPLETED.search(combined) or
-        _REJECT_INFO_ONLY.search(combined)
+        (info_only and not has_transaction_signal)
     )
 
 def _recognized_bank(combined, sender=""):
@@ -196,7 +201,14 @@ def ingest_messages(service,query="newer_than:30d"):
             stats["messagesScanned"] += 1
             msg_id=item["id"]
             with connection() as conn:
-                if conn.execute("SELECT 1 FROM gmail_messages WHERE id=?",(msg_id,)).fetchone():
+                existing = conn.execute(
+                    "SELECT status FROM gmail_messages WHERE id=?",
+                    (msg_id,),
+                ).fetchone()
+                # PENDING means the message was previously seen but could not
+                # be parsed. Retry it on the next sync so parser fixes and
+                # newly supported bank formats can recover old emails.
+                if existing and existing["status"] != "PENDING":
                     stats["alreadyProcessed"] += 1
                     continue
 
@@ -280,6 +292,12 @@ def ingest_messages(service,query="newer_than:30d"):
                     confidence=0.0,
                 )
                 sync_evidence(e)
+
+                with connection() as conn:
+                    conn.execute(
+                        "UPDATE gmail_messages SET status=? WHERE id=?",
+                        (h_status, msg_id),
+                    )
 
                 if h_status == "REVIEW":
                     stats["reviewCount"] += 1
