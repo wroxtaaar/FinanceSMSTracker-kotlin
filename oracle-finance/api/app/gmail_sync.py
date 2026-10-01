@@ -122,7 +122,7 @@ def ingest_messages(service,query="newer_than:30d"):
             has_amount = bool(re.search(r"(?i)(?:INR|Rs\.?)[\\s₹]*[0-9][0-9,]*(?:\\.\\d{1,2})?", combined))
             has_bank = _recognized_bank(combined) is not None
             has_financial_marker = bool(re.search(
-                r"(?i)transaction|debited|credited|spent|purchase|withdrawn|payment\\s+received|card\\s+payment",
+                r"(?i)transaction|debited|credited|spent|purchase|withdrawn|payment\s+received|card\s+payment",
                 combined,
             ))
             h_status = "REVIEW" if has_amount and has_bank and has_financial_marker else "IGNORED"
