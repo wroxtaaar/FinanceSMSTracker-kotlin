@@ -126,3 +126,41 @@ def test_icici_credit_card_email_parser_handles_real_format():
     assert transaction.amountMinor == 54800
     assert transaction.accountType == "CREDIT_CARD"
     assert evidence.sourceType == "GMAIL"
+
+
+def test_imap_falls_back_to_inbox_when_all_mail_is_unavailable(monkeypatch):
+    class FakeConnection:
+        def __init__(self):
+            self.selected = []
+
+        def login(self, username, password):
+            return "OK", [b"LOGIN completed"]
+
+        def select(self, folder, readonly=True):
+            self.selected.append(folder)
+            if folder == "[Gmail]/All Mail":
+                return "NO", [b"Mailbox unavailable"]
+            if folder == "INBOX":
+                return "OK", [b"1"]
+            return "NO", [b"unknown mailbox"]
+
+        def response(self, code):
+            return "UIDVALIDITY", [b"7"]
+
+        def logout(self):
+            return "BYE", [b"logout"]
+
+    fake = FakeConnection()
+    monkeypatch.setattr(
+        "app.gmail_imap.imaplib.IMAP4_SSL",
+        lambda host, port, timeout: fake,
+    )
+    monkeypatch.setenv("GMAIL_USERNAME", "test@gmail.com")
+    monkeypatch.setenv("GMAIL_APP_PASSWORD", "test-password")
+    monkeypatch.setenv("GMAIL_IMAP_FOLDER", "[Gmail]/All Mail")
+
+    service = IMAPService()
+
+    assert service.folder == "INBOX"
+    assert fake.selected == ["[Gmail]/All Mail", "INBOX"]
+    assert service.uidvalidity == "7"
