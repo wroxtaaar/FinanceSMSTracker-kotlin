@@ -8,20 +8,13 @@ class AxisSmsParser : SmsParser {
             return null
         }
 
-        val lowerBody = messageBody.lowercase()
-        if (lowerBody.contains("otp") || lowerBody.contains("one time password") || 
-            lowerBody.contains("verification code") || lowerBody.contains("promotional") ||
-            lowerBody.contains("offer") || lowerBody.contains("failed") || 
-            lowerBody.contains("pending") || lowerBody.contains("scheduled") || 
-            lowerBody.contains("mandate") || lowerBody.contains("bonus") || 
-            lowerBody.contains("off") || lowerBody.contains("upgrade") || 
-            lowerBody.contains("pre-approved") || lowerBody.contains("loan")) {
-            if (!lowerBody.contains("debited") && !lowerBody.contains("credited") && !lowerBody.contains("transferred")) {
-                return ParserResult(isTransaction = false)
-            }
+        if (SenderTrustManager.isNonTransactionalFinancialMessage(messageBody)) {
+            return ParserResult(isTransaction = false)
         }
 
-        val amountPaise = AmountParser.parseAmountToPaise(messageBody) ?: return null
+        val lowerBody = messageBody.lowercase()
+
+
         val currency = AmountParser.parseCurrency(messageBody)
 
         val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") || lowerBody.contains("added") || lowerBody.contains("refund")
