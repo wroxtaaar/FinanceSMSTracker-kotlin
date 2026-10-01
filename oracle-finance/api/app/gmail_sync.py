@@ -168,7 +168,7 @@ def _merchant_or_payee(combined):
     # merchant/payee value. This prevents the rest of the bank's disclaimer
     # from being displayed as the merchant.
     match = re.search(
-        r"(?is)(?<!Transaction)\bInfo\s*:\s*(.*?)(?=\s+(?:The\s+)?"
+        r"(?is)(?<!Transaction )\bInfo\s*:\s*(.*?)(?=\s+(?:The\s+)?"
         r"(?:Available\s+Credit\s+Limit|Total\s+Credit\s+Limit|"
         r"Available\s+Balance|Credit\s+Limit)\b|$)",
         normalized,
