@@ -81,12 +81,22 @@ class FinanceSyncClient(
         return put("/api/v1/splitwise/manual-total", json.toString())
     }
 
-    fun triggerGmailSync(): Result<Int> {
+    fun triggerGmailSync(): Result<GmailSyncResult> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
 
         return post("/api/v1/gmail/sync", "{}").map { body ->
-            JSONObject(body).optInt("createdEvidence", 0)
+            val json = JSONObject(body)
+            GmailSyncResult(
+                messagesScanned = json.optInt("messagesScanned", 0),
+                alreadyProcessed = json.optInt("alreadyProcessed", 0),
+                parsedTransactions = json.optInt("parsedTransactions", 0),
+                axisCredits = json.optInt("axisCredits", 0),
+                duplicateTransactions = json.optInt("duplicateTransactions", 0),
+                reviewCount = json.optInt("reviewCount", 0),
+                ignoredCount = json.optInt("ignoredCount", 0),
+                createdEvidence = json.optInt("createdEvidence", 0)
+            )
         }
     }
 
@@ -186,6 +196,17 @@ class FinanceSyncClient(
         return post("/api/v1/sync", jsonBody)
     }
 }
+
+data class GmailSyncResult(
+    val messagesScanned: Int,
+    val alreadyProcessed: Int,
+    val parsedTransactions: Int,
+    val axisCredits: Int,
+    val duplicateTransactions: Int,
+    val reviewCount: Int,
+    val ignoredCount: Int,
+    val createdEvidence: Int
+)
 
 data class OracleAccount(
     val id: String,
