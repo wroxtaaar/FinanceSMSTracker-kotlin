@@ -220,6 +220,16 @@ class IMAPService:
 
             stage = "mailbox selection"
             status, _ = imap.select(self.folder, readonly=True)
+            if status != "OK" and self.folder != "INBOX":
+                # Gmail normally exposes [Gmail]/All Mail, but some accounts
+                # or IMAP configurations reject that mailbox name. The bank
+                # alerts shown in Gmail are in Inbox, so safely fall back to
+                # INBOX rather than making the entire Gmail sync unavailable.
+                fallback_status, _ = imap.select("INBOX", readonly=True)
+                if fallback_status == "OK":
+                    self.folder = "INBOX"
+                    status = fallback_status
+
             if status != "OK":
                 raise RuntimeError(
                     f"Could not select Gmail folder: {self.folder}"
