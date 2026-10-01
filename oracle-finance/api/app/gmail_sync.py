@@ -1015,18 +1015,23 @@ def ingest_messages(service,query="newer_than:30d"):
                     ),
                 )
 
-            # A statement email is not itself a transaction. Once its PDF was
-            # parsed, finish here so the statement does not create a noisy
-            # Gmail review item. On a PDF error, leave the message pending so
-            # the next Gmail sync retries the attachment.
-            if not parsed and statement_stats["attachmentsParsed"] > 0:
-                continue
-            if not parsed and statement_hint and statement_stats["attachmentsScanned"] > 0:
-                with connection() as conn:
-                    conn.execute(
-                        "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
-                        (msg_id,),
-                    )
+            # A statement email is not itself a transaction. When a PDF
+            # attachment is present, never feed the surrounding statement
+            # summary through the bank-alert transaction parser. A failed PDF
+            # stays PENDING so the next sync retries it.
+            if statement_hint and statement_stats["attachmentsScanned"] > 0:
+                if statement_stats["attachmentsParsed"] > 0:
+                    with connection() as conn:
+                        conn.execute(
+                            "UPDATE gmail_messages SET status='PARSED' WHERE id=?",
+                            (msg_id,),
+                        )
+                else:
+                    with connection() as conn:
+                        conn.execute(
+                            "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
+                            (msg_id,),
+                        )
                 continue
 
             if parsed:
