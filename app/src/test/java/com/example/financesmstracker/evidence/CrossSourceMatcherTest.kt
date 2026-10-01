@@ -41,8 +41,8 @@ class CrossSourceMatcherTest {
     fun testCase1_UnknownDirectionAxisBankMatch() {
         val tx = createDummyTx(id = 1L, amountPaise = 10000L, type = TransactionType.DEBIT, bank = "AXIS", timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_1",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_1",
             receivedAt = 1005000L,
             amountPaise = 10000L,
             direction = "UNKNOWN",
@@ -58,8 +58,8 @@ class CrossSourceMatcherTest {
     fun testCase2_CreditNullBankMatch() {
         val tx = createDummyTx(id = 2L, amountPaise = 10000L, type = TransactionType.CREDIT, bank = "HDFC", timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_2",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_2",
             receivedAt = 1005000L,
             amountPaise = 10000L,
             direction = "CREDIT",
@@ -75,8 +75,8 @@ class CrossSourceMatcherTest {
     fun testCase3_DebitAxisVsCreditAxisUnmatched() {
         val tx = createDummyTx(id = 3L, amountPaise = 10000L, type = TransactionType.CREDIT, bank = "AXIS", timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_3",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_3",
             receivedAt = 1000000L,
             amountPaise = 10000L,
             direction = "DEBIT",
@@ -91,8 +91,8 @@ class CrossSourceMatcherTest {
     fun testCase4_CreditHdfcVsDebitHdfcUnmatched() {
         val tx = createDummyTx(id = 4L, amountPaise = 10000L, type = TransactionType.DEBIT, bank = "HDFC", timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_4",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_4",
             receivedAt = 1000000L,
             amountPaise = 10000L,
             direction = "CREDIT",
@@ -108,8 +108,8 @@ class CrossSourceMatcherTest {
         val tx1 = createDummyTx(id = 5L, amountPaise = 10000L, type = TransactionType.DEBIT, timestamp = 1000000L)
         val tx2 = createDummyTx(id = 6L, amountPaise = 10000L, type = TransactionType.DEBIT, timestamp = 1010000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_5",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_5",
             receivedAt = 1005000L,
             amountPaise = 10000L,
             direction = "UNKNOWN",
@@ -124,8 +124,8 @@ class CrossSourceMatcherTest {
     fun testCase6_UnknownDirectionNullBankUniqueMatch() {
         val tx = createDummyTx(id = 7L, amountPaise = 10000L, type = TransactionType.DEBIT, timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_6",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_6",
             receivedAt = 1005000L,
             amountPaise = 10000L,
             direction = "UNKNOWN",
@@ -141,8 +141,8 @@ class CrossSourceMatcherTest {
     fun testCase7_CreditAxisVsCreditHdfcUnmatched() {
         val tx = createDummyTx(id = 8L, amountPaise = 10000L, type = TransactionType.CREDIT, bank = "HDFC", timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_7",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_7",
             receivedAt = 1000000L,
             amountPaise = 10000L,
             direction = "CREDIT",
@@ -157,8 +157,8 @@ class CrossSourceMatcherTest {
     fun testCase8_DifferentCurrencyUnmatched() {
         val tx = createDummyTx(id = 9L, amountPaise = 138L, timestamp = 1000000L) // INR
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_8",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_8",
             receivedAt = 1000000L,
             amountPaise = 138L, // SGD 1.38 represented as 0 if filtered, or if amountPaise = 0
             direction = "CREDIT",
@@ -173,8 +173,8 @@ class CrossSourceMatcherTest {
     fun testCase9_DifferentAmountUnmatched() {
         val tx = createDummyTx(id = 10L, amountPaise = 10000L, timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_9",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_9",
             receivedAt = 1000000L,
             amountPaise = 10100L, // 101 vs 100
             direction = "DEBIT",
@@ -188,8 +188,8 @@ class CrossSourceMatcherTest {
     fun testCase10_OutsideTimeWindowUnmatched() {
         val tx = createDummyTx(id = 11L, amountPaise = 10000L, timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_10",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_10",
             receivedAt = 2000000L, // 1000 seconds later (> 120s window)
             amountPaise = 10000L,
             direction = "DEBIT",
