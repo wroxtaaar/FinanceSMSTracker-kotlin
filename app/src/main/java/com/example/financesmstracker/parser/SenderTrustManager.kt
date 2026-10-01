@@ -116,10 +116,29 @@ object SenderTrustManager {
      */
     fun isNonTransactionalFinancialMessage(messageBody: String): Boolean {
         if (messageBody.isBlank()) return true
-        return REJECT_OTP.containsMatchIn(messageBody) ||
+
+        if (REJECT_OTP.containsMatchIn(messageBody) ||
             REJECT_PROMO.containsMatchIn(messageBody) ||
-            REJECT_NOT_COMPLETED.containsMatchIn(messageBody) ||
-            REJECT_INFO_ONLY.containsMatchIn(messageBody)
+            REJECT_NOT_COMPLETED.containsMatchIn(messageBody)
+        ) {
+            return true
+        }
+
+        // "Available balance/limit" is often appended to a real transaction SMS.
+        // Reject it only when the message contains no actual transaction event.
+        if (REJECT_INFO_ONLY.containsMatchIn(messageBody)) {
+            val lower = messageBody.lowercase()
+            val hasTransactionEvent =
+                lower.contains("debited") || lower.contains("credited") ||
+                    lower.contains("spent") || lower.contains("paid") ||
+                    lower.contains("received") || lower.contains("transferred") ||
+                    lower.contains("withdrawn") || lower.contains("purchase") ||
+                    lower.contains("charged") || lower.contains("deducted")
+
+            if (!hasTransactionEvent) return true
+        }
+
+        return false
     }
 
     fun isFinancialLooking(messageBody: String): Boolean {
