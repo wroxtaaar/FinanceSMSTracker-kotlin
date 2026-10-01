@@ -19,6 +19,7 @@ import android.widget.CheckBox
 import android.widget.Spinner
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -259,16 +260,22 @@ class MainActivity : AppCompatActivity() {
         accounts: List<OracleAccount>,
         accountType: String
     ) {
+        val title = if (accountType == "BANK_ACCOUNT") {
+            "Edit Bank Accounts"
+        } else {
+            "Edit Credit Cards"
+        }
+
         if (accounts.isEmpty()) {
             AlertDialog.Builder(this)
-                .setTitle(if (accountType == "BANK_ACCOUNT") "Edit Bank Accounts" else "Edit Credit Cards")
+                .setTitle(title)
                 .setMessage("No matching accounts configured on Oracle.")
                 .setPositiveButton("OK", null)
                 .show()
             return
         }
 
-        val inputs = accounts.map { account ->
+        val accountInputs = accounts.map { account ->
             val label = TextView(this).apply {
                 text = buildString {
                     append(account.name)
@@ -281,25 +288,35 @@ class MainActivity : AppCompatActivity() {
             val input = EditText(this).apply {
                 inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
                 setSingleLine(true)
-                hint = if (accountType == "BANK_ACCOUNT") "Current balance" else "Current outstanding"
+                hint = if (accountType == "BANK_ACCOUNT") {
+                    "Current balance"
+                } else {
+                    "Current outstanding"
+                }
                 setText(formatDecimalMinor(account.balanceMinor))
                 selectAll()
             }
 
-            label to input
+            Triple(account, label, input)
         }
 
-        val container = LinearLayout(this).apply {
+        val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 0, 48, 0)
-            inputs.forEach { (label, input) ->
+
+            accountInputs.forEach { (_, label, input) ->
                 addView(label)
                 addView(input)
             }
         }
 
+        val scrollView = ScrollView(this).apply {
+            isFillViewport = true
+            addView(content)
+        }
+
         val dialog = AlertDialog.Builder(this)
-            .setTitle(if (accountType == "BANK_ACCOUNT") "Edit Bank Accounts" else "Edit Credit Cards")
+            .setTitle(title)
             .setMessage(
                 if (accountType == "BANK_ACCOUNT") {
                     "Manually set the current balance for each bank account."
@@ -307,7 +324,7 @@ class MainActivity : AppCompatActivity() {
                     "Manually set the current outstanding amount for each credit card."
                 }
             )
-            .setView(container)
+            .setView(scrollView)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save", null)
             .create()
@@ -316,22 +333,26 @@ class MainActivity : AppCompatActivity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val values = mutableListOf<Pair<OracleAccount, Long>>()
 
-                inputs.forEach { (label, input) ->
+                for ((account, _, input) in accountInputs) {
                     val amount = input.text.toString().trim().replace(",", "").toDoubleOrNull()
                     if (amount == null || amount < 0) {
                         input.error = "Enter a valid amount"
+                        input.requestFocus()
                         return@setOnClickListener
                     }
-                    values += labelToAccount(label, accounts) to kotlin.math.round(amount * 100.0).toLong()
+
+                    values += account to kotlin.math.round(amount * 100.0).toLong()
                 }
 
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
 
                 oracleExecutor.execute {
                     var failure: Throwable? = null
+
                     for ((account, balanceMinor) in values) {
                         val saveResult = FinanceSyncClient(this@MainActivity)
                             .updateAccountBalance(account, balanceMinor)
+
                         if (saveResult.isFailure) {
                             failure = saveResult.exceptionOrNull()
                             break
@@ -340,6 +361,7 @@ class MainActivity : AppCompatActivity() {
 
                     runOnUiThread {
                         dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+
                         if (failure == null) {
                             dialog.dismiss()
                             loadOracleSummary()
@@ -361,17 +383,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
-    }
-
-    private fun labelToAccount(label: TextView, accounts: List<OracleAccount>): OracleAccount {
-        val index = accounts.indexOfFirst { account ->
-            val expected = buildString {
-                append(account.name)
-                account.last4?.let { append(" ••••").append(it) }
-            }
-            label.text.toString() == expected
-        }
-        return accounts[index]
     }
 
     private fun formatDecimalMinor(minor: Long): String =
