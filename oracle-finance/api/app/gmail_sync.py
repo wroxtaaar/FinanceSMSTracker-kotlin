@@ -64,15 +64,19 @@ def _sender_domain_is_known_bank(bank, sender):
                for allowed in _BANK_SENDER_DOMAINS.get(bank, ()))
 def _hard_reject_email(subject, text):
     combined = f"{subject}\n{text}"
-    # "Available balance/limit" is often included in genuine transaction
-    # alerts. Treat it as informational only when the message has no
-    # transaction signal at all; otherwise it must not veto the transaction.
+    # Real bank transaction emails often contain promotional banners and
+    # security disclaimers (for example "Apply Now", "Click here", "OTP", or
+    # "CVV"). Those phrases must not veto an otherwise strong transaction alert.
+    # Keep the negative-state check strict so failed/declined/pending messages
+    # still cannot become transactions.
     info_only = _REJECT_INFO_ONLY.search(combined)
     has_transaction_signal = _TRANSACTION_SIGNAL.search(combined)
     return bool(
-        _REJECT_OTP.search(combined) or
-        _REJECT_PROMO.search(combined) or
         _REJECT_NOT_COMPLETED.search(combined) or
+        (
+            (_REJECT_OTP.search(combined) or _REJECT_PROMO.search(combined))
+            and not has_transaction_signal
+        ) or
         (info_only and not has_transaction_signal)
     )
 
@@ -203,6 +207,7 @@ def ingest_messages(service,query="newer_than:30d"):
         "reviewCount":0,
         "ignoredCount":0,
         "createdEvidence":0,
+        "gmailDiagnostics":None,
     }
 
     # Gmail's API is paginated. IMAPService intentionally exposes only one
@@ -214,6 +219,8 @@ def ingest_messages(service,query="newer_than:30d"):
         if page_token:
             kwargs["pageToken"]=page_token
         result=service.users().messages().list(**kwargs).execute()
+        if result.get("diagnostics") is not None:
+            stats["gmailDiagnostics"] = result["diagnostics"]
 
         for item in result.get("messages",[]):
             stats["messagesScanned"] += 1
