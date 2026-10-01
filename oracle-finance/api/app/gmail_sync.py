@@ -369,21 +369,12 @@ def _repair_legacy_icici_credit_card_classifications(service):
             JOIN evidence e
               ON e.transaction_id = t.id
              AND e.source_type = 'GMAIL'
-            JOIN gmail_messages gm
-              ON (
-                   gm.id = e.source_id
-                   OR e.source_id LIKE 'imap:%:' || gm.id
-                 )
             WHERE t.id LIKE 'gmail:%'
               AND t.status = 'ACTIVE'
               AND t.duplicate_of IS NULL
+              AND e.source_type = 'GMAIL'
               AND UPPER(TRIM(COALESCE(t.bank,''))) = 'ICICI'
               AND UPPER(TRIM(COALESCE(t.account_type,''))) = 'BANK_ACCOUNT'
-              AND LOWER(TRIM(COALESCE(gm.sender,''))) IN (
-                    'credit_cards@icici.bank.in',
-                    'credit_cards@icicibank.com'
-              )
-              AND LOWER(COALESCE(gm.subject,'')) LIKE '%transaction alert%'
             ORDER BY t.timestamp ASC
             """
         ).fetchall()
