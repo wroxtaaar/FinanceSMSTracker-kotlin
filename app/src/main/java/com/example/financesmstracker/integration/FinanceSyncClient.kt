@@ -85,7 +85,13 @@ class FinanceSyncClient(
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
 
-        return post("/api/v1/gmail/sync", "{}").map { body ->
+        // Manual Gmail checks use a bounded 30-day historical window so emails
+        // missed during an earlier UIDVALIDITY/incremental-scan period can be
+        // recovered, while the scheduled worker continues to use incremental mode.
+        return post(
+            "/api/v1/gmail/sync?query=newer_than%3A30d&historical=true",
+            "{}"
+        ).map { body ->
             val json = JSONObject(body)
             GmailSyncResult(
                 messagesScanned = json.optInt("messagesScanned", 0),
@@ -95,7 +101,8 @@ class FinanceSyncClient(
                 duplicateTransactions = json.optInt("duplicateTransactions", 0),
                 reviewCount = json.optInt("reviewCount", 0),
                 ignoredCount = json.optInt("ignoredCount", 0),
-                createdEvidence = json.optInt("createdEvidence", 0)
+                createdEvidence = json.optInt("createdEvidence", 0),
+                repairedTransactions = json.optInt("repairedTransactions", 0)
             )
         }
     }
@@ -207,7 +214,8 @@ data class GmailSyncResult(
     val duplicateTransactions: Int,
     val reviewCount: Int,
     val ignoredCount: Int,
-    val createdEvidence: Int
+    val createdEvidence: Int,
+    val repairedTransactions: Int
 )
 
 data class OracleAccount(
