@@ -127,10 +127,10 @@ class FinanceSyncClient(
                             transactionType = item.optString("type", "UNKNOWN"),
                             paymentMethod = item.optString("payment_method", "UNKNOWN"),
                             accountType = item.optString("account_type", "UNKNOWN"),
-                            bank = item.optString("bank").takeIf { it.isNotBlank() },
-                            merchantOrPayee = item.optString("merchant_or_payee").takeIf { it.isNotBlank() },
-                            accountLast4 = item.optString("account_last4").takeIf { it.isNotBlank() },
-                            reference = item.optString("reference").takeIf { it.isNotBlank() },
+                            bank = cleanRemoteString(item.optString("bank")),
+                            merchantOrPayee = cleanRemoteString(item.optString("merchant_or_payee")),
+                            accountLast4 = cleanRemoteString(item.optString("account_last4")),
+                            reference = cleanRemoteString(item.optString("reference")),
                             timestamp = item.getLong("timestamp"),
                             category = item.optString("category", "OTHER"),
                             confidence = item.optDouble("confidence", 0.0).toFloat()
@@ -155,6 +155,14 @@ class FinanceSyncClient(
                 trueAvailableMinor = json.getLong("trueAvailableMinor")
             )
         }
+    }
+
+    private fun cleanRemoteString(value: String?): String? {
+        val normalized = value?.trim()
+        return normalized
+            ?.takeIf { it.isNotBlank() }
+            ?.takeIf { !it.equals("null", ignoreCase = true) }
+            ?.takeIf { !it.equals("none", ignoreCase = true) }
     }
 
     private fun post(path: String, jsonBody: String): Result<String> {
