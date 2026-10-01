@@ -24,7 +24,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Prepare shared debug keystore
+        if: ${{ secrets.FINANCE_DEBUG_KEYSTORE_BASE64 != '' }}
+        env:
+          FINANCE_DEBUG_KEYSTORE_BASE64: ${{ secrets.FINANCE_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          echo "$FINANCE_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/finance-debug.keystore"
+
       - name: Build debug APK
+        env:
+          FINANCE_KEYSTORE_PATH: ${{ secrets.FINANCE_DEBUG_KEYSTORE_BASE64 != '' && format('{0}/finance-debug.keystore', runner.temp) || '' }}
+          FINANCE_KEY_ALIAS: ${{ secrets.FINANCE_KEY_ALIAS }}
+          FINANCE_KEYSTORE_PASSWORD: ${{ secrets.FINANCE_KEYSTORE_PASSWORD }}
+          FINANCE_KEY_PASSWORD: ${{ secrets.FINANCE_KEY_PASSWORD }}
         run: bash ./gradlew assembleDebug
 
       - name: Run unit tests
