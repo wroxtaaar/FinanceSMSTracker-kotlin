@@ -1,8 +1,7 @@
 package com.example.financesmstracker.evidence
 
 enum class SourceType {
-    SMS,
-    TRUECALLER
+    SMS
 }
 
 enum class EvidenceStatus {
