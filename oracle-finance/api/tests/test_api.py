@@ -40,3 +40,18 @@ def test_sync_with_token_accepts_transaction():
 
 def test_wrong_token_rejected():
     assert client.get("/api/v1/summary",headers={"X-Sync-Token":"wrong"}).status_code==401
+
+
+def test_manual_splitwise_total():
+    response = client.put("/api/v1/splitwise/manual-total", headers=HEADERS,
+                          json={"amountMinor": 850000, "currency": "INR"})
+    assert response.status_code == 200
+    assert response.json()["amountMinor"] == 850000
+
+    response = client.get("/api/v1/splitwise/manual-total", headers=HEADERS)
+    assert response.status_code == 200
+    assert response.json()["amountMinor"] == 850000
+
+    summary = client.get("/api/v1/summary", headers=HEADERS)
+    assert summary.status_code == 200
+    assert summary.json()["splitwiseReceivableMinor"] == 850000
