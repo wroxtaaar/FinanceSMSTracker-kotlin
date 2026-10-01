@@ -96,7 +96,8 @@ def test_gmail_unique_transaction_updates_balance_once():
     set_balance("gmail-unique", "Gmail Unique", "INR", "BANK_ACCOUNT", "HDFC", "9591", 100000)
     created = ingest_messages(service, query="newer_than:30d")
 
-    assert created == 1
+    assert created["parsedTransactions"] == 1
+    assert created["createdEvidence"] == 1
     with connection() as conn:
         balance = conn.execute(
             "SELECT balance_minor FROM accounts WHERE id='gmail-unique'"
@@ -141,6 +142,11 @@ def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
     # transaction and avoid a second balance adjustment.
     service = FakeService([gmail_message])
     ingest_messages(service, query="newer_than:30d")
+
+    result = ingest_messages(service, query="newer_than:30d")
+
+    assert result["parsedTransactions"] == 1
+    assert result["duplicateTransactions"] == 1
 
     with connection() as conn:
         balance = conn.execute(
@@ -238,3 +244,24 @@ def test_axis_bank_credit_email_is_parsed_from_trusted_sender():
     assert transaction.accountType == "BANK_ACCOUNT"
     assert transaction.accountLast4 == "1234"
     assert evidence.direction == "CREDIT"
+
+
+def test_gmail_sync_reports_axis_credit_diagnostic():
+    message = _message(
+        "axis-credit-diagnostic",
+        "Your A/c XX1234 has been credited with INR 1.00. "
+        "Transaction reference: 987654321.",
+        subject="Axis Bank Credit Alert",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Axis Bank Credit Alert"},
+        {"name": "From", "value": "alerts@axisbank.com"},
+    ]
+
+    result = ingest_messages(FakeService([message]), query="newer_than:30d")
+
+    assert result["messagesScanned"] == 1
+    assert result["parsedTransactions"] == 1
+    assert result["axisCredits"] == 1
+    assert result["duplicateTransactions"] == 0
+    assert result["reviewCount"] == 0
