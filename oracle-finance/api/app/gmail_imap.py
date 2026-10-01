@@ -226,12 +226,35 @@ class IMAPService:
         uids = [uid.decode("ascii") for uid in raw_uids[-imap_limit:]]
         uids.reverse()
 
-        return {
-            "messages": [
-                {"id": f"{self.uidvalidity}:{uid}"}
-                for uid in uids
-            ]
-        }
+        messages = []
+        for uid in uids:
+            status, header_data = self._imap.uid(
+                "FETCH",
+                uid,
+                "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])",
+            )
+            if status != "OK":
+                messages.append({"id": f"{self.uidvalidity}:{uid}"})
+                continue
+
+            header_bytes = None
+            for item in header_data or []:
+                if isinstance(item, tuple) and len(item) == 2 and isinstance(item[1], bytes):
+                    header_bytes = item[1]
+                    break
+
+            if header_bytes is None:
+                messages.append({"id": f"{self.uidvalidity}:{uid}"})
+                continue
+
+            header_message = email.message_from_bytes(header_bytes)
+            messages.append({
+                "id": f"{self.uidvalidity}:{uid}",
+                "from": _decode_header_value(header_message.get("From", "")),
+                "subject": _decode_header_value(header_message.get("Subject", "")),
+            })
+
+        return {"messages": messages}
 
     def _get_message(self, message_id):
         try:
