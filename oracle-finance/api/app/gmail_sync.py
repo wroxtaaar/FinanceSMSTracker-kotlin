@@ -37,13 +37,17 @@ def _account_last4(combined):
 
 
 def _reference(combined):
+    # Bank reference fields vary between emails (for example
+    # "Ref UPI-12345", "Reference: 123456", and "UTR ABC/12345").
+    # Capture a token only when it contains at least one digit so ordinary
+    # prose such as "references-center" cannot become a transaction reference.
     match = re.search(
         r"(?i)(?:Ref(?:erence)?|Transaction\s*(?:ID|No\.?)?|UTR)"
-        r"[^A-Za-z0-9]{0,20}([A-Z0-9][A-Z0-9/-]{3,}[A-Z0-9])",
+        r"\s*[:#-]?\s*([A-Z0-9][A-Z0-9/-]*\d[A-Z0-9/-]*)",
         combined,
     )
-    token = match.group(1) if match else None
-    return token if token and re.search(r"\d", token) else None
+    token = match.group(1).rstrip(".,;:)") if match else None
+    return token or None
 
 
 def _looks_like_transaction(combined, amount, direction):
