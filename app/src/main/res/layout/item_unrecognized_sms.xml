@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    app:cardCornerRadius="8dp"
+    app:cardElevation="2dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/textViewUnrecognizedSender"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="BANK-HEADER"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textViewUnrecognizedReason"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Unrecognized financial SMS from unknown sender"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/textViewUnrecognizedDate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/buttonDismissUnrecognized"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Dismiss" />
+    </LinearLayout>
+</androidx.cardview.widget.CardView>
