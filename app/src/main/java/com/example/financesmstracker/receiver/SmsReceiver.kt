@@ -48,7 +48,11 @@ class SmsReceiver : BroadcastReceiver() {
                     val repository = TransactionRepository(dbHelper)
                     val smsHash = HashUtil.sha256(fullBody)
 
+                    val nonTransactionalMessage =
+                        SenderTrustManager.isNonTransactionalFinancialMessage(fullBody)
+
                     val shouldCreateCanonicalTransaction =
+                        !nonTransactionalMessage &&
                         parserResult.isTransaction &&
                         trustStatus == SenderTrustStatus.TRUSTED &&
                         parserResult.confidence >= 0.90f &&
@@ -138,7 +142,7 @@ class SmsReceiver : BroadcastReceiver() {
                     } else {
                         // Never create a canonical transaction from a low-confidence or untrusted parse.
                         // Financial-looking messages are sent to Review & Reconcile instead.
-                        if (SenderTrustManager.isFinancialLooking(fullBody)) {
+                        if (!nonTransactionalMessage && SenderTrustManager.isFinancialLooking(fullBody)) {
                             val reason = when {
                                 !parserResult.isTransaction ->
                                     "UNRECOGNIZED_FINANCIAL_SMS"
