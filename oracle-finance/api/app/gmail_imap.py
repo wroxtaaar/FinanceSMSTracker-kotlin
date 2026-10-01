@@ -351,7 +351,7 @@ class IMAPService:
 
         # Historical syncs use the requested date window directly. Normal syncs
         # keep the two-day overlap against the newest stored Gmail message.
-        if self.historical:
+        if getattr(self, "historical", False):
             search_suffix = query_criteria
         else:
             since = self._last_synced_since().strftime("%d-%b-%Y")
