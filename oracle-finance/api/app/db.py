@@ -88,7 +88,7 @@ def init_db():
             conn.execute("ALTER TABLE transactions ADD COLUMN duplicate_of TEXT")
 
         if "status" not in transaction_columns:
-            conn.execute("ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE')
+            conn.execute("ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'")
 
         account_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()
