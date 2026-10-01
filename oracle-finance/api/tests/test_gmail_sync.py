@@ -154,6 +154,35 @@ def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
     assert adjustment_count == 1
 
 
+
+def test_gmail_parser_rejects_promotional_annual_fee_email():
+    message = _message(
+        "promo-annual-fee",
+        "Dear Customer, enjoy an Annual Fee waiver for Axis Bank ACE Credit Card "
+        "XX1175 on annual spends of INR 200000 by 31-07-27. Visit https://axis.example for details.",
+        subject="Axis Bank Credit Card Offer",
+    )
+    assert parse_bank_email(message) is None
+
+
+def test_gmail_parser_rejects_failed_transaction_email():
+    message = _message(
+        "failed-1",
+        "HDFC Bank A/c XX9591 transaction of INR 500.00 failed due to network timeout.",
+        subject="HDFC Bank Transaction Alert",
+    )
+    assert parse_bank_email(message) is None
+
+
+def test_gmail_parser_rejects_future_payment_email():
+    message = _message(
+        "future-1",
+        "HDFC Bank A/c XX9591 INR 500.00 will be debited on 10-Oct-2026.",
+        subject="HDFC Bank Payment Notification",
+    )
+    assert parse_bank_email(message) is None
+
+
 def test_gmail_parser_rejects_content_without_account_identity():
     message = _message(
         "noise-1",
