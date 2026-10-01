@@ -12,10 +12,13 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
+import android.text.InputType
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.Spinner
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -37,6 +40,7 @@ import com.example.financesmstracker.truecaller.NotificationAccessHelper
 import com.example.financesmstracker.ui.TransactionAdapter
 
 import com.example.financesmstracker.integration.FinanceSyncClient
+import com.example.financesmstracker.integration.SyncSettings
 import com.example.financesmstracker.integration.OracleLedgerSummary
 import com.example.financesmstracker.integration.OracleAccount
 import java.util.concurrent.Executors
@@ -60,6 +64,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textViewSplitwiseReceivable: TextView
     private lateinit var buttonRefreshOracle: Button
     private lateinit var buttonViewAccounts: Button
+    private lateinit var buttonOracleSettings: Button
     private lateinit var buttonReviewReconcile: Button
 
     private val oracleExecutor = Executors.newSingleThreadExecutor()
@@ -135,6 +140,7 @@ class MainActivity : AppCompatActivity() {
         textViewSplitwiseReceivable = findViewById(R.id.textViewSplitwiseReceivable)
         buttonRefreshOracle = findViewById(R.id.buttonRefreshOracle)
         buttonViewAccounts = findViewById(R.id.buttonViewAccounts)
+        buttonOracleSettings = findViewById(R.id.buttonOracleSettings)
         buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
 
         buttonRefreshOracle.setOnClickListener {
@@ -143,6 +149,10 @@ class MainActivity : AppCompatActivity() {
 
         buttonViewAccounts.setOnClickListener {
             loadOracleAccounts()
+        }
+
+        buttonOracleSettings.setOnClickListener {
+            showOracleSettingsDialog()
         }
 
         buttonReviewReconcile.setOnClickListener {
@@ -257,6 +267,92 @@ class MainActivity : AppCompatActivity() {
                 .append("\n")
         }
         append("\n")
+    }
+
+    private fun showOracleSettingsDialog() {
+        val settings = SyncSettings(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 8, 48, 0)
+        }
+
+        val urlInput = EditText(this).apply {
+            hint = "Oracle URL"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine(true)
+            setText(settings.baseUrl())
+            selectAllOnFocus = false
+        }
+
+        val tokenInput = EditText(this).apply {
+            hint = "Oracle sync token"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+            if (settings.token().isNotBlank()) {
+                setText(settings.token())
+            }
+        }
+
+        container.addView(urlInput)
+        container.addView(tokenInput)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Oracle Sync Settings")
+            .setMessage("Use your private Tailscale/Serve URL. The token is stored only in this app's private preferences.")
+            .setView(container)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save & Test", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val baseUrl = urlInput.text.toString().trim().trimEnd('/')
+                val token = tokenInput.text.toString()
+
+                if (baseUrl.isBlank()) {
+                    urlInput.error = "Enter the Oracle URL"
+                    return@setOnClickListener
+                }
+
+                if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
+                    urlInput.error = "Use an http:// or https:// URL"
+                    return@setOnClickListener
+                }
+
+                if (token.isBlank()) {
+                    tokenInput.error = "Enter the Oracle sync token"
+                    return@setOnClickListener
+                }
+
+                settings.save(baseUrl, token)
+                dialog.dismiss()
+                loadOracleSummary()
+
+                oracleExecutor.execute {
+                    val result = FinanceSyncClient(this@MainActivity).fetchSummary()
+                    runOnUiThread {
+                        result.onSuccess {
+                            renderOracleSummary(it)
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Oracle settings saved and connection verified",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }.onFailure { error ->
+                            textViewOracleStatus.text =
+                                "Oracle ledger: " + (error.message ?: "Connection failed")
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Settings saved, but Oracle connection failed",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                }
+            }
+        }
+
+        dialog.show()
     }
 
     private fun updateReviewCount() {
