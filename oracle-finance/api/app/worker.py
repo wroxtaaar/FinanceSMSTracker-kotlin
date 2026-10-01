@@ -14,7 +14,10 @@ def main():
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    interval = max(900, int(os.getenv("FINANCE_SYNC_INTERVAL_SECONDS", "1800")))
+    # Email is the reliable fallback source, so poll it frequently enough to
+    # pick up a bank alert shortly after it arrives. Keep a 60s floor to avoid
+    # an accidental tight loop; production can override this with the env var.
+    interval = max(60, int(os.getenv("FINANCE_SYNC_INTERVAL_SECONDS", "300")))
     logger.info(
         "Finance worker started: interval=%ss gmail_enabled=%s splitwise_enabled=%s",
         interval,
