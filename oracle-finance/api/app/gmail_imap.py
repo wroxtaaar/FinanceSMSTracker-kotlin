@@ -45,7 +45,7 @@ def _message_to_payload(message):
 
     if message.is_multipart():
         parts = []
-        for part in message.iter_parts():
+        for part in message.get_payload() or []:
             child = _part_to_payload(part)
             if child is not None:
                 parts.append(child)
