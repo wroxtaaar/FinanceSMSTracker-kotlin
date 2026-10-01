@@ -246,6 +246,27 @@ def test_axis_bank_credit_email_is_parsed_from_trusted_sender():
     assert evidence.direction == "CREDIT"
 
 
+def test_axis_credit_with_available_balance_is_not_rejected():
+    message = _message(
+        "axis-credit-balance",
+        "Your A/c XX1234 has been credited with INR 1.00. "
+        "Transaction reference: 987654321. Available balance is INR 101.00.",
+        subject="Axis Bank Credit Alert",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Axis Bank Credit Alert"},
+        {"name": "From", "value": "alerts@axisbank.com"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, _ = parsed
+    assert transaction.amountMinor == 100
+    assert transaction.type == "CREDIT"
+    assert transaction.bank == "AXIS"
+
+
 def test_gmail_sync_reports_axis_credit_diagnostic():
     message = _message(
         "axis-credit-diagnostic",
