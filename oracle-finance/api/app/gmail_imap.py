@@ -176,6 +176,14 @@ class IMAPService:
         self.username = os.getenv("GMAIL_USERNAME", "").strip()
         self.password = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "").strip()
         self.folder = os.getenv("GMAIL_IMAP_FOLDER", "INBOX")
+        # Manual Gmail checks must finish quickly enough for the Android client.
+        # Keep the scan focused on the newest messages; already-processed
+        # messages are skipped by ingest_messages before their full body is
+        # fetched. The window can be increased with an environment variable.
+        self.max_results = max(
+            1,
+            min(500, int(os.getenv("GMAIL_IMAP_MAX_RESULTS", "100"))),
+        )
 
         if not self.username:
             raise RuntimeError("GMAIL_USERNAME is not configured")
@@ -211,10 +219,10 @@ class IMAPService:
             raise RuntimeError("Gmail IMAP search failed")
 
         raw_uids = data[0].split() if data and data[0] else []
-        # Keep a larger IMAP window than the Gmail API page size so a valid
-        # older bank alert is not hidden merely because the inbox has more
-        # than 100 recent messages.
-        imap_limit = max(max_results, 500)
+        # Gmail API defaults to 100 messages and permits up to 500. For IMAP,
+        # use the configured bounded window so a manual Android check does not
+        # spend tens of seconds fetching hundreds of full messages.
+        imap_limit = min(max_results, self.max_results)
         uids = [uid.decode("ascii") for uid in raw_uids[-imap_limit:]]
         uids.reverse()
 
