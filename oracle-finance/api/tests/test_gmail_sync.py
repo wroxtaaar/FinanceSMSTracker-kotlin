@@ -141,12 +141,15 @@ def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
     # The parser/ingestor should recognize the Gmail copy as the same
     # transaction and avoid a second balance adjustment.
     service = FakeService([gmail_message])
-    ingest_messages(service, query="newer_than:30d")
+    first = ingest_messages(service, query="newer_than:30d")
+    second = ingest_messages(service, query="newer_than:30d")
 
-    result = ingest_messages(service, query="newer_than:30d")
-
-    assert result["parsedTransactions"] == 1
-    assert result["duplicateTransactions"] == 1
+    # The first pass parses and reconciles the Gmail copy. The second pass
+    # must treat the now-PARSED message as terminal and do no work.
+    assert first["parsedTransactions"] == 1
+    assert first["duplicateTransactions"] == 1
+    assert second["parsedTransactions"] == 0
+    assert second["alreadyProcessed"] == 1
 
     with connection() as conn:
         balance = conn.execute(
