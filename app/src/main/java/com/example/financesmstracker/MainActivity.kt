@@ -67,6 +67,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var buttonRefreshOracle: Button
     private lateinit var buttonViewAccounts: Button
     private lateinit var buttonOracleSettings: Button
+    private lateinit var buttonGmailSync: Button
     private lateinit var buttonReviewReconcile: Button
     private lateinit var buttonEditSplitwise: Button
     private lateinit var buttonEditBankAccounts: Button
@@ -146,6 +147,7 @@ class MainActivity : AppCompatActivity() {
         buttonRefreshOracle = findViewById(R.id.buttonRefreshOracle)
         buttonViewAccounts = findViewById(R.id.buttonViewAccounts)
         buttonOracleSettings = findViewById(R.id.buttonOracleSettings)
+        buttonGmailSync = findViewById(R.id.buttonGmailSync)
         buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
         buttonEditSplitwise = findViewById(R.id.buttonEditSplitwise)
         buttonEditBankAccounts = findViewById(R.id.buttonEditBankAccounts)
@@ -173,6 +175,10 @@ class MainActivity : AppCompatActivity() {
 
         buttonOracleSettings.setOnClickListener {
             showOracleSettingsDialog()
+        }
+
+        buttonGmailSync.setOnClickListener {
+            triggerManualGmailSync()
         }
 
         buttonReviewReconcile.setOnClickListener {
@@ -523,6 +529,39 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
+    }
+
+    private fun triggerManualGmailSync() {
+        buttonGmailSync.isEnabled = false
+        buttonGmailSync.text = "Checking..."
+
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).triggerGmailSync()
+
+            runOnUiThread {
+                buttonGmailSync.isEnabled = true
+                buttonGmailSync.text = "Gmail"
+
+                result.onSuccess { createdEvidence ->
+                    loadOracleSummary()
+                    Toast.makeText(
+                        this@MainActivity,
+                        if (createdEvidence > 0) {
+                            "Gmail checked: $createdEvidence new transaction email(s) found"
+                        } else {
+                            "Gmail checked: no new transaction emails"
+                        },
+                        Toast.LENGTH_LONG
+                    ).show()
+                }.onFailure { error ->
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Gmail check failed: " + (error.message ?: "Unavailable"),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun updateReviewCount() {
