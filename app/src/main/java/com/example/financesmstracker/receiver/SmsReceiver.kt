@@ -48,7 +48,14 @@ class SmsReceiver : BroadcastReceiver() {
                     val repository = TransactionRepository(dbHelper)
                     val smsHash = HashUtil.sha256(fullBody)
 
-                    if (parserResult.isTransaction) {
+                    val shouldCreateCanonicalTransaction =
+                        parserResult.isTransaction &&
+                        trustStatus == SenderTrustStatus.TRUSTED &&
+                        parserResult.confidence >= 0.90f &&
+                        parserResult.amountPaise > 0L &&
+                        parserResult.transactionType != TransactionType.UNKNOWN
+
+                    if (shouldCreateCanonicalTransaction) {
                         val memoryKey = CategoryMemoryKey.from(parserResult)
                         val rememberedCategory = memoryKey?.let { repository.getCategoryForMemoryKey(it) }
                         val category = rememberedCategory ?: TransactionCategorizer.categorize(parserResult, fullBody)
@@ -129,13 +136,25 @@ class SmsReceiver : BroadcastReceiver() {
                             Log.d(TAG, "Duplicate SMS skipped (hash already exists): $smsHash")
                         }
                     } else {
-                        // Parser failed or not a transaction - check if financial-looking from unknown/untrusted sender for review
-                        if (trustStatus != SenderTrustStatus.TRUSTED && SenderTrustManager.isFinancialLooking(fullBody)) {
+                        // Never create a canonical transaction from a low-confidence or untrusted parse.
+                        // Financial-looking messages are sent to Review & Reconcile instead.
+                        if (SenderTrustManager.isFinancialLooking(fullBody)) {
+                            val reason = when {
+                                !parserResult.isTransaction ->
+                                    "UNRECOGNIZED_FINANCIAL_SMS"
+                                trustStatus != SenderTrustStatus.TRUSTED ->
+                                    "UNTRUSTED_FINANCIAL_SMS"
+                                parserResult.confidence < 0.90f ->
+                                    "LOW_CONFIDENCE_FINANCIAL_SMS"
+                                else ->
+                                    "INCOMPLETE_FINANCIAL_SMS"
+                            }
+
                             val unrecognized = UnrecognizedSms(
                                 sender = sender,
                                 receivedAt = timestamp,
                                 contentHash = smsHash,
-                                reason = "UNRECOGNIZED_FINANCIAL_SMS_FROM_UNKNOWN_SENDER"
+                                reason = reason
                             )
                             repository.insertUnrecognizedSms(unrecognized)
                         }
