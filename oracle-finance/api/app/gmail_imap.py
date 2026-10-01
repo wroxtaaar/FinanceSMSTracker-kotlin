@@ -212,61 +212,121 @@ class IMAPService:
     def users(self):
         return _Users(self)
 
+    def _last_synced_since(self):
+        """Return a small overlap window based on the newest stored Gmail email.
+
+        IMAP SINCE is date-based, so keep a two-day overlap. This makes the
+        incremental scan resilient to a short outage while avoiding a full
+        mailbox scan on every manual check.
+        """
+        initial_days = max(
+            1,
+            min(90, int(os.getenv("GMAIL_IMAP_INITIAL_DAYS", "30"))),
+        )
+        fallback = datetime.now(timezone.utc) - timedelta(days=initial_days)
+
+        try:
+            from .db import connection
+
+            with connection() as conn:
+                row = conn.execute(
+                    "SELECT MAX(internal_date) AS max_date "
+                    "FROM gmail_messages"
+                ).fetchone()
+            max_date = int(row["max_date"]) if row and row["max_date"] else 0
+            if max_date <= 0:
+                return fallback
+            latest = datetime.fromtimestamp(max_date / 1000, tz=timezone.utc)
+            return latest - timedelta(days=2)
+        except Exception:
+            # Mail fetching must remain usable even if the optional cursor
+            # lookup is unavailable during startup/migration.
+            return fallback
+
     def _list_messages(self, query, max_results):
-        search_criteria = query_to_imap_search(query)
-        status, data = self._imap.uid("SEARCH", None, search_criteria)
-        if status != "OK":
-            raise RuntimeError("Gmail IMAP search failed")
+        # Do not scan the general inbox and then scan bank domains again.
+        # Instead use explicit sender rules, each scoped by an incremental
+        # SINCE window. This mirrors the efficient two-phase IMAP pattern used
+        # by established finance-mail importers.
+        since = self._last_synced_since().strftime("%d-%b-%Y")
 
-        raw_uids = data[0].split() if data and data[0] else []
-        # Keep the newest general messages bounded, but also include recent
-        # messages from our supported bank sender domains. This matters when
-        # the inbox is busy: a bank alert can be older than the newest 100
-        # messages and would otherwise never reach the parser.
-        imap_limit = min(max_results, self.max_results)
-        uid_set = {uid.decode("ascii") for uid in raw_uids[-imap_limit:]}
-
-        bank_senders = (
+        sender_rules = (
+            # Axis — account/card transaction alerts.
             "alerts@axis.bank.in",
+            "alerts@axisbank.com",
+            # ICICI — credit-card transaction alerts.
             "credit_cards@icici.bank.in",
+            "credit_cards@icicibank.com",
+            "customernotification@icici.bank.in",
+            "customercare@icicibank.com",
+            # HDFC.
+            "alerts@hdfcbank.net",
+            "alerts@hdfcbank.bank.in",
+            # SBI Card / BillDesk.
+            "onlinesbicard@sbicard.com",
+            "paynet@billdesk.in",
+            # HSBC.
+            "hsbc@mail.hsbc.co.in",
+            "alerts@mail.hsbc.co.in",
+            # IndusInd.
+            "transactionalert@indusind.com",
+            "indusind_bank@indusind.com",
+            "IndusInd_Bank@indusind.com",
         )
-        # Search the two exact sender addresses that are currently known to be
-        # missing from the normal/newest-message scan. Do not run a separate
-        # whole-mailbox SEARCH for every supported bank domain: that can be
-        # surprisingly expensive on a busy Gmail mailbox and caused the manual
-        # Android request to hit its HTTP timeout.
-        #
-        # The newest general messages already cover the normal bank flow for the
-        # other supported banks. These exact-sender searches are additionally
-        # bounded to the same requested date window and only contribute their
-        # newest 25 UIDs.
-        for sender in bank_senders:
-            if search_criteria == "ALL":
-                sender_search = f'FROM "{sender}"'
-            else:
-                inner = search_criteria[1:-1]
-                sender_search = f'(FROM "{sender}" {inner})'
-            status, sender_data = self._imap.uid(
-                "SEARCH", None, sender_search
-            )
-            if status == "OK" and sender_data and sender_data[0]:
-                sender_uids = [uid.decode("ascii") for uid in sender_data[0].split()]
-                uid_set.update(sender_uids[-25:])
 
-        uids = sorted(uid_set, key=lambda value: int(value), reverse=True)
-        messages = []
+        per_sender_limit = max(
+            1,
+            min(50, int(os.getenv("GMAIL_IMAP_PER_SENDER_LIMIT", "25"))),
+        )
+        uid_to_sender = {}
+
+        for sender in sender_rules:
+            criteria = f'FROM "{sender}" SINCE {since}'
+            try:
+                status, data = self._imap.uid("SEARCH", None, criteria)
+            except (OSError, imaplib.IMAP4.error) as exc:
+                raise RuntimeError(
+                    f"Gmail IMAP sender search failed for {sender}: {exc}"
+                ) from exc
+
+            if status != "OK":
+                raise RuntimeError(
+                    f"Gmail IMAP sender search failed for {sender}"
+                )
+
+            raw_uids = data[0].split() if data and data[0] else []
+            for uid in raw_uids[-per_sender_limit:]:
+                uid_text = uid.decode("ascii")
+                # The same UID should only exist once in the selected folder.
+                uid_to_sender.setdefault(uid_text, sender)
+
+        uids = sorted(
+            uid_to_sender,
+            key=lambda value: int(value),
+            reverse=True,
+        )
         if not uids:
-            return {"messages": messages}
+            return {"messages": []}
 
-        # Fetch lightweight headers for the whole bounded UID set in one IMAP
-        # request. This is much cheaper than downloading 100 full messages.
-        status, header_data = self._imap.uid(
-            "FETCH",
-            ",".join(uids),
-            "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])",
-        )
+        # Phase 1: batch-fetch only lightweight headers for candidate UIDs.
+        # Full RFC822 is fetched later only for messages that are not already
+        # terminally processed by ingest_messages.
         headers_by_uid = {}
-        if status == "OK":
+        batch_size = max(
+            50,
+            min(500, int(os.getenv("GMAIL_IMAP_HEADER_BATCH_SIZE", "500"))),
+        )
+
+        for batch_start in range(0, len(uids), batch_size):
+            batch = uids[batch_start : batch_start + batch_size]
+            status, header_data = self._imap.uid(
+                "FETCH",
+                ",".join(batch),
+                "(X-GM-MSGID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])",
+            )
+            if status != "OK":
+                raise RuntimeError("Gmail IMAP header fetch failed")
+
             for item in header_data or []:
                 if not (
                     isinstance(item, tuple)
@@ -275,20 +335,33 @@ class IMAPService:
                     and isinstance(item[1], bytes)
                 ):
                     continue
-                match = re.search(rb"(\d+) FETCH", item[0])
-                if not match:
+
+                uid_match = re.search(rb"\bUID\s+(\d+)", item[0])
+                if not uid_match:
+                    # Some Gmail responses expose the sequence number but not
+                    # UID in the metadata line. Fall back to the first numeric
+                    # token immediately before FETCH.
+                    uid_match = re.search(rb"(\d+) FETCH", item[0])
+                if not uid_match:
                     continue
-                uid = match.group(1).decode("ascii")
+
+                uid = uid_match.group(1).decode("ascii")
                 header_message = email.message_from_bytes(item[1])
                 headers_by_uid[uid] = {
-                    "from": _decode_header_value(header_message.get("From", "")),
-                    "subject": _decode_header_value(header_message.get("Subject", "")),
+                    "from": _decode_header_value(
+                        header_message.get("From", "")
+                    ),
+                    "subject": _decode_header_value(
+                        header_message.get("Subject", "")
+                    ),
                 }
 
+        messages = []
         for uid in uids:
             item = {"id": f"{self.uidvalidity}:{uid}"}
             item.update(headers_by_uid.get(uid, {}))
             messages.append(item)
+
         return {"messages": messages}
 
     def _get_message(self, message_id):
