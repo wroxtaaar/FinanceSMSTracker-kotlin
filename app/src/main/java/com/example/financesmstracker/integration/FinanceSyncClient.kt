@@ -189,8 +189,24 @@ class SyncSettings(context: Context) {
             .apply()
     }
 
+    fun hasSplitwiseGroups(): Boolean =
+        prefs.contains(KEY_SPLITWISE_GROUP_1) || prefs.contains(KEY_SPLITWISE_GROUP_2)
+
+    fun splitwiseGroup1Minor(): Long = prefs.getLong(KEY_SPLITWISE_GROUP_1, 0L)
+
+    fun splitwiseGroup2Minor(): Long = prefs.getLong(KEY_SPLITWISE_GROUP_2, 0L)
+
+    fun saveSplitwiseGroups(group1Minor: Long, group2Minor: Long) {
+        prefs.edit()
+            .putLong(KEY_SPLITWISE_GROUP_1, group1Minor)
+            .putLong(KEY_SPLITWISE_GROUP_2, group2Minor)
+            .apply()
+    }
+
     companion object {
         private const val KEY_BASE_URL = "oracle_base_url"
         private const val KEY_TOKEN = "oracle_sync_token"
+        private const val KEY_SPLITWISE_GROUP_1 = "splitwise_group_1_minor"
+        private const val KEY_SPLITWISE_GROUP_2 = "splitwise_group_2_minor"
     }
 }
