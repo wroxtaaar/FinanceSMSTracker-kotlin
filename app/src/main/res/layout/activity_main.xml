@@ -85,7 +85,7 @@
             android:id="@+id/textViewSplitwiseReceivable"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Splitwise receivable: —"
+            android:text="Splitwise owed to you: —"
             android:textSize="14sp" />
 
         <Button
