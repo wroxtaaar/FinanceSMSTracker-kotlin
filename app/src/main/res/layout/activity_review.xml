@@ -53,7 +53,8 @@
         app:layout_constraintBottom_toTopOf="@id/textViewUnrecognizedSection"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/textViewEvidenceSection" />
+        app:layout_constraintTop_toBottomOf="@id/textViewEvidenceSection"
+        app:layout_constraintVertical_bias="0.5" />
 
     <TextView
         android:id="@+id/textViewNoReviews"
@@ -74,14 +75,15 @@
         android:layout_marginTop="10dp"
         android:text="Unrecognized financial SMS"
         android:textStyle="bold"
-        app:layout_constraintBottom_toTopOf="@id/recyclerViewUnrecognized"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/recyclerViewReviews" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerViewUnrecognized"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_marginTop="6dp"
+        android:nestedScrollingEnabled="false"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
