@@ -30,6 +30,24 @@ object FinanceSyncBridge {
         enqueue(context, emptyList(), listOf(evidence))
     }
 
+    fun enqueueVoidedTransaction(
+        context: Context,
+        transactionId: Long
+    ) {
+        val appContext = context.applicationContext
+        executor.execute {
+            runCatching {
+                val service = FinanceSyncService(appContext)
+                service.enqueue(
+                    transactions = emptyList(),
+                    evidence = emptyList(),
+                    voidedTransactionIds = listOf(transactionId)
+                )
+                service.flush()
+            }
+        }
+    }
+
     private fun enqueue(
         context: Context,
         transactions: List<Transaction>,
