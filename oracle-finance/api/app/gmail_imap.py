@@ -322,7 +322,7 @@ class IMAPService:
             status, header_data = self._imap.uid(
                 "FETCH",
                 ",".join(batch),
-                "(X-GM-MSGID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])",
+                "(UID X-GM-MSGID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])",
             )
             if status != "OK":
                 raise RuntimeError("Gmail IMAP header fetch failed")
