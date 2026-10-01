@@ -8,20 +8,13 @@ class HdfcSmsParser : SmsParser {
             return null
         }
 
-        val lowerBody = messageBody.lowercase()
-        if (lowerBody.contains("otp") || lowerBody.contains("one time password") || 
-            lowerBody.contains("verification code") || lowerBody.contains("promotional") ||
-            lowerBody.contains("offer") || lowerBody.contains("reward points") ||
-            lowerBody.contains("congratulations") || lowerBody.contains("loan") ||
-            lowerBody.contains("failed") || lowerBody.contains("pending") ||
-            lowerBody.contains("scheduled") || lowerBody.contains("mandate") ||
-            lowerBody.contains("bonus") || lowerBody.contains("off")) {
-            if (!lowerBody.contains("debited") && !lowerBody.contains("credited") && !lowerBody.contains("spent") && !lowerBody.contains("received") && !lowerBody.contains("transferred")) {
-                return ParserResult(isTransaction = false)
-            }
+        if (SenderTrustManager.isNonTransactionalFinancialMessage(messageBody)) {
+            return ParserResult(isTransaction = false)
         }
 
-        val amountPaise = AmountParser.parseAmountToPaise(messageBody) ?: return null
+        val lowerBody = messageBody.lowercase()
+
+
         val currency = AmountParser.parseCurrency(messageBody)
 
         val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") || 
