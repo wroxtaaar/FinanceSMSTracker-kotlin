@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS splitwise_receivables (
   id TEXT PRIMARY KEY, description TEXT NOT NULL, amount_minor INTEGER NOT NULL, currency TEXT NOT NULL,
   splitwise_expense_id TEXT, status TEXT NOT NULL DEFAULT 'OPEN', created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS manual_splitwise_total (
+  currency TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS internal_transfers (
   id TEXT PRIMARY KEY, debit_transaction_id TEXT NOT NULL, credit_transaction_id TEXT NOT NULL,
   currency TEXT NOT NULL, amount_minor INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'MATCHED',
