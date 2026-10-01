@@ -262,12 +262,18 @@ class IMAPService:
             return fallback
 
     def _list_messages(self, query, max_results):
-        # Do not scan the general inbox and then scan bank domains again.
-        # Instead use explicit sender rules, each scoped by an incremental
-        # SINCE window. This mirrors the efficient two-phase IMAP pattern used
-        # by established finance-mail importers.
+        # Keep the optimized per-sender search pattern, but make the configured
+        # Gmail query part of the actual IMAP SEARCH. The incremental SINCE
+        # window is retained as an additional lower bound so normal syncs stay
+        # bounded while explicit date queries are never silently ignored.
         imap = self._connect()
         since = self._last_synced_since().strftime("%d-%b-%Y")
+        query_criteria = query_to_imap_search(query)
+        incremental_criteria = f'SINCE "{since}"'
+        if query_criteria == "ALL":
+            search_suffix = incremental_criteria
+        else:
+            search_suffix = f'{query_criteria[1:-1]} {incremental_criteria}'
 
         sender_rules = (
             # Axis — account/card transaction alerts.
@@ -298,9 +304,10 @@ class IMAPService:
             min(50, int(os.getenv("GMAIL_IMAP_PER_SENDER_LIMIT", "25"))),
         )
         uid_to_sender = {}
+        sender_search_counts = {}
 
         for sender in sender_rules:
-            criteria = f'FROM "{sender}" SINCE {since}'
+            criteria = f'(FROM "{sender}" {search_suffix})'
             try:
                 status, data = imap.uid("SEARCH", None, criteria)
             except (OSError, imaplib.IMAP4.error) as exc:
@@ -314,6 +321,7 @@ class IMAPService:
                 )
 
             raw_uids = data[0].split() if data and data[0] else []
+            sender_search_counts[sender] = len(raw_uids)
             for uid in raw_uids[-per_sender_limit:]:
                 uid_text = uid.decode("ascii")
                 # The same UID should only exist once in the selected folder.
@@ -324,8 +332,6 @@ class IMAPService:
             key=lambda value: int(value),
             reverse=True,
         )
-        if not uids:
-            return {"messages": []}
 
         # Phase 1: batch-fetch only lightweight headers for candidate UIDs.
         # Full RFC822 is fetched later only for messages that are not already
@@ -385,16 +391,19 @@ class IMAPService:
                 sender_counts[sender] = sender_counts.get(sender, 0) + 1
             messages.append(item)
 
-        # Return compact fetch diagnostics with the page. This makes a manual
-        # Gmail check able to distinguish "sender search found nothing" from
-        # "message was fetched but parser rejected it", without returning
-        # message bodies or credentials.
+        # Return compact fetch diagnostics even when no UIDs matched. This
+        # makes a manual Gmail check distinguish "search found nothing" from
+        # "header fetch returned nothing" without exposing message bodies or
+        # credentials.
         return {
             "messages": messages,
             "diagnostics": {
-                "folder": self.folder,
-                "since": since,
-                "candidateCount": len(messages),
+                "folder": getattr(self, "folder", ""),
+                "query": (query or "").strip(),
+                "searchSuffix": search_suffix,
+                "senderSearchCounts": sender_search_counts,
+                "candidateUidCount": len(uids),
+                "headerCount": len(headers_by_uid),
                 "senderCounts": sender_counts,
             },
         }
