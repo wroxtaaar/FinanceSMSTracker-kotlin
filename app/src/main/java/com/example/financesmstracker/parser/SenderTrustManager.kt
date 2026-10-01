@@ -31,6 +31,25 @@ object SenderTrustManager {
         return SenderTrustStatus.UNTRUSTED
     }
 
+    fun isNonTransactionalFinancialMessage(messageBody: String): Boolean {
+        val lower = messageBody.lowercase()
+
+        return lower.contains("annual fee waiver") ||
+            lower.contains("annual fee") && lower.contains("spend") ||
+            lower.contains("spends of") ||
+            lower.contains("spend of") ||
+            lower.contains("spend rs") ||
+            lower.contains("spend inr") ||
+            lower.contains("reward points") ||
+            lower.contains("cashback offer") ||
+            lower.contains("limited period offer") ||
+            lower.contains("special offer") ||
+            lower.contains("pre-approved") ||
+            lower.contains("eligible for") && lower.contains("credit card") ||
+            lower.contains("enjoy") && lower.contains("credit card") ||
+            lower.contains("visit") && lower.contains("for details")
+    }
+
     fun isFinancialLooking(messageBody: String): Boolean {
         val lower = messageBody.lowercase()
         val hasKeyword = lower.contains("debited") || lower.contains("credited") || 
