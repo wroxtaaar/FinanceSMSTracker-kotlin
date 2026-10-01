@@ -714,6 +714,9 @@ class MainActivity : AppCompatActivity() {
         val buttonSaveCategory =
             dialogView.findViewById<Button>(R.id.buttonSaveCategory)
 
+        val buttonVoidTransaction =
+            dialogView.findViewById<Button>(R.id.buttonVoidTransaction)
+
         val rupees = tx.amountPaise / 100.0
 
         detailTextAmount.text =
@@ -815,6 +818,24 @@ class MainActivity : AppCompatActivity() {
         } else {
             checkboxRememberPayee.visibility = View.GONE
             checkboxRememberPayee.isChecked = false
+        }
+
+        buttonVoidTransaction.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Void Transaction?")
+                .setMessage("This removes the transaction from this phone's history. It does not delete the original SMS.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Void") { _, _ ->
+                    val updated = repository.voidTransaction(tx.id)
+                    if (updated > 0) {
+                        dialog.dismiss()
+                        loadTransactions()
+                        Toast.makeText(this, "Transaction voided", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this, "Could not void transaction", Toast.LENGTH_LONG).show()
+                    }
+                }
+                .show()
         }
 
         buttonSaveCategory.setOnClickListener {
