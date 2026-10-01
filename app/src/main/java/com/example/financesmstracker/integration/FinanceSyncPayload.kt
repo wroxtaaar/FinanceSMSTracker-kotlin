@@ -10,7 +10,8 @@ package com.example.financesmstracker.integration
 object FinanceSyncPayload {
     fun build(
         transactions: List<SyncTransaction>,
-        evidence: List<SyncEvidence>
+        evidence: List<SyncEvidence>,
+        voidedTransactionIds: List<Long> = emptyList()
     ): String {
         val out = StringBuilder(256)
         out.append("{")
@@ -58,6 +59,13 @@ object FinanceSyncPayload {
             require(e.confidence.isFinite()) { "evidence confidence must be finite" }
             out.append(",\"confidence\":").append(e.confidence)
             out.append("}")
+        }
+        out.append("]")
+
+        out.append(",\"voidedTransactionIds\":[")
+        voidedTransactionIds.forEachIndexed { index, id ->
+            if (index > 0) out.append(",")
+            out.append(jsonString(id.toString()))
         }
         out.append("]")
         out.append("}")
