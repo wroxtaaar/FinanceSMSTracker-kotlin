@@ -60,6 +60,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textViewSplitwiseReceivable: TextView
     private lateinit var buttonRefreshOracle: Button
     private lateinit var buttonViewAccounts: Button
+    private lateinit var buttonReviewReconcile: Button
 
     private val oracleExecutor = Executors.newSingleThreadExecutor()
 
@@ -134,6 +135,7 @@ class MainActivity : AppCompatActivity() {
         textViewSplitwiseReceivable = findViewById(R.id.textViewSplitwiseReceivable)
         buttonRefreshOracle = findViewById(R.id.buttonRefreshOracle)
         buttonViewAccounts = findViewById(R.id.buttonViewAccounts)
+        buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
 
         buttonRefreshOracle.setOnClickListener {
             loadOracleSummary()
@@ -141,6 +143,10 @@ class MainActivity : AppCompatActivity() {
 
         buttonViewAccounts.setOnClickListener {
             loadOracleAccounts()
+        }
+
+        buttonReviewReconcile.setOnClickListener {
+            startActivity(Intent(this, ReviewActivity::class.java))
         }
 
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -251,6 +257,15 @@ class MainActivity : AppCompatActivity() {
                 .append("\n")
         }
         append("\n")
+    }
+
+    private fun updateReviewCount() {
+        val count = repository.getUnresolvedEvidenceCount()
+        buttonReviewReconcile.text = if (count > 0) {
+            "Review & Reconcile ($count)"
+        } else {
+            "Review & Reconcile"
+        }
     }
 
     private fun loadOracleSummary() {
@@ -490,6 +505,7 @@ class MainActivity : AppCompatActivity() {
         val transactions = repository.getAllTransactions()
 
         adapter.updateData(transactions)
+        updateReviewCount()
 
         if (transactions.isEmpty()) {
             recyclerView.visibility = View.GONE
