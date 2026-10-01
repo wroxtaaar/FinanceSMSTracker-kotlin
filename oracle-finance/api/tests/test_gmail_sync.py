@@ -152,3 +152,36 @@ def test_gmail_duplicate_of_sms_does_not_reduce_balance_twice():
 
     assert balance == 75000
     assert adjustment_count == 1
+
+
+def test_gmail_parser_rejects_content_without_account_identity():
+    message = _message(
+        "noise-1",
+        "Today: INR 55.00 spent on your card. Learn more in the references-center.",
+        subject="Generic Card Newsletter",
+    )
+
+    assert parse_bank_email(message) is None
+
+
+def test_gmail_parser_rejects_non_transaction_reference_text():
+    message = _message(
+        "noise-2",
+        "HDFC Bank A/c XX9591. INR 5.00. Visit references-center for formatting.",
+        subject="HDFC Account Information",
+    )
+
+    assert parse_bank_email(message) is None
+
+
+def test_gmail_parser_extracts_numeric_reference_only():
+    message = _message(
+        "ref-1",
+        "HDFC Bank A/c XX9591 debited INR 5.00. Ref UPI-12345.",
+    )
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, _ = parsed
+    assert transaction.reference == "UPI-12345"
