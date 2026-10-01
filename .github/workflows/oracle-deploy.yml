@@ -85,19 +85,21 @@ jobs:
 
       - name: 5. Verify VPS commit
         uses: appleboy/ssh-action@v1.2.2
+        env:
+          DEPLOY_COMMIT: ${{ github.sha }}
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          envs: DEPLOY_COMMIT
           script: |
             set -e
             cd ~/FinanceSMSTracker-kotlin
-            EXPECTED="$GITHUB_SHA"
             ACTUAL="$(git rev-parse HEAD)"
-            echo "Expected commit: $EXPECTED"
+            echo "Expected commit: $DEPLOY_COMMIT"
             echo "Actual commit:   $ACTUAL"
-            test "$ACTUAL" = "$EXPECTED"
+            test "$ACTUAL" = "$DEPLOY_COMMIT"
 
       - name: 6. Build finance services
         uses: appleboy/ssh-action@v1.2.2
