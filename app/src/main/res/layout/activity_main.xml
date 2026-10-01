@@ -191,7 +191,7 @@
             android:minHeight="0dp"
             android:paddingStart="2dp"
             android:paddingEnd="2dp"
-            android:text="Gmail" />
+            android:text="Check Gmail" />
 
         <Button
             android:id="@+id/buttonReviewReconcile"
