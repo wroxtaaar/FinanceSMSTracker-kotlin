@@ -144,6 +144,7 @@ class SenderTrustAndReviewTest {
 
 
 
+
     @Test
     fun axisAnnualFeeWaiverIsNotTransactional() {
         val message = "Dear Customer, enjoy an Annual Fee waiver on your Axis Bank ACE Credit Card XX1175 on annual spends of INR 200000 by 31-07-27. Visit https://ccm.axis.bank.in/ for details."
