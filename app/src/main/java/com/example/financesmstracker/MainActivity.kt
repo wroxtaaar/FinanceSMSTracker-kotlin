@@ -63,6 +63,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textViewBankCash: TextView
     private lateinit var textViewCardOutstanding: TextView
     private lateinit var textViewSplitwiseReceivable: TextView
+    private lateinit var buttonViewAccounts: Button
     private lateinit var buttonReviewReconcile: Button
     private lateinit var buttonEditSplitwise: Button
     private lateinit var buttonEditBankAccounts: Button
@@ -139,6 +140,7 @@ class MainActivity : AppCompatActivity() {
         textViewBankCash = findViewById(R.id.textViewBankCash)
         textViewCardOutstanding = findViewById(R.id.textViewCardOutstanding)
         textViewSplitwiseReceivable = findViewById(R.id.textViewSplitwiseReceivable)
+        buttonViewAccounts = findViewById(R.id.buttonViewAccounts)
         buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
         buttonEditSplitwise = findViewById(R.id.buttonEditSplitwise)
         buttonEditBankAccounts = findViewById(R.id.buttonEditBankAccounts)
