@@ -96,6 +96,20 @@
             android:text="Edit Splitwise Owed" />
 
         <Button
+            android:id="@+id/buttonEditBankAccounts"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Edit Bank Accounts" />
+
+        <Button
+            android:id="@+id/buttonEditCreditCards"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Edit Credit Cards" />
+
+        <Button
             android:id="@+id/buttonRefreshOracle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
