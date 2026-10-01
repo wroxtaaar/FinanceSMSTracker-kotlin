@@ -190,24 +190,42 @@ class IMAPService:
         if not self.password:
             raise RuntimeError("GMAIL_APP_PASSWORD is not configured")
 
-        # Bound the network operations so a slow Gmail IMAP operation fails fast instead of\n        # holding the Android manual-sync request until its HTTP timeout.\n        imap_timeout = max(5, min(30, int(os.getenv("GMAIL_IMAP_TIMEOUT_SECONDS", "20"))))\n        self._imap = imaplib.IMAP4_SSL(self.host, self.port, timeout=imap_timeout)
-        try:
-            self._imap.login(self.username, self.password)
-            status, _ = self._imap.select(self.folder, readonly=True)
-            if status != "OK":
-                raise RuntimeError(f"Could not select Gmail folder: {self.folder}")
-        except Exception:
-            try:
-                self._imap.logout()
-            except Exception:
-                pass
-            raise
+        self._imap = None
+        self.uidvalidity = "0"
+        self._connect()
 
-        response_code, uidvalidity_data = self._imap.response("UIDVALIDITY")
-        if response_code == "UIDVALIDITY" and uidvalidity_data:
-            self.uidvalidity = uidvalidity_data[-1].decode(errors="replace")
-        else:
-            self.uidvalidity = "0"
+    def _connect(self):
+        """Create and initialize the IMAP connection if it is not present."""
+        if self._imap is not None:
+            return self._imap
+
+        imap_timeout = max(
+            5,
+            min(30, int(os.getenv("GMAIL_IMAP_TIMEOUT_SECONDS", "20"))),
+        )
+        imap = None
+        try:
+            imap = imaplib.IMAP4_SSL(
+                self.host, self.port, timeout=imap_timeout
+            )
+            imap.login(self.username, self.password)
+            status, _ = imap.select(self.folder, readonly=True)
+            if status != "OK":
+                raise RuntimeError(
+                    f"Could not select Gmail folder: {self.folder}"
+                )
+            response_code, uidvalidity_data = imap.response("UIDVALIDITY")
+            if response_code == "UIDVALIDITY" and uidvalidity_data:
+                self.uidvalidity = uidvalidity_data[-1].decode(errors="replace")
+            self._imap = imap
+            return imap
+        except Exception as exc:
+            if imap is not None:
+                try:
+                    imap.logout()
+                except Exception:
+                    pass
+            raise RuntimeError(f"Gmail IMAP connection failed: {exc}") from exc
 
     def users(self):
         return _Users(self)
@@ -248,6 +266,7 @@ class IMAPService:
         # Instead use explicit sender rules, each scoped by an incremental
         # SINCE window. This mirrors the efficient two-phase IMAP pattern used
         # by established finance-mail importers.
+        imap = self._connect()
         since = self._last_synced_since().strftime("%d-%b-%Y")
 
         sender_rules = (
@@ -283,7 +302,7 @@ class IMAPService:
         for sender in sender_rules:
             criteria = f'FROM "{sender}" SINCE {since}'
             try:
-                status, data = self._imap.uid("SEARCH", None, criteria)
+                status, data = imap.uid("SEARCH", None, criteria)
             except (OSError, imaplib.IMAP4.error) as exc:
                 raise RuntimeError(
                     f"Gmail IMAP sender search failed for {sender}: {exc}"
@@ -319,7 +338,7 @@ class IMAPService:
 
         for batch_start in range(0, len(uids), batch_size):
             batch = uids[batch_start : batch_start + batch_size]
-            status, header_data = self._imap.uid(
+            status, header_data = imap.uid(
                 "FETCH",
                 ",".join(batch),
                 "(UID X-GM-MSGID BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])",
@@ -373,7 +392,8 @@ class IMAPService:
         if uidvalidity != self.uidvalidity:
             raise RuntimeError("Gmail IMAP UIDVALIDITY changed")
 
-        status, data = self._imap.uid("FETCH", uid, "(RFC822)")
+        imap = self._connect()
+        status, data = imap.uid("FETCH", uid, "(RFC822)")
         if status != "OK":
             raise RuntimeError(f"Gmail IMAP fetch failed for UID {uid}")
 
@@ -398,11 +418,15 @@ class IMAPService:
         )
 
     def close(self):
+        imap = self._imap
+        self._imap = None
+        if imap is None:
+            return
         try:
-            self._imap.close()
+            imap.close()
         except Exception:
             pass
         try:
-            self._imap.logout()
+            imap.logout()
         except Exception:
             pass
