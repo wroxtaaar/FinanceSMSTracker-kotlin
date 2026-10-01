@@ -222,6 +222,7 @@ class MainActivity : AppCompatActivity() {
         loadTransactions()
         updateNotificationAccessStatus()
         loadOracleSummary()
+        syncOracleGmailTransactions()
     }
 
     private fun loadOracleAccounts() {
@@ -544,6 +545,7 @@ class MainActivity : AppCompatActivity() {
 
                 result.onSuccess { sync ->
                     loadOracleSummary()
+                    syncOracleGmailTransactions()
 
                     val message = buildString {
                         append("Gmail checked\n\n")
@@ -596,6 +598,32 @@ class MainActivity : AppCompatActivity() {
                     renderOracleSummary(summary)
                 }.onFailure { error ->
                     textViewOracleStatus.text = "Oracle ledger: " + (error.message ?: "Unavailable")
+                }
+            }
+        }
+    }
+
+    private fun syncOracleGmailTransactions() {
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).fetchGmailTransactions()
+
+            runOnUiThread {
+                result.onSuccess { transactions ->
+                    var changed = 0
+                    transactions.forEach { transaction ->
+                        val rowId = repository.upsertOracleGmailTransaction(transaction)
+                        if (rowId != 0L) {
+                            changed++
+                        }
+                    }
+
+                    if (changed > 0) {
+                        loadTransactions()
+                    }
+                }.onFailure {
+                    // The local transaction list remains usable when Oracle is
+                    // temporarily unavailable. The next resume or Gmail sync
+                    // retries the pull.
                 }
             }
         }
