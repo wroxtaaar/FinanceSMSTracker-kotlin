@@ -107,6 +107,40 @@ class FinanceSyncClient(
         }
     }
 
+    fun fetchGmailTransactions(): Result<List<OracleTransaction>> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+
+        return get("/api/v1/transactions?limit=1000").map { body ->
+            val items = JSONObject(body).getJSONArray("transactions")
+            buildList {
+                for (index in 0 until items.length()) {
+                    val item = items.getJSONObject(index)
+                    val id = item.optString("id")
+                    if (!id.startsWith("gmail:")) continue
+
+                    add(
+                        OracleTransaction(
+                            id = id,
+                            amountMinor = item.getLong("amount_minor"),
+                            currency = item.optString("currency", "INR"),
+                            transactionType = item.optString("type", "UNKNOWN"),
+                            paymentMethod = item.optString("payment_method", "UNKNOWN"),
+                            accountType = item.optString("account_type", "UNKNOWN"),
+                            bank = item.optString("bank").takeIf { it.isNotBlank() },
+                            merchantOrPayee = item.optString("merchant_or_payee").takeIf { it.isNotBlank() },
+                            accountLast4 = item.optString("account_last4").takeIf { it.isNotBlank() },
+                            reference = item.optString("reference").takeIf { it.isNotBlank() },
+                            timestamp = item.getLong("timestamp"),
+                            category = item.optString("category", "OTHER"),
+                            confidence = item.optDouble("confidence", 0.0).toFloat()
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     fun fetchSummary(): Result<OracleLedgerSummary> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
@@ -216,6 +250,22 @@ data class GmailSyncResult(
     val ignoredCount: Int,
     val createdEvidence: Int,
     val repairedTransactions: Int
+)
+
+data class OracleTransaction(
+    val id: String,
+    val amountMinor: Long,
+    val currency: String,
+    val transactionType: String,
+    val paymentMethod: String,
+    val accountType: String,
+    val bank: String?,
+    val merchantOrPayee: String?,
+    val accountLast4: String?,
+    val reference: String?,
+    val timestamp: Long,
+    val category: String?,
+    val confidence: Float
 )
 
 data class OracleAccount(
