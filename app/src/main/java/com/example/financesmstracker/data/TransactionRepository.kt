@@ -461,7 +461,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         val db = dbHelper.writableDatabase
         val remoteMarker = "oracle:gmail:" + transaction.id
 
-        val existingId = db.query(
+        val existingRemoteId = db.query(
             FinanceDatabaseHelper.TABLE_TRANSACTIONS,
             arrayOf(FinanceDatabaseHelper.COLUMN_ID),
             FinanceDatabaseHelper.COLUMN_SMS_HASH + " = ?",
@@ -472,6 +472,86 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
             "1"
         ).use {
             if (it.moveToFirst()) it.getLong(0) else null
+        }
+
+        // Prefer an existing phone transaction when Oracle's Gmail copy clearly
+        // describes the same real-world transaction. This prevents a Gmail
+        // mirror from appearing as a second row beside the SMS transaction.
+        val matchingLocal = db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            arrayOf("*"),
+            FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
+                FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE + " = ? AND " +
+                "LOWER(TRIM(COALESCE(" + FinanceDatabaseHelper.COLUMN_BANK + ",''))) = LOWER(TRIM(COALESCE(?,''))) AND " +
+                "TRIM(COALESCE(" + FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR + ",'')) = TRIM(COALESCE(?,'')) AND " +
+                "ABS(" + FinanceDatabaseHelper.COLUMN_TIMESTAMP + " - ?) <= ?",
+            arrayOf(
+                "oracle:gmail:%",
+                "ACTIVE",
+                transaction.amountMinor.toString(),
+                transaction.currency,
+                transaction.transactionType,
+                transaction.paymentMethod,
+                transaction.accountType,
+                transaction.bank ?: "",
+                transaction.accountLast4 ?: "",
+                transaction.timestamp.toString(),
+                (24L * 60L * 60L * 1000L).toString()
+            ),
+            null,
+            null,
+            FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
+            "1"
+        ).use {
+            if (it.moveToFirst()) it else null
+        }
+
+        if (matchingLocal != null) {
+            val localId = matchingLocal.getLong(
+                matchingLocal.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_ID)
+            )
+            val localMerchant = matchingLocal.getString(
+                matchingLocal.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME)
+            )?.trim()
+
+            val remoteMerchant = transaction.merchantOrPayee?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.takeIf { !it.equals("null", ignoreCase = true) }
+                ?.takeIf { !it.equals("none", ignoreCase = true) }
+
+            val merchantNeedsRepair =
+                localMerchant.isNullOrBlank() ||
+                    localMerchant.equals("null", ignoreCase = true) ||
+                    localMerchant.equals("none", ignoreCase = true)
+
+            var changed = false
+            if (merchantNeedsRepair && remoteMerchant != null) {
+                val merchantValues = ContentValues().apply {
+                    put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, remoteMerchant)
+                }
+                changed = db.update(
+                    FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                    merchantValues,
+                    FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                    arrayOf(localId.toString())
+                ) > 0
+            }
+
+            if (existingRemoteId != null) {
+                db.delete(
+                    FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                    FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                    arrayOf(existingRemoteId.toString())
+                )
+                changed = true
+            }
+
+            return if (changed) localId else 0L
         }
 
         val values = ContentValues().apply {
@@ -492,14 +572,14 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
             put(FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS, "ACTIVE")
         }
 
-        if (existingId != null) {
+        if (existingRemoteId != null) {
             val updated = db.update(
                 FinanceDatabaseHelper.TABLE_TRANSACTIONS,
                 values,
                 FinanceDatabaseHelper.COLUMN_ID + " = ?",
-                arrayOf(existingId.toString())
+                arrayOf(existingRemoteId.toString())
             )
-            return if (updated > 0) existingId else 0L
+            return if (updated > 0) existingRemoteId else 0L
         }
 
         return db.insertWithOnConflict(
