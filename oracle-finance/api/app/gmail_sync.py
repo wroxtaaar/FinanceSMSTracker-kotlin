@@ -13,14 +13,7 @@ def _decode(payload):
 
 def _headers(payload): return {h["name"].lower():h["value"] for h in payload.get("headers",[])}
 
-def parse_bank_email(message):
-    payload=message.get("payload",{}); headers=_headers(payload); text=_decode(payload)
-    combined=f"{headers.get('subject','')}\n{text}"
-    m=re.search(r"(?i)(?:INR|Rs\.?)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)",combined)
-    amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
-    direction="CREDIT" if re.search(r"(?i)credited|credit alert|payment.*received",combined) else (
-        "DEBIT" if re.search(r"(?i)debited|spent|sent|purchase|withdrawn",combined) else None)
-    bank=None
+def _recognized_bank(combined):
     for candidate, pattern in (
         ("HDFC", r"(?i)HDFC"),
         ("AXIS", r"(?i)Axis Bank|\bAxis\b"),
@@ -30,28 +23,65 @@ def parse_bank_email(message):
         ("SBI", r"(?i)State Bank of India|\bSBI\b"),
     ):
         if re.search(pattern, combined):
-            bank=candidate
-            break
-    lm=re.search(
-        r"(?i)(?:A/c|account|card(?: no\.?)?)[^\d]{0,20}"
+            return candidate
+    return None
+
+
+def _account_last4(combined):
+    match = re.search(
+        r"(?i)(?:A/c|account|card(?:\s+(?:no\.?|ending|ending\s+in))?)[^\d]{0,24}"
         r"(?:X{0,4}|\*{0,6}|[#\- ]*)?(\d{4})(?!\d)",
-        combined
+        combined,
     )
-    last4=lm.group(1) if lm else None
-    rm=re.search(r"(?i)(?:Ref|reference|transaction)[^A-Za-z0-9]*([A-Z0-9-]{5,})",combined)
-    reference=rm.group(1) if rm else None
-    if amount is None or direction is None: return None
+    return match.group(1) if match else None
+
+
+def _reference(combined):
+    match = re.search(
+        r"(?i)(?:Ref(?:erence)?|Transaction\s*(?:ID|No\.?)?|UTR)"
+        r"[^A-Za-z0-9]{0,20}([A-Z0-9][A-Z0-9/-]{3,}[A-Z0-9])",
+        combined,
+    )
+    token = match.group(1) if match else None
+    return token if token and re.search(r"\d", token) else None
+
+
+def _looks_like_transaction(combined, amount, direction):
+    if amount is None or direction is None:
+        return False
+    return bool(re.search(
+        r"(?i)transaction|debited|credited|spent|purchase|withdrawn|payment\s+received|card\s+payment",
+        combined,
+    ))
+
+
+def parse_bank_email(message):
+    payload=message.get("payload",{}); headers=_headers(payload); text=_decode(payload)
+    combined=f"{headers.get('subject','')}\n{text}"
+    m=re.search(r"(?i)(?:INR|Rs\.?)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)",combined)
+    amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
+    direction="CREDIT" if re.search(r"(?i)credited|credit alert|payment.*received",combined) else (
+        "DEBIT" if re.search(r"(?i)debited|spent|sent|purchase|withdrawn",combined) else None)
+    bank=_recognized_bank(combined)
+    last4=_account_last4(combined)
+
+    # Only promote email content to a transaction when identity and
+    # transaction intent are both strong enough to map it to an account.
+    if not bank or not last4 or not _looks_like_transaction(combined, amount, direction):
+        return None
+
     account_type="CREDIT_CARD" if re.search(r"(?i)card",combined) else "BANK_ACCOUNT"
+    reference=_reference(combined)
     tx_id="gmail:"+hashlib.sha256((message["id"]+":"+str(amount)+":"+direction).encode()).hexdigest()[:32]
     ev_id="gmail-evidence:"+message["id"]
     t=SyncTransactionModel(id=tx_id,amountMinor=amount,currency="INR",type=direction,
        paymentMethod="CARD" if account_type=="CREDIT_CARD" else "UPI",accountType=account_type,
        bank=bank,merchantOrPayee=None,accountLast4=last4,reference=reference,
-       timestamp=int(message.get("internalDate","0")),category="OTHER",confidence=0.75)
+       timestamp=int(message.get("internalDate","0")),category="OTHER",confidence=0.9)
     e=SyncEvidenceModel(id=ev_id,sourceType="GMAIL",sourceId=message["id"],status="UNMATCHED",
        observedAt=int(message.get("internalDate","0")),transactionId=tx_id,amountMinor=amount,currency="INR",
        direction=direction,bankProvider=bank,accountLast4=last4,reference=reference,
-       contentHash=hashlib.sha256(combined.encode()).hexdigest(),confidence=0.75)
+       contentHash=hashlib.sha256(combined.encode()).hexdigest(),confidence=0.9)
     return t,e
 
 def ingest_messages(service,query="newer_than:30d"):
@@ -68,7 +98,7 @@ def ingest_messages(service,query="newer_than:30d"):
             conn.execute("""INSERT OR IGNORE INTO gmail_messages
             (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
             VALUES(?,?,?,?,?,?,?,?)""",(msg_id,message.get("threadId"),int(message.get("internalDate","0")),sender,h.get("subject"),
-            hashlib.sha256((msg_id+h.get("subject","")).encode()).hexdigest(),"PARSED",int(time.time()*1000)))
+            hashlib.sha256((msg_id+h.get("subject","")).encode()).hexdigest(),("PARSED" if parsed else "PENDING"),int(time.time()*1000)))
         if parsed:
             t,e=parsed
             sync_transaction(t)
@@ -86,6 +116,16 @@ def ingest_messages(service,query="newer_than:30d"):
         else:
             h=_headers(message.get("payload",{}))
             combined=f"{h.get('subject','')}\n{_decode(message.get('payload',{}))}"
+            # Only create a review for messages that actually resemble a
+            # bank/card transaction. Ordinary newsletters and unrelated mail
+            # are recorded as ignored evidence without flooding the review queue.
+            has_amount = bool(re.search(r"(?i)(?:INR|Rs\.?)[\\s₹]*[0-9][0-9,]*(?:\\.\\d{1,2})?", combined))
+            has_bank = _recognized_bank(combined) is not None
+            has_financial_marker = bool(re.search(
+                r"(?i)transaction|debited|credited|spent|purchase|withdrawn|payment\\s+received|card\\s+payment",
+                combined,
+            ))
+            h_status = "REVIEW" if has_amount and has_bank and has_financial_marker else "IGNORED"
             e=SyncEvidenceModel(
                 id="gmail-evidence:"+msg_id,
                 sourceType="GMAIL",
@@ -103,5 +143,6 @@ def ingest_messages(service,query="newer_than:30d"):
                 confidence=0.0,
             )
             sync_evidence(e)
-            add_review("GMAIL","unrecognized bank email",evidence_id=e.id)
+            if h_status == "REVIEW":
+                add_review("GMAIL","bank-like email could not be parsed safely",evidence_id=e.id)
     return created
