@@ -8,7 +8,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
 
     companion object {
         private const val DATABASE_NAME = "finance_tracker.db"
-        private const val DATABASE_VERSION = 6
+        private const val DATABASE_VERSION = 7
 
         const val TABLE_TRANSACTIONS = "transactions"
         const val COLUMN_ID = "id"
@@ -211,6 +211,16 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
         if (oldVersion < 6) {
             try {
                 db.execSQL("ALTER TABLE $TABLE_TRANSACTIONS ADD COLUMN $COLUMN_TRANSACTION_STATUS TEXT NOT NULL DEFAULT 'ACTIVE'")
+            } catch (_: Exception) {}
+        }
+        if (oldVersion < 7) {
+            // Truecaller was removed from the financial evidence pipeline.
+            // Delete only legacy Truecaller evidence; transaction history itself
+            // is preserved.
+            try {
+                db.execSQL(
+                    "DELETE FROM $TABLE_SOURCE_EVIDENCE WHERE $COLUMN_EVIDENCE_SOURCE_TYPE = 'TRUECALLER'"
+                )
             } catch (_: Exception) {}
         }
     }
