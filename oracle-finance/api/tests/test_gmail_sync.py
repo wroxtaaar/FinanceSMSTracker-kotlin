@@ -18,6 +18,7 @@ from app.gmail_sync import (
     _repair_legacy_gmail_account_classifications,
     _repair_legacy_icici_credit_card_classifications,
     _repair_legacy_gmail_merchants,
+    _repair_legacy_gmail_merchant_values,
 )
 from app.ledger import set_balance, sync_transaction
 
@@ -727,6 +728,136 @@ def test_repair_legacy_gmail_merchant_reparses_existing_row():
         ).fetchone()
 
     assert tx["merchant_or_payee"] == "AMAZON PAY IN RECHARGE"
+
+
+def test_axis_transaction_info_is_not_merchant():
+    message = _message(
+        "axis-no-merchant",
+        "Dear Customer, Here's the summary of your transaction: "
+        "Amount Debited: INR 6.00 Account Number: XX3370 "
+        "Date & Time: 30-09-26, 23:54:16 IST "
+        "Transaction Info: UPI/P2A/361639089310/ABDUL WASIQ "
+        "If this transaction was not initiated by you: To block UPI: SMS BLOCKUPI.",
+        subject="INR 6.00 was debited from your A/c.",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "INR 6.00 was debited from your A/c."},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, _ = parsed
+    assert transaction.bank == "AXIS"
+    assert transaction.accountType == "BANK_ACCOUNT"
+    assert transaction.reference == "UPI/P2A/361639089310/ABDUL"
+    assert transaction.merchantOrPayee is None
+
+
+def test_repair_legacy_gmail_merchant_values_clears_axis_disclaimer():
+    message = _message(
+        "imap:[Gmail]/All Mail:11:99004",
+        "Dear Customer, Here's the summary of your transaction: "
+        "Amount Debited: INR 6.00 Account Number: XX3370 "
+        "Date & Time: 30-09-26, 23:54:16 IST "
+        "Transaction Info: UPI/P2A/361639089310/ABDUL WASIQ "
+        "If this transaction was not initiated by you: To block UPI: SMS BLOCKUPI.",
+        subject="INR 6.00 was debited from your A/c.",
+        internal_date="1790805256000",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "INR 6.00 was debited from your A/c."},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+    parsed = parse_bank_email(message)
+    assert parsed is not None
+    parsed_transaction, _ = parsed
+
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO transactions
+            (id,amount_minor,currency,type,payment_method,account_type,bank,
+             merchant_or_payee,account_last4,reference,timestamp,category,
+             confidence,duplicate_of,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                parsed_transaction.id,
+                600,
+                "INR",
+                "DEBIT",
+                "UPI",
+                "BANK_ACCOUNT",
+                "AXIS",
+                "UPI/P2A/361639089310/ABDUL WASIQ If this transaction was not initiated by you",
+                "3370",
+                "UPI/P2A/361639089310/ABDUL",
+                1790805256000,
+                "OTHER",
+                1.0,
+                None,
+                "ACTIVE",
+                1790805256000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                "11:99004",
+                "thread-axis-merchant",
+                1790805256000,
+                "alerts@axis.bank.in",
+                "INR 6.00 was debited from your A/c.",
+                "axis-merchant-fingerprint",
+                "PARSED",
+                1790805256000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO evidence
+            (id,source_type,source_id,status,observed_at,transaction_id,
+             matched_transaction_id,amount_minor,currency,direction,
+             bank_provider,account_last4,reference,content_hash,confidence,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "gmail-evidence:" + message["id"],
+                "GMAIL",
+                message["id"],
+                "UNMATCHED",
+                1790805256000,
+                parsed_transaction.id,
+                None,
+                600,
+                "INR",
+                "DEBIT",
+                "AXIS",
+                "3370",
+                parsed_transaction.reference,
+                "axis-legacy-merchant-hash",
+                1.0,
+                1790805256000,
+            ),
+        )
+
+    service = FakeService([message])
+    assert _repair_legacy_gmail_merchant_values(service) == 1
+    assert _repair_legacy_gmail_merchant_values(service) == 0
+
+    with connection() as conn:
+        tx = conn.execute(
+            "SELECT merchant_or_payee FROM transactions WHERE id=?",
+            (parsed_transaction.id,),
+        ).fetchone()
+
+    assert tx["merchant_or_payee"] is None
 
 
 def test_icici_transaction_subject_is_not_a_reference():
