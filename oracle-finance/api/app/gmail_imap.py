@@ -176,16 +176,16 @@ class _Users:
 
 
 class IMAPService:
-    def __init__(self):
+    def __init__(self, historical=False):
         self.host = os.getenv("GMAIL_IMAP_HOST", "imap.gmail.com")
         self.port = int(os.getenv("GMAIL_IMAP_PORT", "993"))
         self.username = os.getenv("GMAIL_USERNAME", "").strip()
         self.password = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "").strip()
         self.folder = os.getenv("GMAIL_IMAP_FOLDER", "[Gmail]/All Mail")
-        # Manual Gmail checks must finish quickly enough for the Android client.
-        # Keep the scan focused on the newest messages; already-processed
-        # messages are skipped by ingest_messages before their full body is
-        # fetched. The window can be increased with an environment variable.
+        # Manual Gmail checks normally use the incremental cursor. A historical
+        # sync deliberately bypasses that cursor so a bounded Gmail date query
+        # (for example newer_than:30d) can recover older messages.
+        self.historical = bool(historical)
         self.max_results = max(
             1,
             min(500, int(os.getenv("GMAIL_IMAP_MAX_RESULTS", "100"))),
@@ -347,13 +347,19 @@ class IMAPService:
         # window is retained as an additional lower bound so normal syncs stay
         # bounded while explicit date queries are never silently ignored.
         imap = self._connect()
-        since = self._last_synced_since().strftime("%d-%b-%Y")
         query_criteria = query_to_imap_search(query)
-        incremental_criteria = f'SINCE "{since}"'
-        if query_criteria == "ALL":
-            search_suffix = incremental_criteria
+
+        # Historical syncs use the requested date window directly. Normal syncs
+        # keep the two-day overlap against the newest stored Gmail message.
+        if self.historical:
+            search_suffix = query_criteria
         else:
-            search_suffix = f'{query_criteria[1:-1]} {incremental_criteria}'
+            since = self._last_synced_since().strftime("%d-%b-%Y")
+            incremental_criteria = f'SINCE "{since}"'
+            if query_criteria == "ALL":
+                search_suffix = incremental_criteria
+            else:
+                search_suffix = f'{query_criteria[1:-1]} {incremental_criteria}'
 
         sender_rules = (
             # Axis — account/card transaction alerts.
