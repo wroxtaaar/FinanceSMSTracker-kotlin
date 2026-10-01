@@ -89,6 +89,13 @@
             android:textSize="14sp" />
 
         <Button
+            android:id="@+id/buttonEditSplitwise"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Edit Splitwise Owed" />
+
+        <Button
             android:id="@+id/buttonRefreshOracle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
