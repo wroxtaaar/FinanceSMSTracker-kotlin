@@ -479,7 +479,10 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         // mirror from appearing as a second row beside the SMS transaction.
         val matchingLocal = db.query(
             FinanceDatabaseHelper.TABLE_TRANSACTIONS,
-            arrayOf("*"),
+            arrayOf(
+                FinanceDatabaseHelper.COLUMN_ID,
+                FinanceDatabaseHelper.COLUMN_MERCHANT_NAME
+            ),
             FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
                 FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
                 FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
@@ -508,16 +511,19 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
             FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
             "1"
         ).use {
-            if (it.moveToFirst()) it else null
+            if (it.moveToFirst()) {
+                Pair(
+                    it.getLong(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_ID)),
+                    it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME))?.trim()
+                )
+            } else {
+                null
+            }
         }
 
         if (matchingLocal != null) {
-            val localId = matchingLocal.getLong(
-                matchingLocal.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_ID)
-            )
-            val localMerchant = matchingLocal.getString(
-                matchingLocal.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME)
-            )?.trim()
+            val localId = matchingLocal.first
+            val localMerchant = matchingLocal.second
 
             val remoteMerchant = transaction.merchantOrPayee?.trim()
                 ?.takeIf { it.isNotBlank() }
