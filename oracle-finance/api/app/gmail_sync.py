@@ -135,9 +135,9 @@ def _reference(combined):
     # UTR, Transaction ID, or Transaction No. label.
     normalized = _plain_text(combined)
     patterns = (
-        r"(?i)\b(?:Ref(?:erence)?|UTR)\s*[:#-]\s*"
+        r"(?i)\b(?:Ref(?:erence)?|UTR)\s*[:#-]?\s*"
         r"([A-Z0-9][A-Z0-9/-]*\d[A-Z0-9/-]*)",
-        r"(?i)\bTransaction\s+(?:ID|No\.?)\s*[:#-]\s*"
+        r"(?i)\bTransaction\s+(?:ID|No\.?)\s*[:#-]?\s*"
         r"([A-Z0-9][A-Z0-9/-]*\d[A-Z0-9/-]*)",
     )
     token = None
