@@ -40,11 +40,11 @@ class CrossSourceMatchCoordinatorTest {
     }
 
     @Test
-    fun test1_TruecallerAfterSmsTransactionIsMatched() {
+    fun test1_SmsEvidenceAfterTransactionIsMatched() {
         val tx = createDummyTx(id = 1L, amountPaise = 15000L, currency = "INR", timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_key_1",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_key_1",
             receivedAt = 1005000L,
             amountPaise = 15000L,
             currency = "INR",
@@ -58,10 +58,10 @@ class CrossSourceMatchCoordinatorTest {
     }
 
     @Test
-    fun test2_TruecallerBeforeSmsTransactionBecomesMatchedLater() {
+    fun test2_SmsEvidenceBeforeTransactionBecomesMatchedLater() {
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_key_2",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_key_2",
             receivedAt = 1000000L,
             amountPaise = 20000L,
             currency = "INR",
@@ -84,8 +84,8 @@ class CrossSourceMatchCoordinatorTest {
         val tx2 = createDummyTx(id = 4L, amountPaise = 25000L, currency = "INR", timestamp = 1010000L, ref = "REF_B")
 
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_key_3",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_key_3",
             receivedAt = 1005000L,
             amountPaise = 25000L,
             currency = "INR",
@@ -100,8 +100,8 @@ class CrossSourceMatchCoordinatorTest {
     @Test
     fun test4_NoCandidateResultsInUnmatchedStatus() {
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_key_4",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_key_4",
             receivedAt = 1000000L,
             amountPaise = 99999L,
             currency = "INR",
@@ -116,8 +116,8 @@ class CrossSourceMatchCoordinatorTest {
     @Test
     fun test5_AlreadyMatchedEvidenceRemainsUnchanged() {
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_key_5",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_key_5",
             receivedAt = 1000000L,
             amountPaise = 30000L,
             currency = "INR",
@@ -134,8 +134,8 @@ class CrossSourceMatchCoordinatorTest {
     fun test6_KnownDirectionConflictResultsInUnmatched() {
         val tx = createDummyTx(id = 6L, amountPaise = 40000L, currency = "INR", type = TransactionType.CREDIT, timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_key_6",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_key_6",
             receivedAt = 1000000L,
             amountPaise = 40000L,
             currency = "INR",
@@ -151,8 +151,8 @@ class CrossSourceMatchCoordinatorTest {
     fun test7_UnknownDirectionWithCompatibleCandidateResultsInMatched() {
         val tx = createDummyTx(id = 7L, amountPaise = 50000L, currency = "INR", type = TransactionType.DEBIT, timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_key_7",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_key_7",
             receivedAt = 1000000L,
             amountPaise = 50000L,
             currency = "INR",
@@ -169,8 +169,8 @@ class CrossSourceMatchCoordinatorTest {
     fun test8_UnknownBankWithCompatibleCandidateResultsInMatched() {
         val tx = createDummyTx(id = 8L, amountPaise = 60000L, currency = "INR", bank = "HDFC", timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_key_8",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_key_8",
             receivedAt = 1000000L,
             amountPaise = 60000L,
             currency = "INR",
@@ -187,8 +187,8 @@ class CrossSourceMatchCoordinatorTest {
     fun test9_DifferentCurrencyCrossMatchUnmatched() {
         val tx = createDummyTx(id = 9L, amountPaise = 10000L, currency = "INR", timestamp = 1000000L)
         val evidence = SourceEvidence(
-            sourceType = SourceType.TRUECALLER,
-            sourceKey = "tc_key_9",
+            sourceType = SourceType.SMS,
+            sourceKey = "sms_key_9",
             receivedAt = 1000000L,
             amountPaise = 10000L,
             currency = "SGD", // Different currency!
