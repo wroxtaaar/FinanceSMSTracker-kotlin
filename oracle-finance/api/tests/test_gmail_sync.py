@@ -22,6 +22,7 @@ from app.gmail_sync import (
     _repair_self_transfer_gmail_merchants,
 )
 from app.ledger import set_balance, sync_transaction
+from app.statement_sync import _hdfc_metadata, _parse_hdfc_rows, process_statement_attachments
 
 init_db()
 
@@ -970,3 +971,122 @@ def test_icici_transaction_subject_is_not_a_reference():
     transaction, _ = parsed
     assert transaction.reference is None
     assert transaction.merchantOrPayee == "AMAZON PAY GROCERY"
+
+
+def test_hdfc_statement_text_parser_matches_statement_layout():
+    text = """HDFC Bank Ltd
+Account Number : 50100534629591
+Statement From : 01/08/2026 To 31/08/2026
+Currency : INR
+Opening Balance : 1,000.00
+Txn Date Narration Withdrawals Deposits Closing Balance
+02/08/2026 UPI-TEST-MERCHANT-test@upi 100.00 0.00 900.00
+Value Dt 02/08/2026 Ref
+111111111111
+03/08/2026 UPI-SECOND-shop@upi 50.00 0.00 850.00
+Value Dt 03/08/2026 Ref
+222222222222
+04/08/2026 FT-A2A - - - 0.00 200.00 1,050.00
+WBS SALARY ACCOUNT Value Dt 04/08/2026 Ref
+333333333333
+Page 5 of 5"""
+    metadata = _hdfc_metadata(text)
+    rows = _parse_hdfc_rows(text, metadata)
+
+    assert metadata["bank"] == "HDFC"
+    assert metadata["account_last4"] == "9591"
+    assert metadata["currency"] == "INR"
+    assert len(rows) == 3
+    assert rows[0]["amount_minor"] == 10000
+    assert rows[0]["type"] == "DEBIT"
+    assert rows[0]["reference"] == "111111111111"
+    assert rows[1]["merchant"] == "SECOND"
+    assert rows[2]["type"] == "CREDIT"
+    assert rows[2]["amount_minor"] == 20000
+    assert rows[2]["merchant"] == "WBS SALARY ACCOUNT"
+
+
+def test_statement_attachment_is_imported_once_and_updates_balance(monkeypatch):
+    import hashlib
+    from datetime import datetime, timezone
+
+    set_balance(
+        "statement-hdfc",
+        "HDFC Statement 9591",
+        "INR",
+        "BANK_ACCOUNT",
+        "HDFC",
+        "9591",
+        100000,
+    )
+
+    pdf_bytes = b"test-pdf-bytes"
+    encoded = base64.urlsafe_b64encode(pdf_bytes).decode().rstrip("=")
+    message = {
+        "id": "statement-message-1",
+        "payload": {
+            "headers": [
+                {"name": "Subject", "value": "HDFC e-Statement"},
+                {"name": "From", "value": "HDFC Bank <alerts@hdfcbank.net>"},
+            ],
+            "parts": [
+                {
+                    "filename": "HDFC_Statement_Aug_2026.pdf",
+                    "mimeType": "application/pdf",
+                    "body": {"data": encoded},
+                }
+            ],
+        },
+    }
+
+    fake_rows = [{
+        "date": datetime(2026, 8, 2, 12, tzinfo=timezone.utc),
+        "amount_minor": 1000,
+        "type": "DEBIT",
+        "merchant": "TEST MERCHANT",
+        "reference": "REF-1",
+        "payment_method": "UPI",
+        "category": "OTHER",
+        "narration": "UPI-TEST MERCHANT",
+    }]
+    fake_metadata = {
+        "bank": "HDFC",
+        "account_last4": "9591",
+        "currency": "INR",
+        "statement_from": "01/08/2026",
+        "statement_to": "31/08/2026",
+        "opening_balance_minor": 100000,
+    }
+
+    monkeypatch.setenv("HDFC_STATEMENT_SECRET", "fixture-secret")
+    monkeypatch.setattr(
+        "app.statement_sync.parse_hdfc_statement",
+        lambda pdf, key: (
+            fake_metadata,
+            fake_rows,
+        ),
+    )
+
+    first = process_statement_attachments(FakeService([message]), message)
+    second = process_statement_attachments(FakeService([message]), message)
+
+    assert first["attachmentsParsed"] == 1
+    assert first["transactionsAdded"] == 1
+    assert second["attachmentsParsed"] == 0
+    assert second["transactionsAdded"] == 0
+
+    with connection() as conn:
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='statement-hdfc'"
+        ).fetchone()["balance_minor"]
+        attachment = conn.execute(
+            "SELECT status,transaction_count FROM gmail_attachments WHERE message_id='statement-message-1'"
+        ).fetchone()
+        statements = conn.execute(
+            "SELECT COUNT(*) value FROM transactions WHERE id LIKE 'statement:%'"
+        ).fetchone()["value"]
+
+    assert balance == 99000
+    assert attachment["status"] == "PARSED"
+    assert attachment["transaction_count"] == 1
+    assert statements == 1
