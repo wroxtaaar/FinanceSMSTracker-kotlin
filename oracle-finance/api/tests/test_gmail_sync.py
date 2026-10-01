@@ -843,10 +843,10 @@ def test_axis_transaction_info_is_not_merchant():
     assert transaction.bank == "AXIS"
     assert transaction.accountType == "BANK_ACCOUNT"
     assert transaction.reference == "UPI/P2A/361639089310/ABDUL"
-    assert transaction.merchantOrPayee is None
+    assert transaction.merchantOrPayee == "ABDUL WASIQ"
 
 
-def test_repair_legacy_gmail_merchant_values_clears_axis_disclaimer():
+def test_repair_legacy_gmail_merchant_values_replaces_axis_disclaimer():
     message = _message(
         "imap:[Gmail]/All Mail:11:99004",
         "Dear Customer, Here's the summary of your transaction: "
@@ -948,7 +948,7 @@ def test_repair_legacy_gmail_merchant_values_clears_axis_disclaimer():
             (parsed_transaction.id,),
         ).fetchone()
 
-    assert tx["merchant_or_payee"] is None
+    assert tx["merchant_or_payee"] == "ABDUL WASIQ"
 
 
 def test_icici_transaction_subject_is_not_a_reference():
