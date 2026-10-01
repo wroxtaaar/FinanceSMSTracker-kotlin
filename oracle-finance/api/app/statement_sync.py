@@ -181,7 +181,7 @@ def parse_icici_statement(pdf_bytes, key):
     metadata = _icici_metadata(text)
 
     table_match = re.search(
-        r"(?ms)Date\s+SerNo\.\s+Transaction Details.*?(?=^# International Spends\s*$|^Credit Limit \(Including cash\))",
+        r"(?s)Date\s+SerNo\.\s+Transaction Details.*?(?=# International Spends|Credit Limit \(Including cash\))",
         text,
     )
     if not table_match:
@@ -198,13 +198,18 @@ def parse_icici_statement(pdf_bytes, key):
     rows = []
     for block in blocks:
         body = _compact(block.group("body"))
-        amount_match = re.search(
-            r"(?P<amount>[0-9][0-9,]*\.\d{2})(?:\s+(?P<credit>CR))?\s*$",
+        # pdfplumber can place a wrapped location/country token after the
+        # amount (for example "... BANGALORE 15 504.99\\nIN"). Use the final
+        # decimal money token in the transaction block rather than requiring it
+        # to be the final characters.
+        amount_matches = list(re.finditer(
+            r"(?P<amount>[0-9][0-9,]*\\.\\d{2})(?:\\s+(?P<credit>CR))?",
             body,
             flags=re.IGNORECASE,
-        )
-        if not amount_match:
+        ))
+        if not amount_matches:
             continue
+        amount_match = amount_matches[-1]
 
         detail = body[:amount_match.start()].strip()
         # ICICI places Reward Points immediately before the amount. They are
