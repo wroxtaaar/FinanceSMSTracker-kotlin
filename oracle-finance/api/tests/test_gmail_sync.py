@@ -43,6 +43,7 @@ class _Messages:
     def __init__(self, messages):
         self._messages = messages
         self._mode = "list"
+        self.last_get_id = None
 
     def list(self, **kwargs):
         self._mode = "list"
@@ -50,6 +51,7 @@ class _Messages:
 
     def get(self, **kwargs):
         self._mode = "get"
+        self.last_get_id = kwargs.get("id")
         return self
 
     def execute(self):
@@ -587,6 +589,7 @@ def test_repair_legacy_icici_credit_card_reparses_existing_row():
 
     service = FakeService([message])
     assert _repair_legacy_icici_credit_card_classifications(service) == 1
+    assert service.users().messages().last_get_id == "11:99002"
     assert _repair_legacy_icici_credit_card_classifications(service) == 0
 
     with connection() as conn:
