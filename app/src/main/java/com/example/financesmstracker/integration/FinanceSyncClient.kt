@@ -45,6 +45,24 @@ class FinanceSyncClient(
         }
     }
 
+    fun fetchManualSplitwiseTotal(): Result<Long> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return get("/api/v1/splitwise/manual-total").map { body ->
+            JSONObject(body).getLong("amountMinor")
+        }
+    }
+
+    fun updateManualSplitwiseTotal(amountMinor: Long): Result<String> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        val json = JSONObject().apply {
+            put("amountMinor", amountMinor)
+            put("currency", "INR")
+        }
+        return put("/api/v1/splitwise/manual-total", json.toString())
+    }
+
     fun fetchSummary(): Result<OracleLedgerSummary> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
@@ -58,6 +76,31 @@ class FinanceSyncClient(
                 creditCardOutstandingMinor = json.getLong("creditCardOutstandingMinor"),
                 trueAvailableMinor = json.getLong("trueAvailableMinor")
             )
+        }
+    }
+
+    private fun put(path: String, jsonBody: String): Result<String> {
+        return runCatching {
+            val endpoint = baseUrl.trimEnd('/') + path
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "PUT"
+                connectTimeout = 10_000
+                readTimeout = 20_000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("X-Sync-Token", token)
+            }
+            try {
+                connection.outputStream.use { it.write(jsonBody.toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) throw IOException("Oracle request HTTP $code: $body")
+                body
+            } finally {
+                connection.disconnect()
+            }
         }
     }
 
