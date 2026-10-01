@@ -12,7 +12,11 @@ from app import db
 db.DB_PATH = DB_FILE
 
 from app.db import init_db, connection
-from app.gmail_sync import ingest_messages, parse_bank_email
+from app.gmail_sync import (
+    ingest_messages,
+    parse_bank_email,
+    _repair_legacy_gmail_account_classifications,
+)
 from app.ledger import set_balance, sync_transaction
 
 init_db()
@@ -314,6 +318,139 @@ def test_axis_real_bank_in_sender_and_html_style_credit_alert():
     assert transaction.accountLast4 == "3370"
     assert transaction.reference == "UPI/P2A/18335801167/ABDUL"
     assert transaction.accountType == "BANK_ACCOUNT"
+
+
+def test_axis_account_alert_takes_priority_over_card_footer_text():
+    message = _message(
+        "axis-account-priority",
+        "Here's the summary of your transaction: "
+        "Amount Credited: INR 5.00 Account Number: XX3370. "
+        "Never share your OTP or CVV. Apply Now for a credit card.",
+        subject="INR 5.00 was credited to your A/c.",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "INR 5.00 was credited to your A/c."},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, _ = parsed
+    assert transaction.bank == "AXIS"
+    assert transaction.type == "CREDIT"
+    assert transaction.accountType == "BANK_ACCOUNT"
+    assert transaction.accountLast4 == "3370"
+
+
+def test_repair_legacy_axis_credit_moves_balance_to_bank_account():
+    set_balance(
+        "axis-repair",
+        "Axis Bank 3370",
+        "INR",
+        "BANK_ACCOUNT",
+        "AXIS",
+        "3370",
+        100000,
+    )
+
+    transaction_id = "gmail:legacy-axis-credit"
+    gmail_id = "11:99001"
+
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO transactions
+            (id,amount_minor,currency,type,payment_method,account_type,bank,
+             merchant_or_payee,account_last4,reference,timestamp,category,
+             confidence,duplicate_of,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                transaction_id,
+                500,
+                "INR",
+                "CREDIT",
+                "CARD",
+                "CREDIT_CARD",
+                "AXIS",
+                None,
+                "3370",
+                "LEGACY-AXIS",
+                1950000000000,
+                "OTHER",
+                0.95,
+                None,
+                "ACTIVE",
+                1950000000000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                gmail_id,
+                "thread-legacy-axis",
+                1950000000000,
+                "alerts@axis.bank.in",
+                "INR 5.00 was credited to your A/c.",
+                "legacy-fingerprint",
+                "PARSED",
+                1950000000000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO evidence
+            (id,source_type,source_id,status,observed_at,transaction_id,
+             matched_transaction_id,amount_minor,currency,direction,
+             bank_provider,account_last4,reference,content_hash,confidence,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "gmail-evidence:"+gmail_id,
+                "GMAIL",
+                gmail_id,
+                "UNMATCHED",
+                1950000000000,
+                transaction_id,
+                None,
+                500,
+                "INR",
+                "CREDIT",
+                "AXIS",
+                "3370",
+                "LEGACY-AXIS",
+                "legacy-hash",
+                0.95,
+                1950000000000,
+            ),
+        )
+
+    assert _repair_legacy_gmail_account_classifications() == 1
+    assert _repair_legacy_gmail_account_classifications() == 0
+
+    with connection() as conn:
+        tx = conn.execute(
+            "SELECT account_type,payment_method FROM transactions WHERE id=?",
+            (transaction_id,),
+        ).fetchone()
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='axis-repair'"
+        ).fetchone()["balance_minor"]
+        adjustment = conn.execute(
+            "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
+            (transaction_id,),
+        ).fetchone()
+
+    assert tx["account_type"] == "BANK_ACCOUNT"
+    assert tx["payment_method"] == "UPI"
+    assert balance == 100500
+    assert adjustment["account_id"] == "axis-repair"
+    assert adjustment["delta_minor"] == 500
 
 
 def test_icici_real_credit_card_alert_from_bank_in_sender():
