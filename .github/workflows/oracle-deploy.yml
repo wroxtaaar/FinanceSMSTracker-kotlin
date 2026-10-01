@@ -69,7 +69,7 @@ jobs:
             echo "Tailscale private endpoint:"
             sudo tailscale serve status
 
-      - name: 4. Stop current finance API
+      - name: 4. Stop current finance services
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
@@ -81,7 +81,7 @@ jobs:
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
             docker compose down
 
-      - name: 5. Build finance API
+      - name: 5. Build finance services
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
@@ -91,40 +91,13 @@ jobs:
           script: |
             set -e
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
-            if grep -Eq '^GMAIL_ENABLED=true([[:space:]]*)
-
-      - name: 6. Start finance API
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: ${{ secrets.ORACLE_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
-          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
-          script: |
-            set -e
-            cd ~/FinanceSMSTracker-kotlin/oracle-finance
-            if grep -Eq '^GMAIL_ENABLED=true([[:space:]]*)
-
-      - name: 7. Health check
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: ${{ secrets.ORACLE_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
-          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
-          script: |
-            set -e
-            cd ~/FinanceSMSTracker-kotlin/oracle-finance
-            sleep 3
-            curl --fail http://127.0.0.1:8090/health
-            docker compose ps
- .env; then
+            if grep -Eq '^GMAIL_ENABLED=true([[:space:]]*)$' .env; then
               docker compose build --no-cache finance-api finance-worker
             else
               docker compose build --no-cache finance-api
             fi
 
-      - name: 6. Start finance API
+      - name: 6. Start finance services
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
@@ -134,57 +107,11 @@ jobs:
           script: |
             set -e
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
-            docker compose up -d
-
-      - name: 7. Health check
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: ${{ secrets.ORACLE_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
-          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
-          script: |
-            set -e
-            cd ~/FinanceSMSTracker-kotlin/oracle-finance
-            sleep 3
-            curl --fail http://127.0.0.1:8090/health
-            docker compose ps
- .env; then
+            if grep -Eq '^GMAIL_ENABLED=true([[:space:]]*)$' .env; then
               docker compose --profile worker up -d finance-api finance-worker
             else
               docker compose up -d finance-api
             fi
-
-      - name: 7. Health check
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: ${{ secrets.ORACLE_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
-          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
-          script: |
-            set -e
-            cd ~/FinanceSMSTracker-kotlin/oracle-finance
-            sleep 3
-            curl --fail http://127.0.0.1:8090/health
-            docker compose ps
- .env; then
-              docker compose build --no-cache finance-api finance-worker
-            else
-              docker compose build --no-cache finance-api
-            fi
-
-      - name: 6. Start finance API
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: ${{ secrets.ORACLE_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
-          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
-          script: |
-            set -e
-            cd ~/FinanceSMSTracker-kotlin/oracle-finance
-            docker compose up -d
 
       - name: 7. Health check
         uses: appleboy/ssh-action@v1.2.2
