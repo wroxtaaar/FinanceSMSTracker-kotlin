@@ -551,6 +551,7 @@ class MainActivity : AppCompatActivity() {
                         append("New transaction emails: ${sync.parsedTransactions}\n")
                         append("Axis credits found: ${sync.axisCredits}\n")
                         append("Already processed: ${sync.alreadyProcessed}\n")
+                        append("Corrected old Gmail transactions: ${sync.repairedTransactions}\n")
                         append("Duplicates skipped: ${sync.duplicateTransactions}\n")
                         append("Needs review: ${sync.reviewCount}\n")
                         append("Ignored: ${sync.ignoredCount}")
