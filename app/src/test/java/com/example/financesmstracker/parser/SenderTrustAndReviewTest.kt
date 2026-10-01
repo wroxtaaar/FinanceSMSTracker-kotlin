@@ -6,6 +6,8 @@ import org.junit.Test
 
 class SenderTrustAndReviewTest {
 
+    // CI trigger: keep test declarations inside the class.
+
     private val parserManager = SmsParserManager()
 
     @Test
