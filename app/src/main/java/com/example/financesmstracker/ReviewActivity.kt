@@ -21,6 +21,8 @@ import com.example.financesmstracker.data.ReviewStatus
 import com.example.financesmstracker.data.TransactionRepository
 import com.example.financesmstracker.data.UnrecognizedSms
 import com.example.financesmstracker.evidence.SourceEvidence
+import com.example.financesmstracker.evidence.CrossSourceMatcher
+import com.example.financesmstracker.evidence.MatchOutcome
 import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.parser.AccountType
 import com.example.financesmstracker.parser.PaymentMethod
@@ -259,10 +261,39 @@ class ReviewActivity : AppCompatActivity() {
 
     private fun showEvidenceReview(evidence: SourceEvidence) {
         val candidates = repository.getCandidateTransactionsForEvidence(evidence)
-        if (candidates.isEmpty()) {
+        val matchResult = CrossSourceMatcher.match(evidence, candidates)
+
+        // When the current evidence has exactly one safe candidate, reconcile it
+        // immediately. This is still evidence-only: no new transaction is created.
+        if (matchResult.outcome == MatchOutcome.MATCHED &&
+            matchResult.matchedTransactionId != null
+        ) {
+            val matchedTransaction = repository.getTransactionById(matchResult.matchedTransactionId)
+            val matchedEvidence = repository.resolveEvidenceToTransaction(
+                evidence.id,
+                matchResult.matchedTransactionId
+            )
+
+            if (matchedEvidence != null) {
+                FinanceSyncBridge.enqueueEvidence(this, matchedEvidence)
+                val label = matchedTransaction?.let { transactionLabel(it) } ?: "matching transaction"
+                Toast.makeText(
+                    this,
+                    "Matched automatically\n" + label,
+                    Toast.LENGTH_LONG
+                ).show()
+                loadReviews()
+                return
+            }
+        }
+
+        if (candidates.isEmpty() || matchResult.outcome == MatchOutcome.UNMATCHED) {
             AlertDialog.Builder(this)
-                .setTitle("No matching transaction")
-                .setMessage(buildEvidenceDetails(evidence))
+                .setTitle("No safe local match")
+                .setMessage(
+                    buildEvidenceDetails(evidence) +
+                        "\n\nNo local transaction matches this evidence by amount, bank/account, direction, and time."
+                )
                 .setPositiveButton("Close", null)
                 .show()
             return
@@ -271,9 +302,13 @@ class ReviewActivity : AppCompatActivity() {
         val labels = candidates.map { transactionLabel(it) }.toTypedArray()
         var selected = -1
 
+        val candidateSummary =
+            "\n\nPossible matching transactions: " + candidates.size + "\n" +
+                "Select the transaction that represents the same real-world payment."
+
         AlertDialog.Builder(this)
             .setTitle("Match " + evidence.sourceType.name + " evidence")
-            .setMessage(buildEvidenceDetails(evidence))
+            .setMessage(buildEvidenceDetails(evidence) + candidateSummary)
             .setSingleChoiceItems(labels, -1) { _, which -> selected = which }
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Match") { _, _ ->
