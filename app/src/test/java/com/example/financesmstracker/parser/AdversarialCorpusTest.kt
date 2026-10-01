@@ -111,6 +111,20 @@ class AdversarialCorpusTest {
     }
 
     @Test
+    fun testN2_MissingAmountAfterDebitMustBeRejected() {
+        val sms = "Your HDFC account was debited from a/c xx9591 for a UPI payment."
+        val result = parserManager.parse("JD-HDFCBK-S", sms)
+        assertFalse(result.isTransaction)
+    }
+
+    @Test
+    fun testN3_NonNumericAmountMustBeRejected() {
+        val sms = "INR abc.00 was debited from a/c xx9591."
+        val result = parserManager.parse("JD-HDFCBK-S", sms)
+        assertFalse(result.isTransaction)
+    }
+
+    @Test
     fun testO_SpoofedBankNameInBodyFromUntrustedSender() {
         val sender = "+919876543210" // Untrusted
         val sms = "HDFC Bank credited Rs. 500.00 to your account."
