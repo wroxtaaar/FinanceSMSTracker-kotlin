@@ -163,7 +163,7 @@ def test_imap_falls_back_to_inbox_when_all_mail_is_unavailable(monkeypatch):
     service = IMAPService()
 
     assert service.folder == "INBOX"
-    assert fake.selected == ["[Gmail]/All Mail", "INBOX"]
+    assert fake.selected == ['"[Gmail]/All Mail"', '"INBOX"']
     assert service.uidvalidity == "7"
 
 
