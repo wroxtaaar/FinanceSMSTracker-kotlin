@@ -16,6 +16,7 @@ class AxisSmsParser : SmsParser {
 
 
         val currency = AmountParser.parseCurrency(messageBody)
+        val amountPaise = AmountParser.parseAmountToPaise(messageBody) ?: 0L
 
         val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") || lowerBody.contains("added") || lowerBody.contains("refund")
         val isDebit = lowerBody.contains("debited") || lowerBody.contains("deducted") || lowerBody.contains("spent") || lowerBody.contains("paid") || lowerBody.contains("charged") || lowerBody.contains("transferred") || lowerBody.contains("transfer")
