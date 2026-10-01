@@ -130,18 +130,60 @@
 
     </LinearLayout>
 
-    <Button
-        android:id="@+id/buttonReviewReconcile"
+    <LinearLayout
+        android:id="@+id/oracleControlsRow"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:minHeight="0dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:text="Review &amp; Reconcile"
+        android:orientation="horizontal"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel" />
+        app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel">
+
+        <Button
+            android:id="@+id/buttonRefreshOracle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:text="Refresh" />
+
+        <Button
+            android:id="@+id/buttonViewAccounts"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:minHeight="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:text="Accounts" />
+
+        <Button
+            android:id="@+id/buttonOracleSettings"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:minHeight="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:text="Settings" />
+
+        <Button
+            android:id="@+id/buttonReviewReconcile"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:minHeight="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:text="Review" />
+
+    </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerViewTransactions"
