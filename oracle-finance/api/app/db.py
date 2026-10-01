@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   id TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL, currency TEXT NOT NULL,
   type TEXT NOT NULL, payment_method TEXT NOT NULL, account_type TEXT NOT NULL,
   bank TEXT, merchant_or_payee TEXT, account_last4 TEXT, reference TEXT,
-  timestamp INTEGER NOT NULL, category TEXT NOT NULL, confidence REAL NOT NULL, duplicate_of TEXT, created_at INTEGER NOT NULL
+  timestamp INTEGER NOT NULL, category TEXT NOT NULL, confidence REAL NOT NULL, duplicate_of TEXT, status TEXT NOT NULL DEFAULT 'ACTIVE', created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS evidence (
   id TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_id TEXT NOT NULL, status TEXT NOT NULL,
@@ -86,6 +86,9 @@ def init_db():
         }
         if "duplicate_of" not in transaction_columns:
             conn.execute("ALTER TABLE transactions ADD COLUMN duplicate_of TEXT")
+
+        if "status" not in transaction_columns:
+            conn.execute("ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE')
 
         account_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()
