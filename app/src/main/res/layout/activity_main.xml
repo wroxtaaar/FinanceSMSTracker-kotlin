@@ -172,6 +172,27 @@
             android:paddingEnd="2dp"
             android:text="Settings" />
 
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/oracleControlsRow2"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow">
+
+        <Button
+            android:id="@+id/buttonGmailSync"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:text="Gmail" />
+
         <Button
             android:id="@+id/buttonReviewReconcile"
             android:layout_width="0dp"
@@ -193,7 +214,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow"
+        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow2"
         tools:listitem="@layout/item_transaction" />
 
     <TextView
