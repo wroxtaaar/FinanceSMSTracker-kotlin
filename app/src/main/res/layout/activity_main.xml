@@ -24,6 +24,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:text="Open Notification Access Settings"
+        android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/textViewTitle" />
@@ -127,26 +128,6 @@
                 android:text="Cards" />
         </LinearLayout>
 
-        <Button
-            android:id="@+id/buttonRefreshOracle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Refresh Oracle Ledger" />
-
-        <Button
-            android:id="@+id/buttonViewAccounts"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="View All Accounts" />
-
-        <Button
-            android:id="@+id/buttonOracleSettings"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Oracle Sync Settings" />
     </LinearLayout>
 
     <Button
