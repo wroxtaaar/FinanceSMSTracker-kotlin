@@ -34,7 +34,7 @@ class FakeIMAP:
         raise AssertionError(command)
 
 
-def test_incremental_imap_uses_sender_scoped_searches_only():
+def test_incremental_imap_uses_sender_scoped_searches_and_honors_query():
     service = IMAPService.__new__(IMAPService)
     service._imap = FakeIMAP()
     service.uidvalidity = "7"
@@ -43,17 +43,21 @@ def test_incremental_imap_uses_sender_scoped_searches_only():
         2026, 10, 1, tzinfo=timezone.utc
     )
 
-    result = service._list_messages("newer_than:30d", 100)
+    result = service._list_messages("after:2026/10/01", 100)
 
     searches = service._imap.searches
     assert searches
-    assert all("SINCE 01-Oct-2026" in s for s in searches)
+    assert all('SINCE "01-Oct-2026"' in s for s in searches)
     assert any('FROM "alerts@axis.bank.in"' in s for s in searches)
     # HDFC is a configured sender too; the important invariant is that every
     # search is sender-scoped rather than a broad bank-domain scan.
     assert all("FROM " in s for s in searches)
     assert not any("@axis.bank.in" in s and s.count("FROM") > 1 for s in searches)
     assert len(result["messages"]) == 2
+    diagnostics = result["diagnostics"]
+    assert diagnostics["query"] == "after:2026/10/01"
+    assert diagnostics["candidateUidCount"] == 2
+    assert diagnostics["senderSearchCounts"]["alerts@axis.bank.in"] == 2
 
 
 def _payload(sender, subject, body):
@@ -83,6 +87,8 @@ def test_axis_credit_email_parser_handles_real_format():
         Account Number: XX3370
         Date & Time: 01-10-26, 17:15:42 IST
         Transaction Info: UPI/P2A/18335801167/ABDUL WAS/HDFC/Paym
+        Axis Bank promotion: Apply Now. CLICK HERE for details.
+        Never share your OTP, URN, CVV or password with anyone.
         """,
     )
 
@@ -106,6 +112,8 @@ def test_icici_credit_card_email_parser_handles_real_format():
         Info: AMAZON PAY IN RECHARGE.
         The Available Credit Limit on your card is INR 3,46,849.06 and
         Total Credit Limit is INR 3,80,000.00.
+        Never share your OTP, URN, CVV or password with anyone.
+        Click here for more information.
         """,
     )
 
