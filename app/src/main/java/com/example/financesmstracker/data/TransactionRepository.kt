@@ -457,8 +457,8 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         val cursor = db.query(
             FinanceDatabaseHelper.TABLE_TRANSACTIONS,
             null,
-            null,
-            null,
+            "${FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS} = ?",
+            arrayOf("ACTIVE"),
             null,
             null,
             "${FinanceDatabaseHelper.COLUMN_TIMESTAMP} DESC"
@@ -471,6 +471,19 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         }
 
         return list
+    }
+
+    fun voidTransaction(id: Long): Int {
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put(FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS, "VOIDED")
+        }
+        return db.update(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            values,
+            "${FinanceDatabaseHelper.COLUMN_ID} = ?",
+            arrayOf(id.toString())
+        )
     }
 
     fun updateTransactionCategory(id: Long, category: String): Int {
