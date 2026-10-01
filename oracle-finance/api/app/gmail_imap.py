@@ -107,6 +107,12 @@ def message_to_api_shape(raw_message, uid, uidvalidity, folder):
     }
 
 
+def _quote_imap_string(value):
+    """Quote an IMAP string argument for imaplib, which does not quote args."""
+    value = str(value).replace("\\", "\\\\").replace('"', '\"')
+    return f'"{value}"'
+
+
 def query_to_imap_search(query):
     query = (query or "").strip()
 
@@ -219,7 +225,7 @@ class IMAPService:
                 ) from exc
 
             stage = "mailbox selection"
-            status, data = imap.select(self.folder)
+            status, data = imap.select(_quote_imap_string(self.folder))
             attempts = [
                 f"{self.folder}=>{status}"
                 + (f" {data!r}" if data and status != "OK" else "")
@@ -227,7 +233,7 @@ class IMAPService:
 
             # The bank emails currently visible in Gmail are in Inbox.
             if status != "OK" and self.folder.casefold() != "inbox":
-                fallback_status, fallback_data = imap.select("INBOX")
+                fallback_status, fallback_data = imap.select(_quote_imap_string("INBOX"))
                 attempts.append(
                     "INBOX=>"
                     + str(fallback_status)
@@ -243,7 +249,7 @@ class IMAPService:
 
             advertised = []
             if status != "OK":
-                list_status, folders = imap.list("", "*")
+                list_status, folders = imap.list('""', '"*"')
                 if list_status == "OK":
                     for raw in folders or []:
                         if not isinstance(raw, bytes):
@@ -263,7 +269,7 @@ class IMAPService:
                         if not mailbox:
                             continue
 
-                        mailbox_status, mailbox_data = imap.select(mailbox)
+                        mailbox_status, mailbox_data = imap.select(_quote_imap_string(mailbox))
                         attempts.append(
                             f"{mailbox}=>{mailbox_status}"
                             + (
