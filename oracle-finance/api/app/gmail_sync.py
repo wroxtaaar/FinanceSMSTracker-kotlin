@@ -507,6 +507,109 @@ def _repair_legacy_icici_credit_card_classifications(service):
     return repaired
 
 
+def _repair_legacy_gmail_merchants(service):
+    """Backfill missing merchant/payee names on existing Gmail transactions.
+
+    Re-fetch the original Gmail message and let the current parser recover a
+    merchant when the stored transaction has no merchant value. Only the
+    transaction's descriptive merchant field and confidence/evidence metadata
+    are updated; balances and transaction identity are never changed here.
+    """
+    repaired = 0
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                t.id,
+                t.amount_minor,
+                t.type,
+                t.currency,
+                t.bank,
+                t.account_last4,
+                t.status,
+                t.duplicate_of,
+                t.merchant_or_payee,
+                e.source_id
+            FROM transactions t
+            JOIN evidence e
+              ON e.transaction_id = t.id
+             AND e.source_type = 'GMAIL'
+            WHERE t.id LIKE 'gmail:%'
+              AND t.status = 'ACTIVE'
+              AND t.duplicate_of IS NULL
+              AND TRIM(COALESCE(t.merchant_or_payee,'')) = ''
+            ORDER BY t.timestamp ASC
+            """
+        ).fetchall()
+
+        for row in rows:
+            try:
+                message_id = _gmail_message_id_from_source_id(row["source_id"])
+            except ValueError:
+                continue
+
+            try:
+                message = service.users().messages().get(
+                    userId="me",
+                    id=message_id,
+                    format="full",
+                ).execute()
+            except Exception:
+                continue
+
+            parsed = parse_bank_email(message)
+            if not parsed:
+                continue
+
+            parsed_t, parsed_e = parsed
+            if parsed_t.id != row["id"]:
+                continue
+            if (
+                parsed_t.amountMinor != row["amount_minor"]
+                or parsed_t.currency != row["currency"]
+                or parsed_t.type != row["type"]
+                or parsed_t.bank != row["bank"]
+                or parsed_t.accountLast4 != row["account_last4"]
+                or not parsed_t.merchantOrPayee
+            ):
+                continue
+
+            conn.execute(
+                """
+                UPDATE transactions
+                   SET merchant_or_payee=?,
+                       confidence=?
+                 WHERE id=?
+                """,
+                (
+                    parsed_t.merchantOrPayee,
+                    parsed_t.confidence,
+                    row["id"],
+                ),
+            )
+
+            conn.execute(
+                """
+                UPDATE evidence
+                   SET reference=?,
+                       content_hash=?,
+                       confidence=?
+                 WHERE source_type='GMAIL'
+                   AND source_id=?
+                """,
+                (
+                    parsed_e.reference,
+                    parsed_e.contentHash,
+                    parsed_e.confidence,
+                    row["source_id"],
+                ),
+            )
+
+            repaired += 1
+
+    return repaired
+
+
 def parse_bank_email(message):
     payload=message.get("payload",{})
     headers=_headers(payload)
@@ -586,6 +689,7 @@ def ingest_messages(service,query="newer_than:30d"):
     stats["repairedTransactions"] = (
         _repair_legacy_gmail_account_classifications()
         + _repair_legacy_icici_credit_card_classifications(service)
+        + _repair_legacy_gmail_merchants(service)
     )
 
     # Gmail's API is paginated. IMAPService intentionally exposes only one
