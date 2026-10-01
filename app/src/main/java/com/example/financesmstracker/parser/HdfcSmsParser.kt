@@ -14,9 +14,9 @@ class HdfcSmsParser : SmsParser {
 
         val lowerBody = messageBody.lowercase()
 
-
         val currency = AmountParser.parseCurrency(messageBody)
-        val amountPaise = AmountParser.parseAmountToPaise(messageBody) ?: 0L
+        val amountPaise = AmountParser.parseAmountToPaise(messageBody)
+            ?: return ParserResult(isTransaction = false)
 
         val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") || 
                        lowerBody.contains("added") || lowerBody.contains("refund") || 
