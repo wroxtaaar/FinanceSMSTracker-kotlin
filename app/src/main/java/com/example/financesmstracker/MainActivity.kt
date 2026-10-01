@@ -41,6 +41,7 @@ import com.example.financesmstracker.truecaller.NotificationAccessHelper
 import com.example.financesmstracker.ui.TransactionAdapter
 
 import com.example.financesmstracker.integration.FinanceSyncClient
+import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.integration.SyncSettings
 import com.example.financesmstracker.integration.OracleLedgerSummary
 import com.example.financesmstracker.integration.OracleAccount
@@ -823,14 +824,15 @@ class MainActivity : AppCompatActivity() {
         buttonVoidTransaction.setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Void Transaction?")
-                .setMessage("This removes the transaction from this phone's history. It does not delete the original SMS.")
+                .setMessage("This removes the transaction from this phone's history and queues the void for Oracle. It does not delete the original SMS.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Void") { _, _ ->
                     val updated = repository.voidTransaction(tx.id)
                     if (updated > 0) {
                         dialog.dismiss()
                         loadTransactions()
-                        Toast.makeText(this, "Transaction voided", Toast.LENGTH_SHORT).show()
+                        FinanceSyncBridge.enqueueVoidedTransaction(this, tx.id)
+                        Toast.makeText(this, "Transaction voided and queued for Oracle sync", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(this, "Could not void transaction", Toast.LENGTH_LONG).show()
                     }
