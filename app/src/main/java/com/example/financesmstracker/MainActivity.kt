@@ -260,7 +260,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateReviewCount() {
-        val count = repository.getUnresolvedEvidenceCount()
+        val count =
+            repository.getUnresolvedEvidenceCount() +
+            repository.getUnresolvedUnrecognizedSmsCount()
+
         buttonReviewReconcile.text = if (count > 0) {
             "Review & Reconcile ($count)"
         } else {
