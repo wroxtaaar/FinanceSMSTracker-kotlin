@@ -18,6 +18,11 @@ class SmsParserManager {
         for (parser in parsers) {
             val result = parser.parse(sender, messageBody)
             if (result != null) {
+                // A parser must never turn malformed text into a ledger transaction.
+                // Amount extraction is mandatory for every canonical transaction.
+                if (!result.isTransaction || result.amountPaise <= 0L) {
+                    return ParserResult(isTransaction = false)
+                }
                 return result
             }
         }
