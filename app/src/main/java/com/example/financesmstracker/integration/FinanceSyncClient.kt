@@ -122,7 +122,9 @@ class FinanceSyncClient(
             val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 10_000
-                readTimeout = 30_000
+                // Gmail sync may need to fetch several new messages from IMAP.
+                // Keep enough time for that work instead of failing at 30s.
+                readTimeout = 120_000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
