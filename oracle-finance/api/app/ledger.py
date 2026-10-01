@@ -8,10 +8,10 @@ def sync_transaction(t):
         before=conn.execute("SELECT id FROM transactions WHERE id=?",(t.id,)).fetchone()
         created_at=now_ms()
         conn.execute("""INSERT OR IGNORE INTO transactions
-        (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,t.reference,
-         t.timestamp,t.category,t.confidence,None,created_at))
+         t.timestamp,t.category,t.confidence,None,"ACTIVE",created_at))
 
         if before is None and not str(t.id).startswith("gmail:"):
             apply_transaction_to_account(conn, t, created_at)
@@ -84,6 +84,42 @@ def sync_evidence(e):
          e.direction,e.bankProvider,e.accountLast4,e.reference,e.contentHash,e.confidence,now_ms()))
         return before is None
 
+def void_transaction(transaction_id):
+    with connection() as conn:
+        tx=conn.execute(
+            "SELECT id,status FROM transactions WHERE id=?",
+            (transaction_id,)
+        ).fetchone()
+        if not tx:
+            return {"status":"NOT_FOUND","transactionId":transaction_id}
+        if tx["status"]=="VOIDED":
+            return {"status":"ALREADY_VOIDED","transactionId":transaction_id}
+
+        adjustment=conn.execute(
+            "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
+            (transaction_id,)
+        ).fetchone()
+
+        if adjustment:
+            conn.execute(
+                "UPDATE accounts SET balance_minor=balance_minor-?, updated_at=? WHERE id=?",
+                (adjustment["delta_minor"], now_ms(), adjustment["account_id"])
+            )
+            conn.execute(
+                "DELETE FROM balance_adjustments WHERE transaction_id=?",
+                (transaction_id,)
+            )
+
+        conn.execute(
+            "UPDATE transactions SET status='VOIDED' WHERE id=?",
+            (transaction_id,)
+        )
+        return {
+            "status":"VOIDED",
+            "transactionId":transaction_id,
+            "reversedAdjustment": bool(adjustment)
+        }
+
 def balances():
     with connection() as conn:
         return [dict(r) for r in conn.execute("SELECT * FROM accounts ORDER BY name").fetchall()]
@@ -145,7 +181,7 @@ def true_available(currency="INR"):
 
 def list_transactions(limit=100):
     with connection() as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM transactions WHERE duplicate_of IS NULL ORDER BY timestamp DESC LIMIT ?",(limit,)).fetchall()]
+        return [dict(r) for r in conn.execute("SELECT * FROM transactions WHERE duplicate_of IS NULL AND status='ACTIVE' ORDER BY timestamp DESC LIMIT ?",(limit,)).fetchall()]
 
 def list_review_queue():
     with connection() as conn:
