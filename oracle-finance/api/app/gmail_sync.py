@@ -162,8 +162,13 @@ def _reference(combined):
 
 def _merchant_or_payee(combined):
     normalized = _plain_text(combined)
+
+    # In Axis account alerts, "Transaction Info:" is the reference block, not
+    # a merchant field. Only a standalone "Info:" field should populate the
+    # merchant/payee value. This prevents the rest of the bank's disclaimer
+    # from being displayed as the merchant.
     match = re.search(
-        r"(?is)\bInfo\s*:\s*(.*?)(?=\s+(?:The\s+)?"
+        r"(?is)(?<!Transaction)\bInfo\s*:\s*(.*?)(?=\s+(?:The\s+)?"
         r"(?:Available\s+Credit\s+Limit|Total\s+Credit\s+Limit|"
         r"Available\s+Balance|Credit\s+Limit)\b|$)",
         normalized,
@@ -610,6 +615,116 @@ def _repair_legacy_gmail_merchants(service):
     return repaired
 
 
+def _repair_legacy_gmail_merchant_values(service):
+    """Repair stale Gmail merchant values using the current parser.
+
+    This covers both missing merchants and old values that accidentally stored
+    bank disclaimer text as the merchant. Only an identity-verified Gmail row
+    is updated, and no balance adjustment is touched.
+    """
+    repaired = 0
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                t.id,
+                t.amount_minor,
+                t.type,
+                t.currency,
+                t.bank,
+                t.account_last4,
+                t.status,
+                t.duplicate_of,
+                t.merchant_or_payee,
+                e.source_id
+            FROM transactions t
+            JOIN evidence e
+              ON e.transaction_id = t.id
+             AND e.source_type = 'GMAIL'
+            WHERE t.id LIKE 'gmail:%'
+              AND t.status = 'ACTIVE'
+              AND t.duplicate_of IS NULL
+            ORDER BY t.timestamp ASC
+            """
+        ).fetchall()
+
+        for row in rows:
+            try:
+                message_id = _gmail_message_id_from_source_id(row["source_id"])
+                message = service.users().messages().get(
+                    userId="me",
+                    id=message_id,
+                    format="full",
+                ).execute()
+            except (ValueError, RuntimeError):
+                continue
+            except Exception:
+                continue
+
+            parsed = parse_bank_email(message)
+            if not parsed:
+                continue
+
+            parsed_t, parsed_e = parsed
+            if (
+                parsed_t.id != row["id"]
+                or parsed_t.amountMinor != row["amount_minor"]
+                or parsed_t.currency != row["currency"]
+                or parsed_t.type != row["type"]
+                or parsed_t.bank != row["bank"]
+                or parsed_t.accountLast4 != row["account_last4"]
+            ):
+                continue
+
+            current = (row["merchant_or_payee"] or "").strip()
+            parsed_merchant = (parsed_t.merchantOrPayee or "").strip()
+
+            # Update only when the parser has a useful replacement, or when
+            # the current value is clearly a bank disclaimer/reference block.
+            looks_like_garbage = bool(re.search(
+                r"(?i)If this transaction|Feel free to connect|Copyright Axis Bank|"
+                r"system generated|Please do not share|Internet communications|"
+                r"Transaction Info\s*:",
+                current,
+            ))
+            if not parsed_merchant and not looks_like_garbage:
+                continue
+            if current == parsed_merchant:
+                continue
+
+            conn.execute(
+                """
+                UPDATE transactions
+                   SET merchant_or_payee=?,
+                       confidence=?
+                 WHERE id=?
+                """,
+                (
+                    parsed_t.merchantOrPayee,
+                    parsed_t.confidence,
+                    row["id"],
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE evidence
+                   SET reference=?,
+                       content_hash=?,
+                       confidence=?
+                 WHERE source_type='GMAIL'
+                   AND source_id=?
+                """,
+                (
+                    parsed_e.reference,
+                    parsed_e.contentHash,
+                    parsed_e.confidence,
+                    row["source_id"],
+                ),
+            )
+            repaired += 1
+
+    return repaired
+
 def parse_bank_email(message):
     payload=message.get("payload",{})
     headers=_headers(payload)
@@ -690,6 +805,7 @@ def ingest_messages(service,query="newer_than:30d"):
         _repair_legacy_gmail_account_classifications()
         + _repair_legacy_icici_credit_card_classifications(service)
         + _repair_legacy_gmail_merchants(service)
+        + _repair_legacy_gmail_merchant_values(service)
     )
 
     # Gmail's API is paginated. IMAPService intentionally exposes only one
