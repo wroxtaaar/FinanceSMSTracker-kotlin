@@ -281,7 +281,6 @@ class MainActivity : AppCompatActivity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine(true)
             setText(settings.baseUrl())
-            selectAllOnFocus = false
         }
 
         val tokenInput = EditText(this).apply {
