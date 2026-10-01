@@ -142,6 +142,118 @@ def _looks_like_transaction(combined, amount, direction):
     return bool(_TRANSACTION_SIGNAL.search(combined))
 
 
+def _is_bank_account_email(combined):
+    # Explicit bank-account labels must win over generic card/promotion text in
+    # the footer. This is especially important for Axis emails that say
+    # "credited to your A/c" and separately contain credit-card promotions.
+    return bool(re.search(
+        r"(?i)\bA/c\b|\baccount\s+(?:number|no\.?)\b|\bbank\s+account\b",
+        combined,
+    ))
+
+
+def _repair_legacy_gmail_account_classifications():
+    """Fix already-parsed Gmail transactions using a strong bank-account label.
+
+    Older parser versions could classify an Axis A/c credit as CREDIT_CARD when
+    the HTML/email footer also mentioned cards. Repair only active Gmail
+    transactions that are unambiguously tied to an Axis A/c alert and have a
+    matching configured bank account.
+    """
+    repaired = 0
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                t.id,
+                t.amount_minor,
+                t.type,
+                t.bank,
+                t.account_type,
+                t.account_last4,
+                t.status,
+                t.duplicate_of,
+                t.payment_method,
+                gm.id AS gmail_id,
+                gm.sender,
+                gm.subject,
+                a.id AS target_account_id,
+                ba.account_id AS adjustment_account_id,
+                ba.delta_minor AS adjustment_delta
+            FROM transactions t
+            JOIN evidence e
+              ON e.transaction_id = t.id
+             AND e.source_type = 'GMAIL'
+            JOIN gmail_messages gm
+              ON gm.id = e.source_id
+            JOIN accounts a
+              ON a.account_type = 'BANK_ACCOUNT'
+             AND a.currency = t.currency
+             AND UPPER(TRIM(COALESCE(a.bank,''))) = 'AXIS'
+             AND TRIM(COALESCE(a.last4,'')) = TRIM(COALESCE(t.account_last4,''))
+            LEFT JOIN balance_adjustments ba
+              ON ba.transaction_id = t.id
+            WHERE t.id LIKE 'gmail:%'
+              AND t.status = 'ACTIVE'
+              AND t.duplicate_of IS NULL
+              AND UPPER(TRIM(COALESCE(t.bank,''))) = 'AXIS'
+              AND UPPER(TRIM(COALESCE(t.account_type,''))) = 'CREDIT_CARD'
+              AND UPPER(TRIM(COALESCE(t.type,''))) = 'CREDIT'
+              AND LOWER(TRIM(COALESCE(gm.sender,''))) = 'alerts@axis.bank.in'
+              AND LOWER(COALESCE(gm.subject,'')) LIKE '%was credited to your a/c%'
+            """
+        ).fetchall()
+
+        for row in rows:
+            # Undo an adjustment that was attached to the wrong account, if
+            # one exists. Normally the old misclassification had no matching
+            # adjustment, but this keeps the repair safe and idempotent.
+            if row["adjustment_account_id"] and row["adjustment_account_id"] != row["target_account_id"]:
+                conn.execute(
+                    "UPDATE accounts SET balance_minor=balance_minor-?, updated_at=? WHERE id=?",
+                    (row["adjustment_delta"], int(time.time()*1000), row["adjustment_account_id"]),
+                )
+                conn.execute(
+                    "DELETE FROM balance_adjustments WHERE transaction_id=?",
+                    (row["id"],),
+                )
+
+            now = int(time.time() * 1000)
+            conn.execute(
+                """
+                UPDATE transactions
+                   SET account_type='BANK_ACCOUNT',
+                       payment_method='UPI'
+                 WHERE id=?
+                """,
+                (row["id"],),
+            )
+
+            adjustment = conn.execute(
+                "SELECT account_id FROM balance_adjustments WHERE transaction_id=?",
+                (row["id"],),
+            ).fetchone()
+
+            if adjustment is None:
+                delta = row["amount_minor"] if row["type"] == "CREDIT" else -row["amount_minor"]
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO balance_adjustments
+                    (transaction_id, account_id, delta_minor, applied_at)
+                    VALUES (?,?,?,?)
+                    """,
+                    (row["id"], row["target_account_id"], delta, now),
+                )
+                conn.execute(
+                    "UPDATE accounts SET balance_minor=balance_minor+?, updated_at=? WHERE id=?",
+                    (delta, now, row["target_account_id"]),
+                )
+
+            repaired += 1
+
+    return repaired
+
+
 def parse_bank_email(message):
     payload=message.get("payload",{})
     headers=_headers(payload)
@@ -190,7 +302,16 @@ def parse_bank_email(message):
     if score < 0.90:
         return None
 
-    account_type="CREDIT_CARD" if re.search(r"(?i)credit card|card ending|card no|card number",combined) else "BANK_ACCOUNT"
+    # Strong bank-account identity takes precedence over generic card/footer
+    # wording. This prevents an Axis A/c alert from becoming a card
+    # transaction merely because the email contains a credit-card promotion.
+    account_type = (
+        "BANK_ACCOUNT"
+        if _is_bank_account_email(combined)
+        else "CREDIT_CARD"
+        if re.search(r"(?i)credit card|card ending|card no|card number", combined)
+        else "BANK_ACCOUNT"
+    )
     tx_id="gmail:"+hashlib.sha256((message["id"]+":"+str(amount)+":"+direction).encode()).hexdigest()[:32]
     ev_id="gmail-evidence:"+message["id"]
     t=SyncTransactionModel(id=tx_id,amountMinor=amount,currency="INR",type=direction,
@@ -213,8 +334,11 @@ def ingest_messages(service,query="newer_than:30d"):
         "reviewCount":0,
         "ignoredCount":0,
         "createdEvidence":0,
+        "repairedTransactions":0,
         "gmailDiagnostics":None,
     }
+
+    stats["repairedTransactions"] = _repair_legacy_gmail_account_classifications()
 
     # Gmail's API is paginated. IMAPService intentionally exposes only one
     # result page, so this loop also works with IMAP while consuming every
