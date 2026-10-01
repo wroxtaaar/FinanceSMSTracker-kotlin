@@ -94,10 +94,10 @@ def _google_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def service():
+def service(historical=False):
     if _provider() == "imap":
         from .gmail_imap import IMAPService
-        return IMAPService()
+        return IMAPService(historical=historical)
 
     if _provider() == "oauth":
         return _google_service()
@@ -105,8 +105,8 @@ def service():
     raise RuntimeError(f"Unsupported GMAIL_PROVIDER: {_provider()}")
 
 
-def sync(query=None):
-    gmail_service = service()
+def sync(query=None, historical=False):
+    gmail_service = service(historical=historical)
     try:
         return ingest_messages(
             gmail_service,
