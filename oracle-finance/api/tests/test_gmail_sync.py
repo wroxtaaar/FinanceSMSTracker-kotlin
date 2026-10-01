@@ -16,6 +16,7 @@ from app.gmail_sync import (
     ingest_messages,
     parse_bank_email,
     _repair_legacy_gmail_account_classifications,
+    _repair_legacy_icici_credit_card_classifications,
 )
 from app.ledger import set_balance, sync_transaction
 
@@ -481,6 +482,139 @@ def test_icici_real_credit_card_alert_from_bank_in_sender():
     assert transaction.merchantOrPayee == "AMAZON PAY IN RECHARGE"
     assert transaction.reference is None
     assert evidence.reference is None
+
+
+def test_repair_legacy_icici_credit_card_reparses_existing_row():
+    message = _message(
+        "imap:[Gmail]/All Mail:11:99002",
+        "Dear Customer, Your ICICI Bank Credit Card XX1012 has been used "
+        "for a transaction of INR 641.00 on Sep 27, 2026 at 12:17:29. "
+        "Info: AMAZON PAY GROCERY. "
+        "The Available Credit Limit on your card is INR 100000.00 and Total Credit Limit is INR 200000.00. "
+        "You can pay your Credit Card bills from your bank account.",
+        subject="Transaction alert for your ICICI Bank Credit Card",
+        internal_date="1790491657000",
+    )
+    parsed = parse_bank_email(message)
+    assert parsed is not None
+    parsed_transaction, _ = parsed
+
+    set_balance(
+        "icici-repair",
+        "ICICI Credit Card 1012",
+        "INR",
+        "CREDIT_CARD",
+        "ICICI",
+        "1012",
+        100000,
+    )
+
+    gmail_id = "11:99002"
+    transaction_id = parsed_transaction.id
+
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO transactions
+            (id,amount_minor,currency,type,payment_method,account_type,bank,
+             merchant_or_payee,account_last4,reference,timestamp,category,
+             confidence,duplicate_of,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                transaction_id,
+                64100,
+                "INR",
+                "DEBIT",
+                "UPI",
+                "BANK_ACCOUNT",
+                "ICICI",
+                None,
+                "1012",
+                "alert/1",
+                1790491657000,
+                "OTHER",
+                1.0,
+                None,
+                "ACTIVE",
+                1790491657000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                gmail_id,
+                "thread-icici-legacy",
+                1790491657000,
+                "credit_cards@icici.bank.in",
+                "Transaction alert for your ICICI Bank Credit Card",
+                "icici-legacy-fingerprint",
+                "PARSED",
+                1790491657000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO evidence
+            (id,source_type,source_id,status,observed_at,transaction_id,
+             matched_transaction_id,amount_minor,currency,direction,
+             bank_provider,account_last4,reference,content_hash,confidence,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "gmail-evidence:"+message["id"],
+                "GMAIL",
+                message["id"],
+                "UNMATCHED",
+                1790491657000,
+                transaction_id,
+                None,
+                64100,
+                "INR",
+                "DEBIT",
+                "ICICI",
+                "1012",
+                "alert/1",
+                "legacy-icici-hash",
+                1.0,
+                1790491657000,
+            ),
+        )
+
+    service = FakeService([message])
+    assert _repair_legacy_icici_credit_card_classifications(service) == 1
+    assert _repair_legacy_icici_credit_card_classifications(service) == 0
+
+    with connection() as conn:
+        tx = conn.execute(
+            "SELECT account_type,payment_method,merchant_or_payee,reference FROM transactions WHERE id=?",
+            (transaction_id,),
+        ).fetchone()
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='icici-repair'"
+        ).fetchone()["balance_minor"]
+        adjustment = conn.execute(
+            "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
+            (transaction_id,),
+        ).fetchone()
+        evidence = conn.execute(
+            "SELECT reference,matched_transaction_id FROM evidence WHERE source_id=?",
+            (message["id"],),
+        ).fetchone()
+
+    assert tx["account_type"] == "CREDIT_CARD"
+    assert tx["payment_method"] == "CARD"
+    assert tx["merchant_or_payee"] == "AMAZON PAY GROCERY"
+    assert tx["reference"] is None
+    assert balance == 164100
+    assert adjustment["account_id"] == "icici-repair"
+    assert adjustment["delta_minor"] == 64100
+    assert evidence["reference"] is None
+    assert evidence["matched_transaction_id"] is None
 
 
 def test_icici_transaction_subject_is_not_a_reference():
