@@ -227,33 +227,40 @@ class IMAPService:
         uids.reverse()
 
         messages = []
-        for uid in uids:
-            status, header_data = self._imap.uid(
-                "FETCH",
-                uid,
-                "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])",
-            )
-            if status != "OK":
-                messages.append({"id": f"{self.uidvalidity}:{uid}"})
-                continue
+        if not uids:
+            return {"messages": messages}
 
-            header_bytes = None
+        # Fetch lightweight headers for the whole bounded UID set in one IMAP
+        # request. This is much cheaper than downloading 100 full messages.
+        status, header_data = self._imap.uid(
+            "FETCH",
+            ",".join(uids),
+            "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])",
+        )
+        headers_by_uid = {}
+        if status == "OK":
             for item in header_data or []:
-                if isinstance(item, tuple) and len(item) == 2 and isinstance(item[1], bytes):
-                    header_bytes = item[1]
-                    break
+                if not (
+                    isinstance(item, tuple)
+                    and len(item) == 2
+                    and isinstance(item[0], bytes)
+                    and isinstance(item[1], bytes)
+                ):
+                    continue
+                match = re.search(rb"(\d+) FETCH", item[0])
+                if not match:
+                    continue
+                uid = match.group(1).decode("ascii")
+                header_message = email.message_from_bytes(item[1])
+                headers_by_uid[uid] = {
+                    "from": _decode_header_value(header_message.get("From", "")),
+                    "subject": _decode_header_value(header_message.get("Subject", "")),
+                }
 
-            if header_bytes is None:
-                messages.append({"id": f"{self.uidvalidity}:{uid}"})
-                continue
-
-            header_message = email.message_from_bytes(header_bytes)
-            messages.append({
-                "id": f"{self.uidvalidity}:{uid}",
-                "from": _decode_header_value(header_message.get("From", "")),
-                "subject": _decode_header_value(header_message.get("Subject", "")),
-            })
-
+        for uid in uids:
+            item = {"id": f"{self.uidvalidity}:{uid}"}
+            item.update(headers_by_uid.get(uid, {}))
+            messages.append(item)
         return {"messages": messages}
 
     def _get_message(self, message_id):
