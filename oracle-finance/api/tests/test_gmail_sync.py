@@ -22,7 +22,13 @@ from app.gmail_sync import (
     _repair_self_transfer_gmail_merchants,
 )
 from app.ledger import set_balance, sync_transaction
-from app.statement_sync import _hdfc_metadata, _parse_hdfc_rows, process_statement_attachments
+from app.statement_sync import (
+    _hdfc_metadata,
+    _parse_hdfc_rows,
+    _icici_metadata,
+    parse_icici_statement,
+    process_statement_attachments,
+)
 
 init_db()
 
@@ -1090,3 +1096,44 @@ def test_statement_attachment_is_imported_once_and_updates_balance(monkeypatch):
     assert attachment["status"] == "PARSED"
     assert attachment["transaction_count"] == 1
     assert statements == 1
+
+
+def test_icici_statement_text_parser_matches_uploaded_layout(monkeypatch):
+    text = """STATEMENT SUMMARY
+SPENDS OVERVIEW
+Date SerNo. Transaction Details Reward Points Intl.# amount Amount (in₹)
+4315XXXXXXXX1012
+31/08/2026 14082331109 BBPS Payment received 0 1,631.00 CR
+11/09/2026 14151292488 AMAZON PAY IN E COMMERC BANGALORE
+IN
+15 504.99
+16/09/2026 14183724817 AMAZON PAY IN E COMMERC BANGALORE
+IN
+14 494.99
+# International Spends
+Credit Limit (Including cash) Available Credit (Including cash) Cash Limit Available Cash
+₹3,80,000.00 ₹3,78,359.02 ₹38,000.00 ₹38,000.00
+Statement period : August 29, 2026 to September 28, 2026
+"""
+    metadata = _icici_metadata(text)
+    assert metadata["bank"] == "ICICI"
+    assert metadata["account_type"] == "CREDIT_CARD"
+    assert metadata["account_last4"] == "1012"
+    assert metadata["currency"] == "INR"
+
+    monkeypatch.setattr(
+        "app.statement_sync._pdf_text",
+        lambda pdf_bytes, key: text,
+    )
+    metadata, rows = parse_icici_statement(b"fixture", "fixture-secret")
+
+    assert len(rows) == 3
+    assert rows[0]["type"] == "CREDIT"
+    assert rows[0]["amount_minor"] == 163100
+    assert rows[0]["reference"] == "14082331109"
+    assert rows[0]["merchant"] == "BBPS Payment received"
+
+    assert rows[1]["type"] == "DEBIT"
+    assert rows[1]["amount_minor"] == 50499
+    assert rows[1]["merchant"] == "AMAZON PAY IN E COMMERC BANGALORE IN"
+    assert rows[2]["amount_minor"] == 49499
