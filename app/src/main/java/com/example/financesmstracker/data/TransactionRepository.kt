@@ -13,6 +13,7 @@ import com.example.financesmstracker.evidence.SourceType
 import com.example.financesmstracker.parser.AccountType
 import com.example.financesmstracker.parser.PaymentMethod
 import com.example.financesmstracker.parser.TransactionType
+import com.example.financesmstracker.integration.OracleTransaction
 
 class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
 
@@ -448,6 +449,65 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         }
 
         return null
+    }
+
+    /**
+     * Upserts a transaction received from the durable Oracle Gmail ledger into
+     * the phone's local transaction list. The remote Gmail id is stored in the
+     * existing unique sms_hash column with an explicit prefix, so this works
+     * without a destructive database migration and remains idempotent.
+     */
+    fun upsertOracleGmailTransaction(transaction: OracleTransaction): Long {
+        val db = dbHelper.writableDatabase
+        val remoteMarker = "oracle:gmail:" + transaction.id
+
+        val existingId = db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            arrayOf(FinanceDatabaseHelper.COLUMN_ID),
+            FinanceDatabaseHelper.COLUMN_SMS_HASH + " = ?",
+            arrayOf(remoteMarker),
+            null,
+            null,
+            null,
+            "1"
+        ).use {
+            if (it.moveToFirst()) it.getLong(0) else null
+        }
+
+        val values = ContentValues().apply {
+            put(FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE, transaction.amountMinor)
+            put(FinanceDatabaseHelper.COLUMN_CURRENCY, transaction.currency)
+            put(FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE, transaction.transactionType)
+            put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod)
+            put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType)
+            put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
+            put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantOrPayee)
+            putNull(FinanceDatabaseHelper.COLUMN_PAYEE_ID)
+            put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLast4)
+            put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, transaction.reference)
+            put(FinanceDatabaseHelper.COLUMN_TIMESTAMP, transaction.timestamp)
+            put(FinanceDatabaseHelper.COLUMN_SMS_HASH, remoteMarker)
+            put(FinanceDatabaseHelper.COLUMN_CATEGORY, transaction.category ?: "OTHER")
+            put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, transaction.confidence)
+            put(FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS, "ACTIVE")
+        }
+
+        if (existingId != null) {
+            val updated = db.update(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                values,
+                FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                arrayOf(existingId.toString())
+            )
+            return if (updated > 0) existingId else 0L
+        }
+
+        return db.insertWithOnConflict(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            null,
+            values,
+            SQLiteDatabase.CONFLICT_IGNORE
+        )
     }
 
     fun getAllTransactions(): List<Transaction> {
