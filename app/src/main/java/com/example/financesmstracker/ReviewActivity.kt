@@ -11,10 +11,12 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.financesmstracker.data.FinanceDatabaseHelper
 import com.example.financesmstracker.data.Transaction
+import com.example.financesmstracker.data.ReviewStatus
 import com.example.financesmstracker.data.TransactionRepository
 import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.ui.ReviewAdapter
+import com.example.financesmstracker.ui.UnrecognizedSmsAdapter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -26,6 +28,9 @@ class ReviewActivity : AppCompatActivity() {
     private lateinit var adapter: ReviewAdapter
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyText: TextView
+    private lateinit var unrecognizedAdapter: UnrecognizedSmsAdapter
+    private lateinit var unrecognizedRecyclerView: RecyclerView
+    private lateinit var emptyUnrecognizedText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +41,8 @@ class ReviewActivity : AppCompatActivity() {
 
         recyclerView = findViewById(R.id.recyclerViewReviews)
         emptyText = findViewById(R.id.textViewNoReviews)
+        unrecognizedRecyclerView = findViewById(R.id.recyclerViewUnrecognized)
+        emptyUnrecognizedText = findViewById(R.id.textViewNoUnrecognized)
 
         adapter = ReviewAdapter(emptyList()) { evidence ->
             showEvidenceReview(evidence)
@@ -43,6 +50,9 @@ class ReviewActivity : AppCompatActivity() {
 
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
+        unrecognizedAdapter = UnrecognizedSmsAdapter(emptyList()) { item -> dismissUnrecognizedSms(item.id) }
+        unrecognizedRecyclerView.layoutManager = LinearLayoutManager(this)
+        unrecognizedRecyclerView.adapter = unrecognizedAdapter
 
         findViewById<Button>(R.id.buttonRefreshReviews).setOnClickListener {
             loadReviews()
@@ -59,6 +69,21 @@ class ReviewActivity : AppCompatActivity() {
         adapter.updateData(reviews)
         recyclerView.visibility = if (reviews.isEmpty()) View.GONE else View.VISIBLE
         emptyText.visibility = if (reviews.isEmpty()) View.VISIBLE else View.GONE
+
+        val unrecognized = repository.getUnresolvedUnrecognizedSms()
+        unrecognizedAdapter.updateData(unrecognized)
+        unrecognizedRecyclerView.visibility = if (unrecognized.isEmpty()) View.GONE else View.VISIBLE
+        emptyUnrecognizedText.visibility = if (unrecognized.isEmpty()) View.VISIBLE else View.GONE
+    }
+
+    private fun dismissUnrecognizedSms(id: Long) {
+        val updated = repository.updateUnrecognizedSmsStatus(id, ReviewStatus.DISMISSED)
+        if (updated > 0) {
+            Toast.makeText(this, "Unrecognized SMS dismissed", Toast.LENGTH_SHORT).show()
+            loadReviews()
+        } else {
+            Toast.makeText(this, "Could not dismiss SMS", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showEvidenceReview(evidence: SourceEvidence) {
