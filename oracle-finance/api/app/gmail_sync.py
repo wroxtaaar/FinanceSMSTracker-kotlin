@@ -1,4 +1,4 @@
-import base64, hashlib, os, re, time
+import base64, hashlib, html, os, re, time
 from email.utils import parseaddr
 from .db import connection
 from .ledger import sync_transaction,sync_evidence,add_review,apply_transaction_to_account,reconcile_duplicate_transaction
@@ -102,15 +102,27 @@ def _recognized_bank(combined, sender=""):
     return None
 
 
-def _account_last4(combined):
-    # Bank HTML emails can split a label and its masked number across table
-    # cells with a large amount of whitespace and markup. Normalize only this
-    # field so existing transaction detection remains unchanged.
-    normalized = re.sub(r"<[^>]*>", " ", combined)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
+def _plain_text(value):
+    # Normalize bank HTML into readable text before applying field-specific
+    # regexes. This keeps footer/promotional markup from looking like part of
+    # the transaction itself.
+    text = re.sub(
+        r"(?is)<(?:script|style)[^>]*>.*?</(?:script|style)>",
+        " ",
+        value or "",
+    )
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
 
+
+def _account_last4(combined):
+    normalized = _plain_text(combined)
+
+    # Prefer an explicit masked account/card number and require the label to
+    # be close to the final four digits. This avoids unrelated footer numbers.
     match = re.search(
-        r"(?i)(?:A/c|account|card(?:\s+(?:no\.?|ending|ending\s+in))?)[^\d]{0,64}"
+        r"(?i)(?:A/c|account|card(?:\s+(?:no\.?|ending(?:\s+in)?))?)[^\d]{0,64}"
         r"(?:X{0,6}|\*{0,8}|[#\- ]*)?(\d{4})(?!\d)",
         normalized,
     )
@@ -118,38 +130,93 @@ def _account_last4(combined):
 
 
 def _reference(combined):
-    # Bank reference fields vary between emails (for example
-    # "Ref UPI-12345", "Reference: 123456", and "UTR ABC/12345").
-    # Capture a token only when it contains at least one digit so ordinary
-    # prose such as "references-center" cannot become a transaction reference.
+    # Do not treat "Transaction alert/1" or similar subject/footer wording as
+    # a reference. A transaction reference must have an explicit Ref/Reference,
+    # UTR, Transaction ID, or Transaction No. label.
+    normalized = _plain_text(combined)
+    patterns = (
+        r"(?i)\b(?:Ref(?:erence)?|UTR)\s*[:#-]\s*"
+        r"([A-Z0-9][A-Z0-9/-]*\d[A-Z0-9/-]*)",
+        r"(?i)\bTransaction\s+(?:ID|No\.?)\s*[:#-]\s*"
+        r"([A-Z0-9][A-Z0-9/-]*\d[A-Z0-9/-]*)",
+    )
+    token = None
+    for pattern in patterns:
+        match = re.search(pattern, normalized)
+        if match:
+            token = match.group(1)
+            break
+
+    # Axis alerts often expose the transaction reference as "Transaction
+    # Info" rather than "Ref"/"UTR".
+    if not token:
+        match = re.search(
+            r"(?i)\bTransaction\s+Info\s*:\s*([^\s<]{6,120})",
+            normalized,
+        )
+        token = match.group(1) if match else None
+
+    token = token.rstrip(".,;:)") if token else None
+    return token or None
+
+
+def _merchant_or_payee(combined):
+    normalized = _plain_text(combined)
     match = re.search(
-        r"(?i)(?:Ref(?:erence)?|Transaction\s*(?:ID|No\.?)?|UTR)"
-        r"\s*[:#-]?\s*([A-Z0-9][A-Z0-9/-]*\d[A-Z0-9/-]*)",
-        combined,
+        r"(?is)\bInfo\s*:\s*(.*?)(?=\s+(?:The\s+)?"
+        r"(?:Available\s+Credit\s+Limit|Total\s+Credit\s+Limit|"
+        r"Available\s+Balance|Credit\s+Limit)\b|$)",
+        normalized,
     )
     if not match:
-        match = re.search(
-            r"(?i)Transaction\s+Info\s*:\s*([^\s<]{6,120})",
-            combined,
-        )
-    token = match.group(1).rstrip(".,;:)") if match else None
-    return token or None
+        return None
+    value = match.group(1).strip(" \t\r\n.,;:-")
+    return value or None
+
+
+def _account_type_for_email(combined, subject, last4):
+    normalized = _plain_text(combined)
+    masked_last4 = re.escape(last4)
+
+    # Classify from the label attached to the same four digits, rather than
+    # from unrelated footer text. A credit-card alert can legitimately mention
+    # paying the card bill from a bank account.
+    card_patterns = (
+        rf"(?i)\bcredit\s+card\b[^\d]{{0,80}}"
+        rf"(?:X{{0,6}}|\*{{0,8}}|[#\- ]*)?{masked_last4}\b",
+        rf"(?i)\bcard\s+(?:ending(?:\s+in)?|no\.?|number)\b[^\d]{{0,40}}"
+        rf"(?:X{{0,6}}|\*{{0,8}}|[#\- ]*)?{masked_last4}\b",
+        rf"(?i)\bcard\b[^\d]{{0,40}}"
+        rf"(?:X{{0,6}}|\*{{0,8}}|[#\- ]*)?{masked_last4}\b",
+    )
+    bank_patterns = (
+        rf"(?i)\bA/c\b[^\d]{{0,80}}"
+        rf"(?:X{{0,6}}|\*{{0,8}}|[#\- ]*)?{masked_last4}\b",
+        rf"(?i)\baccount\s+(?:number|no\.?)\b[^\d]{{0,80}}"
+        rf"(?:X{{0,6}}|\*{{0,8}}|[#\- ]*)?{masked_last4}\b",
+        rf"(?i)\bbank\s+account\b[^\d]{{0,80}}"
+        rf"(?:X{{0,6}}|\*{{0,8}}|[#\- ]*)?{masked_last4}\b",
+    )
+
+    if any(re.search(pattern, normalized) for pattern in card_patterns):
+        return "CREDIT_CARD"
+    if any(re.search(pattern, normalized) for pattern in bank_patterns):
+        return "BANK_ACCOUNT"
+
+    # Subject lines are useful as a final explicit identity signal when the
+    # body is fragmented by HTML.
+    if re.search(r"(?i)credit\s+card|card\s+transaction", subject or ""):
+        return "CREDIT_CARD"
+    if re.search(r"(?i)\bA/c\b|account\s+(?:number|no\.?)", subject or ""):
+        return "BANK_ACCOUNT"
+
+    return "BANK_ACCOUNT"
 
 
 def _looks_like_transaction(combined, amount, direction):
     if amount is None or direction is None:
         return False
     return bool(_TRANSACTION_SIGNAL.search(combined))
-
-
-def _is_bank_account_email(combined):
-    # Explicit bank-account labels must win over generic card/promotion text in
-    # the footer. This is especially important for Axis emails that say
-    # "credited to your A/c" and separately contain credit-card promotions.
-    return bool(re.search(
-        r"(?i)\bA/c\b|\baccount\s+(?:number|no\.?)\b|\bbank\s+account\b",
-        combined,
-    ))
 
 
 def _repair_legacy_gmail_account_classifications():
@@ -185,7 +252,10 @@ def _repair_legacy_gmail_account_classifications():
               ON e.transaction_id = t.id
              AND e.source_type = 'GMAIL'
             JOIN gmail_messages gm
-              ON gm.id = e.source_id
+              ON (
+                   gm.id = e.source_id
+                   OR e.source_id LIKE 'imap:%:' || gm.id
+                 )
             JOIN accounts a
               ON a.account_type = 'BANK_ACCOUNT'
              AND a.currency = t.currency
@@ -280,6 +350,7 @@ def parse_bank_email(message):
         return None
 
     reference=_reference(combined)
+    merchant_or_payee=_merchant_or_payee(combined)
     score=0.75
     if _sender_domain_is_known_bank(bank, sender):
         score += 0.10
@@ -302,21 +373,12 @@ def parse_bank_email(message):
     if score < 0.90:
         return None
 
-    # Strong bank-account identity takes precedence over generic card/footer
-    # wording. This prevents an Axis A/c alert from becoming a card
-    # transaction merely because the email contains a credit-card promotion.
-    account_type = (
-        "BANK_ACCOUNT"
-        if _is_bank_account_email(combined)
-        else "CREDIT_CARD"
-        if re.search(r"(?i)credit card|card ending|card no|card number", combined)
-        else "BANK_ACCOUNT"
-    )
+    account_type = _account_type_for_email(combined, subject, last4)
     tx_id="gmail:"+hashlib.sha256((message["id"]+":"+str(amount)+":"+direction).encode()).hexdigest()[:32]
     ev_id="gmail-evidence:"+message["id"]
     t=SyncTransactionModel(id=tx_id,amountMinor=amount,currency="INR",type=direction,
        paymentMethod="CARD" if account_type=="CREDIT_CARD" else "UPI",accountType=account_type,
-       bank=bank,merchantOrPayee=None,accountLast4=last4,reference=reference,
+       bank=bank,merchantOrPayee=merchant_or_payee,accountLast4=last4,reference=reference,
        timestamp=int(message.get("internalDate","0")),category="OTHER",confidence=min(score, 1.0))
     e=SyncEvidenceModel(id=ev_id,sourceType="GMAIL",sourceId=message["id"],status="UNMATCHED",
        observedAt=int(message.get("internalDate","0")),transactionId=tx_id,amountMinor=amount,currency="INR",
