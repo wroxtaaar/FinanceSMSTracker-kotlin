@@ -57,11 +57,29 @@ def apply_transaction_to_account(conn, t, applied_at):
 
 def sync_evidence(e):
     with connection() as conn:
-        before=conn.execute("SELECT id FROM evidence WHERE source_type=? AND source_id=?",(e.sourceType,e.sourceId)).fetchone()
-        conn.execute("""INSERT OR IGNORE INTO evidence
-        (id,source_type,source_id,status,observed_at,transaction_id,matched_transaction_id,amount_minor,currency,direction,
-         bank_provider,account_last4,reference,content_hash,confidence,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        before=conn.execute(
+            "SELECT id FROM evidence WHERE source_type=? AND source_id=?",
+            (e.sourceType,e.sourceId)
+        ).fetchone()
+        conn.execute("""
+            INSERT INTO evidence
+            (id,source_type,source_id,status,observed_at,transaction_id,matched_transaction_id,amount_minor,currency,direction,
+             bank_provider,account_last4,reference,content_hash,confidence,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(source_type, source_id) DO UPDATE SET
+                status=excluded.status,
+                observed_at=excluded.observed_at,
+                transaction_id=excluded.transaction_id,
+                matched_transaction_id=excluded.matched_transaction_id,
+                amount_minor=excluded.amount_minor,
+                currency=excluded.currency,
+                direction=excluded.direction,
+                bank_provider=excluded.bank_provider,
+                account_last4=excluded.account_last4,
+                reference=excluded.reference,
+                content_hash=excluded.content_hash,
+                confidence=excluded.confidence
+        """,
         (e.id,e.sourceType,e.sourceId,e.status,e.observedAt,e.transactionId,e.matchedTransactionId,e.amountMinor,e.currency,
          e.direction,e.bankProvider,e.accountLast4,e.reference,e.contentHash,e.confidence,now_ms()))
         return before is None
