@@ -195,25 +195,85 @@ class IMAPService:
         self._connect()
 
     def _select_folder(self, imap):
-        """Select the configured folder, with a safe \All discovery fallback."""
+        """Select the configured folder, with a safe \\All discovery fallback."""
         status, _ = imap.select(self.folder, readonly=True)
         if status == "OK":
             return self.folder
 
         # Gmail normally exposes [Gmail]/All Mail, but the visible IMAP name
-        # can vary by account/locale. Discover the special-use \All mailbox
+        # can vary by account/locale. Discover the special-use \\All mailbox
         # instead of failing when the configured display name is different.
         status, folders = imap.list("", "*")
         if status == "OK":
             for raw in folders or []:
                 if not isinstance(raw, bytes):
                     continue
+
                 decoded = raw.decode(errors="replace")
                 if "\\All" not in decoded:
                     continue
-                match = re.search(r'(?:"[^"]*")\\s+(.+)
-    def users(self):
-        return _Users(self)
+
+                # RFC 3501 LIST responses end with the mailbox name after the
+                # hierarchy delimiter. Gmail normally quotes both fields.
+                match = re.search(r'\)\s+"[^"]*"\s+(.+)$', decoded)
+                if not match:
+                    continue
+
+                candidate = match.group(1).strip()
+                if candidate.startswith('"') and candidate.endswith('"'):
+                    candidate = candidate[1:-1].replace('\\\\', '\\')
+
+                if candidate == self.folder:
+                    continue
+
+                candidate_status, _ = imap.select(candidate, readonly=True)
+                if candidate_status == "OK":
+                    self.folder = candidate
+                    return candidate
+
+        raise RuntimeError(f"Could not select Gmail folder: {self.folder}")
+
+    def _connect(self):
+        """Create and initialize the IMAP connection if it is not present."""
+        if self._imap is not None:
+            return self._imap
+
+        imap_timeout = max(
+            5,
+            min(30, int(os.getenv("GMAIL_IMAP_TIMEOUT_SECONDS", "20"))),
+        )
+        imap = None
+        stage = "SSL connection"
+        try:
+            imap = imaplib.IMAP4_SSL(
+                self.host, self.port, timeout=imap_timeout
+            )
+
+            stage = "authentication/login"
+            try:
+                imap.login(self.username, self.password)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"IMAP authentication failed for {self.username}: {exc}"
+                ) from exc
+
+            stage = "mailbox selection"
+            self._select_folder(imap)
+
+            response_code, uidvalidity_data = imap.response("UIDVALIDITY")
+            if response_code == "UIDVALIDITY" and uidvalidity_data:
+                self.uidvalidity = uidvalidity_data[-1].decode(errors="replace")
+            self._imap = imap
+            return imap
+        except Exception as exc:
+            if imap is not None:
+                try:
+                    imap.logout()
+                except Exception:
+                    pass
+            raise RuntimeError(
+                f"Gmail IMAP {stage} failed for {self.host}:{self.port}: {exc}"
+            ) from exc
 
     def _last_synced_since(self):
         """Return a small overlap window based on the newest stored Gmail email.
