@@ -8,7 +8,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
 
     companion object {
         private const val DATABASE_NAME = "finance_tracker.db"
-        private const val DATABASE_VERSION = 5
+        private const val DATABASE_VERSION = 6
 
         const val TABLE_TRANSACTIONS = "transactions"
         const val COLUMN_ID = "id"
@@ -26,6 +26,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
         const val COLUMN_SMS_HASH = "sms_hash"
         const val COLUMN_CATEGORY = "category"
         const val COLUMN_PARSER_CONFIDENCE = "parser_confidence"
+        const val COLUMN_TRANSACTION_STATUS = "status"
 
         const val TABLE_CATEGORY_MEMORY = "category_memory"
         const val COLUMN_MEMORY_KEY = "memory_key"
@@ -73,7 +74,8 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
                 $COLUMN_TIMESTAMP INTEGER NOT NULL,
                 $COLUMN_SMS_HASH TEXT UNIQUE NOT NULL,
                 $COLUMN_CATEGORY TEXT,
-                $COLUMN_PARSER_CONFIDENCE REAL NOT NULL
+                $COLUMN_PARSER_CONFIDENCE REAL NOT NULL,
+                $COLUMN_TRANSACTION_STATUS TEXT NOT NULL DEFAULT 'ACTIVE'
             )
         """.trimIndent()
 
@@ -205,6 +207,11 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             """.trimIndent()
             db.execSQL(createEvidenceTable)
             db.execSQL(createEvidenceIndex)
+        }
+        if (oldVersion < 6) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_TRANSACTIONS ADD COLUMN $COLUMN_TRANSACTION_STATUS TEXT NOT NULL DEFAULT 'ACTIVE'")
+            } catch (_: Exception) {}
         }
     }
 }
