@@ -261,7 +261,7 @@ def reconcile_duplicate_transaction(transaction_id):
         if tx["id"].startswith("gmail:") is False: return None
         candidates=conn.execute(
             """SELECT * FROM transactions WHERE id<>? AND duplicate_of IS NULL
-               AND id NOT LIKE 'gmail:%' AND amount_minor=? AND currency=?
+               AND id NOT LIKE 'gmail:%' AND status='ACTIVE' AND amount_minor=? AND currency=?
                AND ABS(timestamp-?)<=86400000 ORDER BY ABS(timestamp-?) LIMIT 5""",
             (tx["id"],tx["amount_minor"],tx["currency"],tx["timestamp"],tx["timestamp"])).fetchall()
         strong=[]
