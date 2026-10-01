@@ -138,6 +138,7 @@ def test_imap_falls_back_to_inbox_when_all_mail_is_unavailable(monkeypatch):
 
         def select(self, folder, readonly=True):
             self.selected.append(folder)
+            folder = folder.strip('"')
             if folder == "[Gmail]/All Mail":
                 return "NO", [b"Mailbox unavailable"]
             if folder == "INBOX":
@@ -164,3 +165,39 @@ def test_imap_falls_back_to_inbox_when_all_mail_is_unavailable(monkeypatch):
     assert service.folder == "INBOX"
     assert fake.selected == ["[Gmail]/All Mail", "INBOX"]
     assert service.uidvalidity == "7"
+
+
+def test_imap_quotes_mailbox_names(monkeypatch):
+    class FakeConnection:
+        def __init__(self):
+            self.selected = []
+
+        def login(self, username, password):
+            return "OK", [b"LOGIN completed"]
+
+        def select(self, folder, readonly=False):
+            self.selected.append(folder)
+            if folder == '"[Gmail]/All Mail"':
+                return "OK", [b"10"]
+            return "NO", [b"unexpected mailbox argument"]
+
+        def response(self, code):
+            return "UIDVALIDITY", [b"9"]
+
+        def logout(self):
+            return "BYE", [b"logout"]
+
+    fake = FakeConnection()
+    monkeypatch.setattr(
+        "app.gmail_imap.imaplib.IMAP4_SSL",
+        lambda host, port, timeout: fake,
+    )
+    monkeypatch.setenv("GMAIL_USERNAME", "test@gmail.com")
+    monkeypatch.setenv("GMAIL_APP_PASSWORD", "test-password")
+    monkeypatch.setenv("GMAIL_IMAP_FOLDER", "[Gmail]/All Mail")
+
+    service = IMAPService()
+
+    assert service.folder == "[Gmail]/All Mail"
+    assert fake.selected == ['"[Gmail]/All Mail"']
+    assert service.uidvalidity == "9"
