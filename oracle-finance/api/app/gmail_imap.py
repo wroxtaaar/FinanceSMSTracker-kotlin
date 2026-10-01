@@ -211,7 +211,11 @@ class IMAPService:
             raise RuntimeError("Gmail IMAP search failed")
 
         raw_uids = data[0].split() if data and data[0] else []
-        uids = [uid.decode("ascii") for uid in raw_uids[-max_results:]]
+        # Keep a larger IMAP window than the Gmail API page size so a valid
+        # older bank alert is not hidden merely because the inbox has more
+        # than 100 recent messages.
+        imap_limit = max(max_results, 500)
+        uids = [uid.decode("ascii") for uid in raw_uids[-imap_limit:]]
         uids.reverse()
 
         return {
