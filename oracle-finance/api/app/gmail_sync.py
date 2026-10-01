@@ -13,6 +13,64 @@ def _decode(payload):
 
 def _headers(payload): return {h["name"].lower():h["value"] for h in payload.get("headers",[])}
 
+
+_REJECT_OTP = re.compile(
+    r"\botp\b|one[\s-]?time[\s-]?password|verification code|\bcvv\b",
+    re.I,
+)
+_REJECT_PROMO = re.compile(
+    r"pre[\s-]?approved|apply now|click here|hurry|limited period|offer ends|"
+    r"t&c apply|download the app|you have won|congratulations|lowest interest|"
+    r"upgrade your|refer and earn|reward points|cashback offer|special offer|"
+    r"annual fee waiver|annual fee.{0,60}\bspends?\b|"
+    r"\bspends?\s+(?:of|rs\.?|inr|₹)|"
+    r"\b(?:get|earn|save)\b.{0,60}\b(?:cashback|reward|bonus|points)\b",
+    re.I,
+)
+_REJECT_NOT_COMPLETED = re.compile(
+    r"will be (?:debited|deducted|credited|charged|transferred|reversed|refunded|blocked|processed)|"
+    r"is due|due on|due date|(?:collect|payment|money) request|has requested|requesting|"
+    r"(?:failed|declined|unsuccessful|not processed|could not be processed)|"
+    r"\bnot (?:debited|credited|deducted|charged)\b|\brejection\b|"
+    r"to (?:authorise|authorize|approve)|\bscheduled\b|\bpending\b",
+    re.I,
+)
+_REJECT_INFO_ONLY = re.compile(
+    r"mini statement|statement is ready|statement has been generated|e-statement|"
+    r"available balance|available limit|credit limit",
+    re.I,
+)
+_TRANSACTION_SIGNAL = re.compile(
+    r"transaction|debited|credited|spent|purchase|withdrawn|"
+    r"payment\s+(?:of|received|successful)|card\s+(?:payment|charged)|"
+    r"cash\s+withdrawal|upi\s+(?:transaction|payment)",
+    re.I,
+)
+_BANK_SENDER_DOMAINS = {
+    "HDFC": ("hdfcbank.net", "hdfcbank.bank.in"),
+    "AXIS": ("axisbank.com",),
+    "ICICI": ("icicibank.com",),
+    "SBI": ("sbi.co.in",),
+    "HSBC": ("hsbc.co.in", "hsbc.com"),
+    "INDUSIND": ("indusind.com",),
+}
+def _email_sender(headers):
+    return parseaddr(headers.get("from", ""))[1].lower()
+def _sender_domain_is_known_bank(bank, sender):
+    if not bank or not sender or "@" not in sender:
+        return False
+    domain = sender.rsplit("@", 1)[1].lower()
+    return any(domain == allowed or domain.endswith("." + allowed)
+               for allowed in _BANK_SENDER_DOMAINS.get(bank, ()))
+def _hard_reject_email(subject, text):
+    combined = f"{subject}\n{text}"
+    return bool(
+        _REJECT_OTP.search(combined) or
+        _REJECT_PROMO.search(combined) or
+        _REJECT_NOT_COMPLETED.search(combined) or
+        _REJECT_INFO_ONLY.search(combined)
+    )
+
 def _recognized_bank(combined):
     for candidate, pattern in (
         ("HDFC", r"(?i)HDFC"),
@@ -53,39 +111,55 @@ def _reference(combined):
 def _looks_like_transaction(combined, amount, direction):
     if amount is None or direction is None:
         return False
-    return bool(re.search(
-        r"(?i)transaction|debited|credited|spent|purchase|withdrawn|payment\s+received|card\s+payment",
-        combined,
-    ))
+    return bool(_TRANSACTION_SIGNAL.search(combined))
 
 
 def parse_bank_email(message):
-    payload=message.get("payload",{}); headers=_headers(payload); text=_decode(payload)
-    combined=f"{headers.get('subject','')}\n{text}"
+    payload=message.get("payload",{})
+    headers=_headers(payload)
+    text=_decode(payload)
+    subject=headers.get("subject","")
+    sender=_email_sender(headers)
+    combined=f"{subject}\n{text}"
+
+    if _hard_reject_email(subject, text):
+        return None
+
     m=re.search(r"(?i)(?:INR|Rs\.?)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)",combined)
     amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
-    direction="CREDIT" if re.search(r"(?i)credited|credit alert|payment.*received",combined) else (
-        "DEBIT" if re.search(r"(?i)debited|spent|sent|purchase|withdrawn",combined) else None)
+    direction="CREDIT" if re.search(r"(?i)credited|credit alert|payment.*received|refund",combined) else (
+        "DEBIT" if re.search(r"(?i)debited|spent|sent|purchase|withdrawn|payment.*successful",combined) else None)
     bank=_recognized_bank(combined)
     last4=_account_last4(combined)
 
-    # Only promote email content to a transaction when identity and
-    # transaction intent are both strong enough to map it to an account.
     if not bank or not last4 or not _looks_like_transaction(combined, amount, direction):
         return None
 
-    account_type="CREDIT_CARD" if re.search(r"(?i)card",combined) else "BANK_ACCOUNT"
     reference=_reference(combined)
+    score=0.75
+    if _sender_domain_is_known_bank(bank, sender):
+        score += 0.10
+    if reference:
+        score += 0.10
+    if re.search(r"(?i)(transaction|debit|credit|payment)\s+(alert|confirmation|notification)|transaction alert", subject):
+        score += 0.05
+    if re.search(r"(?i)(debited from|credited to|transaction of|purchase of|withdrawn|payment of)", combined):
+        score += 0.05
+
+    if score < 0.90:
+        return None
+
+    account_type="CREDIT_CARD" if re.search(r"(?i)credit card|card ending|card no|card number",combined) else "BANK_ACCOUNT"
     tx_id="gmail:"+hashlib.sha256((message["id"]+":"+str(amount)+":"+direction).encode()).hexdigest()[:32]
     ev_id="gmail-evidence:"+message["id"]
     t=SyncTransactionModel(id=tx_id,amountMinor=amount,currency="INR",type=direction,
        paymentMethod="CARD" if account_type=="CREDIT_CARD" else "UPI",accountType=account_type,
        bank=bank,merchantOrPayee=None,accountLast4=last4,reference=reference,
-       timestamp=int(message.get("internalDate","0")),category="OTHER",confidence=0.9)
+       timestamp=int(message.get("internalDate","0")),category="OTHER",confidence=min(score, 1.0))
     e=SyncEvidenceModel(id=ev_id,sourceType="GMAIL",sourceId=message["id"],status="UNMATCHED",
        observedAt=int(message.get("internalDate","0")),transactionId=tx_id,amountMinor=amount,currency="INR",
        direction=direction,bankProvider=bank,accountLast4=last4,reference=reference,
-       contentHash=hashlib.sha256(combined.encode()).hexdigest(),confidence=0.9)
+       contentHash=hashlib.sha256(combined.encode()).hexdigest(),confidence=min(score, 1.0))
     return t,e
 
 def ingest_messages(service,query="newer_than:30d"):
@@ -125,10 +199,7 @@ def ingest_messages(service,query="newer_than:30d"):
             # are recorded as ignored evidence without flooding the review queue.
             has_amount = bool(re.search(r"(?i)(?:INR|Rs\.?)[\\s₹]*[0-9][0-9,]*(?:\\.\\d{1,2})?", combined))
             has_bank = _recognized_bank(combined) is not None
-            has_financial_marker = bool(re.search(
-                r"(?i)transaction|debited|credited|spent|purchase|withdrawn|payment\s+received|card\s+payment",
-                combined,
-            ))
+            has_financial_marker = bool(_TRANSACTION_SIGNAL.search(combined))
             h_status = "REVIEW" if has_amount and has_bank and has_financial_marker else "IGNORED"
             e=SyncEvidenceModel(
                 id="gmail-evidence:"+msg_id,
