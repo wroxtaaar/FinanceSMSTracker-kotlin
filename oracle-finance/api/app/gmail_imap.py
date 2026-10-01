@@ -190,7 +190,7 @@ class IMAPService:
         if not self.password:
             raise RuntimeError("GMAIL_APP_PASSWORD is not configured")
 
-        self._imap = imaplib.IMAP4_SSL(self.host, self.port)
+        # Bound the network operations so a slow Gmail IMAP operation fails fast instead of\n        # holding the Android manual-sync request until its HTTP timeout.\n        imap_timeout = max(5, min(30, int(os.getenv("GMAIL_IMAP_TIMEOUT_SECONDS", "20"))))\n        self._imap = imaplib.IMAP4_SSL(self.host, self.port, timeout=imap_timeout)
         try:
             self._imap.login(self.username, self.password)
             status, _ = self._imap.select(self.folder, readonly=True)
@@ -230,36 +230,28 @@ class IMAPService:
             "alerts@axis.bank.in",
             "credit_cards@icici.bank.in",
         )
-        bank_domains = (
-            "hdfcbank.net", "hdfcbank.bank.in",
-            "axisbank.com", "axis.bank.in",
-            "icicibank.com", "icici.bank.in",
-            "sbi.co.in",
-            "hsbc.co.in", "hsbc.com",
-            "indusind.com",
-        )
-
-        # Search exact known senders first. Python's IMAP client supports
-        # SEARCH FROM criteria; using the exact address avoids relying on
-        # display names such as "Axis Bank Alerts" and guarantees the two
-        # transaction senders used by this account are included.
+        # Search the two exact sender addresses that are currently known to be
+        # missing from the normal/newest-message scan. Do not run a separate
+        # whole-mailbox SEARCH for every supported bank domain: that can be
+        # surprisingly expensive on a busy Gmail mailbox and caused the manual
+        # Android request to hit its HTTP timeout.
+        #
+        # The newest general messages already cover the normal bank flow for the
+        # other supported banks. These exact-sender searches are additionally
+        # bounded to the same requested date window and only contribute their
+        # newest 25 UIDs.
         for sender in bank_senders:
+            if search_criteria == "ALL":
+                sender_search = f'FROM "{sender}"'
+            else:
+                inner = search_criteria[1:-1]
+                sender_search = f'(FROM "{sender}" {inner})'
             status, sender_data = self._imap.uid(
-                "SEARCH", None, f'FROM "{sender}"'
+                "SEARCH", None, sender_search
             )
             if status == "OK" and sender_data and sender_data[0]:
                 sender_uids = [uid.decode("ascii") for uid in sender_data[0].split()]
-                uid_set.update(sender_uids[-50:])
-
-        # Keep domain-level discovery as a fallback for other supported bank
-        # sender addresses.
-        for domain in bank_domains:
-            status, bank_data = self._imap.uid(
-                "SEARCH", None, f'FROM "{domain}"'
-            )
-            if status == "OK" and bank_data and bank_data[0]:
-                bank_uids = [uid.decode("ascii") for uid in bank_data[0].split()]
-                uid_set.update(bank_uids[-50:])
+                uid_set.update(sender_uids[-25:])
 
         uids = sorted(uid_set, key=lambda value: int(value), reverse=True)
         messages = []
