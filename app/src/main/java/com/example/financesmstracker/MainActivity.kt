@@ -705,11 +705,11 @@ class MainActivity : AppCompatActivity() {
     private fun updateNotificationAccessStatus() {
         val granted = NotificationAccessHelper.isNotificationAccessGranted(this)
         if (granted) {
-            textViewNotificationStatus.text = "Notification Access: Granted"
+            textViewNotificationStatus.text = "Notification Access: Granted (Truecaller + Gmail)"
             textViewNotificationStatus.setTextColor(Color.parseColor("#2E7D32"))
             buttonOpenNotificationSettings.visibility = View.GONE
         } else {
-            textViewNotificationStatus.text = "Notification Access: Disabled (Tap button above to enable)"
+            textViewNotificationStatus.text = "Notification Access: Disabled (needed for Truecaller + Gmail notification triggers)"
             textViewNotificationStatus.setTextColor(Color.parseColor("#C62828"))
             buttonOpenNotificationSettings.visibility = View.VISIBLE
         }
