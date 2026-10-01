@@ -37,7 +37,7 @@ import com.example.financesmstracker.data.TransactionRepository
 import com.example.financesmstracker.parser.ParserResult
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.receiver.SmsReceiver
-import com.example.financesmstracker.truecaller.NotificationAccessHelper
+import com.example.financesmstracker.gmail.NotificationAccessHelper
 import com.example.financesmstracker.ui.TransactionAdapter
 
 import com.example.financesmstracker.integration.FinanceSyncClient
@@ -734,11 +734,11 @@ class MainActivity : AppCompatActivity() {
     private fun updateNotificationAccessStatus() {
         val granted = NotificationAccessHelper.isNotificationAccessGranted(this)
         if (granted) {
-            textViewNotificationStatus.text = "Notification Access: Granted (Truecaller + Gmail)"
+            textViewNotificationStatus.text = "Gmail notification trigger: Enabled"
             textViewNotificationStatus.setTextColor(Color.parseColor("#2E7D32"))
             buttonOpenNotificationSettings.visibility = View.GONE
         } else {
-            textViewNotificationStatus.text = "Notification Access: Disabled (needed for Truecaller + Gmail notification triggers)"
+            textViewNotificationStatus.text = "Gmail notification trigger: Disabled"
             textViewNotificationStatus.setTextColor(Color.parseColor("#C62828"))
             buttonOpenNotificationSettings.visibility = View.VISIBLE
         }
