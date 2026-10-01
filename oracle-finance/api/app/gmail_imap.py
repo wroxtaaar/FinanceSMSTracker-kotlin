@@ -175,7 +175,7 @@ class IMAPService:
         self.port = int(os.getenv("GMAIL_IMAP_PORT", "993"))
         self.username = os.getenv("GMAIL_USERNAME", "").strip()
         self.password = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "").strip()
-        self.folder = os.getenv("GMAIL_IMAP_FOLDER", "INBOX")
+        self.folder = os.getenv("GMAIL_IMAP_FOLDER", "[Gmail]/All Mail")
         # Manual Gmail checks must finish quickly enough for the Android client.
         # Keep the scan focused on the newest messages; already-processed
         # messages are skipped by ingest_messages before their full body is
@@ -376,12 +376,28 @@ class IMAPService:
                 }
 
         messages = []
+        sender_counts = {}
         for uid in uids:
             item = {"id": f"{self.uidvalidity}:{uid}"}
             item.update(headers_by_uid.get(uid, {}))
+            sender = parseaddr(item.get("from", ""))[1].lower()
+            if sender:
+                sender_counts[sender] = sender_counts.get(sender, 0) + 1
             messages.append(item)
 
-        return {"messages": messages}
+        # Return compact fetch diagnostics with the page. This makes a manual
+        # Gmail check able to distinguish "sender search found nothing" from
+        # "message was fetched but parser rejected it", without returning
+        # message bodies or credentials.
+        return {
+            "messages": messages,
+            "diagnostics": {
+                "folder": self.folder,
+                "since": since,
+                "candidateCount": len(messages),
+                "senderCounts": sender_counts,
+            },
+        }
 
     def _get_message(self, message_id):
         try:
