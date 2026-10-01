@@ -954,7 +954,7 @@ def ingest_messages(service,query="newer_than:30d"):
 
             subject_preview = item.get("subject", "") or ""
             statement_hint = bool(re.search(
-                r"(?i)\\bstatement\\b|\\be[- ]?statement\\b",
+                r"(?i)\bstatement\b|\be[- ]?statement\b",
                 subject_preview,
             ))
 
