@@ -20,18 +20,19 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
-        android:text="Unmatched or ambiguous evidence that needs a transaction match."
+        android:text="Resolve unmatched or ambiguous evidence and review financial SMS that could not be parsed."
         android:textSize="14sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/textViewReviewTitle" />
 
-    <Button
-        android:id="@+id/buttonRefreshReviews"
+    <TextView
+        android:id="@+id/textViewEvidenceSection"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Refresh"
+        android:layout_marginTop="12dp"
+        android:text="Evidence needing a transaction match"
+        android:textStyle="bold"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/textViewReviewSubtitle" />
 
@@ -39,22 +40,54 @@
         android:id="@+id/recyclerViewReviews"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginTop="8dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        android:layout_marginTop="6dp"
+        app:layout_constraintBottom_toTopOf="@id/textViewUnrecognizedSection"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/buttonRefreshReviews" />
+        app:layout_constraintTop_toBottomOf="@id/textViewEvidenceSection" />
 
     <TextView
         android:id="@+id/textViewNoReviews"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Nothing needs review."
-        android:textSize="16sp"
+        android:text="No unmatched or ambiguous evidence."
+        android:textSize="14sp"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="@id/recyclerViewReviews"
         app:layout_constraintEnd_toEndOf="@id/recyclerViewReviews"
         app:layout_constraintStart_toStartOf="@id/recyclerViewReviews"
         app:layout_constraintTop_toTopOf="@id/recyclerViewReviews" />
+
+    <TextView
+        android:id="@+id/textViewUnrecognizedSection"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="Unrecognized financial SMS"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toTopOf="@id/recyclerViewUnrecognized"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerViewUnrecognized"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="6dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/textViewUnrecognizedSection" />
+
+    <TextView
+        android:id="@+id/textViewNoUnrecognized"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="No unrecognized financial SMS."
+        android:textSize="14sp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/recyclerViewUnrecognized"
+        app:layout_constraintEnd_toEndOf="@id/recyclerViewUnrecognized"
+        app:layout_constraintStart_toStartOf="@id/recyclerViewUnrecognized"
+        app:layout_constraintTop_toTopOf="@id/recyclerViewUnrecognized" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
