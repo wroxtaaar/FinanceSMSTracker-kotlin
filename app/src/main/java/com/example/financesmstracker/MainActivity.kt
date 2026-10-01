@@ -542,17 +542,25 @@ class MainActivity : AppCompatActivity() {
                 buttonGmailSync.isEnabled = true
                 buttonGmailSync.text = "Check Gmail"
 
-                result.onSuccess { createdEvidence ->
+                result.onSuccess { sync ->
                     loadOracleSummary()
-                    Toast.makeText(
-                        this@MainActivity,
-                        if (createdEvidence > 0) {
-                            "Gmail checked: $createdEvidence new transaction email(s) found"
-                        } else {
-                            "Gmail checked: no new transaction emails"
-                        },
-                        Toast.LENGTH_LONG
-                    ).show()
+
+                    val message = buildString {
+                        append("Gmail checked\\n\\n")
+                        append("Messages scanned: ${sync.messagesScanned}\\n")
+                        append("New transaction emails: ${sync.parsedTransactions}\\n")
+                        append("Axis credits found: ${sync.axisCredits}\\n")
+                        append("Already processed: ${sync.alreadyProcessed}\\n")
+                        append("Duplicates skipped: ${sync.duplicateTransactions}\\n")
+                        append("Needs review: ${sync.reviewCount}\\n")
+                        append("Ignored: ${sync.ignoredCount}")
+                    }
+
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Gmail Sync")
+                        .setMessage(message)
+                        .setPositiveButton("OK", null)
+                        .show()
                 }.onFailure { error ->
                     Toast.makeText(
                         this@MainActivity,
