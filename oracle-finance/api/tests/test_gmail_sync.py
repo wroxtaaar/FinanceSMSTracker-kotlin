@@ -214,3 +214,27 @@ def test_gmail_parser_extracts_numeric_reference_only():
     assert parsed is not None
     transaction, _ = parsed
     assert transaction.reference == "UPI-12345"
+
+
+def test_axis_bank_credit_email_is_parsed_from_trusted_sender():
+    message = _message(
+        "axis-credit-1",
+        "Your A/c XX1234 has been credited with INR 1.00. "
+        "Transaction reference: 123456789.",
+        subject="Axis Bank Credit Alert",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Axis Bank Credit Alert"},
+        {"name": "From", "value": "alerts@axisbank.com"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, evidence = parsed
+    assert transaction.amountMinor == 100
+    assert transaction.type == "CREDIT"
+    assert transaction.bank == "AXIS"
+    assert transaction.accountType == "BANK_ACCOUNT"
+    assert transaction.accountLast4 == "1234"
+    assert evidence.direction == "CREDIT"
