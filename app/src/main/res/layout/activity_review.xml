@@ -35,70 +35,76 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/buttonRefreshReviews" />
 
-    <TextView
-        android:id="@+id/textViewEvidenceSection"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+    <ScrollView
+        android:id="@+id/reviewScroll"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
         android:layout_marginTop="12dp"
-        android:text="Evidence needing a transaction match"
-        android:textStyle="bold"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/textViewReviewSubtitle" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerViewReviews"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginTop="6dp"
-        app:layout_constraintBottom_toTopOf="@id/textViewUnrecognizedSection"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/textViewEvidenceSection"
-        app:layout_constraintVertical_bias="0.5" />
-
-    <TextView
-        android:id="@+id/textViewNoReviews"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="No unmatched or ambiguous evidence."
-        android:textSize="14sp"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="@id/recyclerViewReviews"
-        app:layout_constraintEnd_toEndOf="@id/recyclerViewReviews"
-        app:layout_constraintStart_toStartOf="@id/recyclerViewReviews"
-        app:layout_constraintTop_toTopOf="@id/recyclerViewReviews" />
-
-    <TextView
-        android:id="@+id/textViewUnrecognizedSection"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:text="Unrecognized financial SMS"
-        android:textStyle="bold"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/recyclerViewReviews" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerViewUnrecognized"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginTop="6dp"
-        android:nestedScrollingEnabled="false"
+        android:fillViewport="true"
+        android:overScrollMode="ifContentScrolls"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/textViewUnrecognizedSection" />
+        app:layout_constraintTop_toBottomOf="@id/textViewReviewSubtitle">
 
-    <TextView
-        android:id="@+id/textViewNoUnrecognized"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="No unrecognized financial SMS."
-        android:textSize="14sp"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="@id/recyclerViewUnrecognized"
-        app:layout_constraintEnd_toEndOf="@id/recyclerViewUnrecognized"
-        app:layout_constraintStart_toStartOf="@id/recyclerViewUnrecognized"
-        app:layout_constraintTop_toTopOf="@id/recyclerViewUnrecognized" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="16dp">
+
+            <TextView
+                android:id="@+id/textViewEvidenceSection"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Evidence needing a transaction match"
+                android:textStyle="bold" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyclerViewReviews"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:minHeight="0dp"
+                android:nestedScrollingEnabled="false" />
+
+            <TextView
+                android:id="@+id/textViewNoReviews"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="No unmatched or ambiguous evidence."
+                android:textSize="14sp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/textViewUnrecognizedSection"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Unrecognized financial SMS"
+                android:textStyle="bold" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyclerViewUnrecognized"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:minHeight="0dp"
+                android:nestedScrollingEnabled="false" />
+
+            <TextView
+                android:id="@+id/textViewNoUnrecognized"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="No unrecognized financial SMS."
+                android:textSize="14sp"
+                android:visibility="gone" />
+
+        </LinearLayout>
+    </ScrollView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
