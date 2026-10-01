@@ -116,10 +116,30 @@ def add_receivable(item):
         VALUES(?,?,?,?,?,'OPEN',?)""",
         (item["id"],item["description"],item["amount_minor"],item["currency"],item.get("splitwise_expense_id"),now_ms()))
 
+def set_manual_splitwise_total(currency, amount_minor):
+    with connection() as conn:
+        conn.execute(
+            """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
+               VALUES(?,?,?)
+               ON CONFLICT(currency) DO UPDATE SET
+                 amount_minor=excluded.amount_minor,
+                 updated_at=excluded.updated_at""",
+            (currency, max(0, int(amount_minor)), now_ms())
+        )
+
+def get_manual_splitwise_total(currency="INR"):
+    with connection() as conn:
+        row=conn.execute("SELECT amount_minor FROM manual_splitwise_total WHERE currency=?",(currency,)).fetchone()
+        return int(row["amount_minor"]) if row else None
+
 def true_available(currency="INR"):
     with connection() as conn:
         cash=conn.execute("SELECT COALESCE(SUM(balance_minor),0) value FROM accounts WHERE account_type='BANK_ACCOUNT' AND currency=?",(currency,)).fetchone()["value"]
-        rec=conn.execute("SELECT COALESCE(SUM(amount_minor),0) value FROM splitwise_receivables WHERE status='OPEN' AND currency=?",(currency,)).fetchone()["value"]
+        manual=get_manual_splitwise_total(currency)
+        if manual is None:
+            rec=conn.execute("SELECT COALESCE(SUM(amount_minor),0) value FROM splitwise_receivables WHERE status='OPEN' AND currency=?",(currency,)).fetchone()["value"]
+        else:
+            rec=manual
         cards=conn.execute("SELECT COALESCE(SUM(balance_minor),0) value FROM accounts WHERE account_type='CREDIT_CARD' AND currency=?",(currency,)).fetchone()["value"]
         return {"currency":currency,"bankCashMinor":cash,"splitwiseReceivableMinor":rec,"creditCardOutstandingMinor":cards,"trueAvailableMinor":cash+rec-cards}
 
