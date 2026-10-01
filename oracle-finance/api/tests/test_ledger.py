@@ -270,3 +270,87 @@ def test_gmail_duplicate_does_not_double_count_balance():
         ).fetchone()["value"]
 
     assert adjustments == 0
+
+
+def test_void_transaction_reverses_account_adjustment_once():
+    from app.ledger import sync_transaction, void_transaction
+
+    class T:
+        id = "void-test"
+        amountMinor = 2500
+        currency = "INR"
+        type = "DEBIT"
+        paymentMethod = "UPI"
+        accountType = "BANK_ACCOUNT"
+        bank = "HDFC"
+        merchantOrPayee = "VOID TEST"
+        accountLast4 = "8888"
+        reference = None
+        timestamp = 2000000000000
+        category = "OTHER"
+        confidence = 0.95
+
+    set_balance("void-account", "Void Account", "INR", "BANK_ACCOUNT", "HDFC", "8888", 10000)
+    sync_transaction(T())
+
+    with connection() as conn:
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='void-account'"
+        ).fetchone()["balance_minor"]
+    assert balance == 7500
+
+    result = void_transaction("void-test")
+    assert result["status"] == "VOIDED"
+    assert result["reversedAdjustment"] is True
+
+    with connection() as conn:
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='void-account'"
+        ).fetchone()["balance_minor"]
+        tx = conn.execute(
+            "SELECT status FROM transactions WHERE id='void-test'"
+        ).fetchone()
+        adjustments = conn.execute(
+            "SELECT COUNT(*) value FROM balance_adjustments WHERE transaction_id='void-test'"
+        ).fetchone()["value"]
+
+    assert balance == 10000
+    assert tx["status"] == "VOIDED"
+    assert adjustments == 0
+
+    again = void_transaction("void-test")
+    assert again["status"] == "ALREADY_VOIDED"
+
+    with connection() as conn:
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='void-account'"
+        ).fetchone()["balance_minor"]
+
+    assert balance == 10000
+
+
+def test_voided_transactions_are_hidden_from_list():
+    from app.ledger import sync_transaction, void_transaction, list_transactions
+
+    class T:
+        id = "void-hidden"
+        amountMinor = 1000
+        currency = "INR"
+        type = "DEBIT"
+        paymentMethod = "UPI"
+        accountType = "BANK_ACCOUNT"
+        bank = "HDFC"
+        merchantOrPayee = None
+        accountLast4 = "9999"
+        reference = None
+        timestamp = 2000000001000
+        category = "OTHER"
+        confidence = 0.95
+
+    set_balance("void-hidden-account", "Void Hidden", "INR", "BANK_ACCOUNT", "HDFC", "9999", 10000)
+    sync_transaction(T())
+    assert any(row["id"] == "void-hidden" for row in list_transactions())
+
+    void_transaction("void-hidden")
+
+    assert not any(row["id"] == "void-hidden" for row in list_transactions())
