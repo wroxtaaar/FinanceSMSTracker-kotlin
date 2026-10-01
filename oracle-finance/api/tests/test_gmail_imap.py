@@ -32,3 +32,33 @@ def test_imap_message_becomes_gmail_like_payload():
     assert payload["payload"]["headers"]
     assert payload["internalDate"] != "0"
     assert payload["payload"]["body"]["data"]
+
+
+def test_imap_message_keeps_pdf_attachment_data():
+    from email.message import EmailMessage
+
+    message = EmailMessage()
+    message["From"] = "HDFC Bank <alerts@hdfcbank.net>"
+    message["Subject"] = "HDFC e-Statement"
+    message.set_content("Your statement is attached.")
+    message.add_attachment(
+        b"%PDF-test",
+        maintype="application",
+        subtype="pdf",
+        filename="HDFC_Statement_Aug_2026.pdf",
+    )
+
+    payload = message_to_api_shape(
+        message.as_bytes(),
+        uid="321",
+        uidvalidity="654",
+        folder="INBOX",
+    )
+
+    pdf_parts = [
+        part for part in payload["payload"]["parts"]
+        if part.get("filename") == "HDFC_Statement_Aug_2026.pdf"
+    ]
+    assert len(pdf_parts) == 1
+    assert pdf_parts[0]["mimeType"] == "application/pdf"
+    assert pdf_parts[0]["body"]["data"]
