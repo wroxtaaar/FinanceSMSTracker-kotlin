@@ -218,6 +218,28 @@ def ingest_messages(service,query="newer_than:30d"):
         for item in result.get("messages",[]):
             stats["messagesScanned"] += 1
             msg_id=item["id"]
+
+            # IMAP can cheaply return headers without downloading the full
+            # message. On a first/manual scan this avoids fetching newsletters,
+            # promotions, OTPs, etc. Only likely bank/transaction mail gets a
+            # full RFC822 fetch.
+            if item.get("from") is not None:
+                sender_preview = parseaddr(item.get("from", ""))[1].lower()
+                subject_preview = item.get("subject", "") or ""
+                sender_domain = sender_preview.rsplit("@", 1)[-1] if "@" in sender_preview else ""
+                known_bank_sender = any(
+                    sender_domain == domain or sender_domain.endswith("." + domain)
+                    for domains in _BANK_SENDER_DOMAINS.values()
+                    for domain in domains
+                )
+                transaction_subject = bool(re.search(
+                    r"(?i)transaction|debited|credited|payment|purchase|spent|withdraw",
+                    subject_preview,
+                ))
+                if not known_bank_sender and not transaction_subject:
+                    stats["ignoredCount"] += 1
+                    continue
+
             with connection() as conn:
                 existing = conn.execute(
                     "SELECT status FROM gmail_messages WHERE id=?",
