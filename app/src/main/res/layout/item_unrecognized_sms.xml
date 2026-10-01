@@ -25,7 +25,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="Unrecognized financial SMS from unknown sender"
+            android:text="Unrecognized financial SMS"
             android:textSize="13sp" />
 
         <TextView
@@ -35,11 +35,26 @@
             android:layout_marginTop="4dp"
             android:textSize="11sp" />
 
-        <Button
-            android:id="@+id/buttonDismissUnrecognized"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="Dismiss" />
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/buttonCreateTransactionUnrecognized"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Create Transaction" />
+
+            <Button
+                android:id="@+id/buttonDismissUnrecognized"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Dismiss" />
+        </LinearLayout>
     </LinearLayout>
 </androidx.cardview.widget.CardView>
