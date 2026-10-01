@@ -88,13 +88,6 @@
             android:text="Splitwise owed to you: —"
             android:textSize="14sp" />
 
-        <Button
-            android:id="@+id/buttonEditSplitwise"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Edit Splitwise Owed" />
-
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -102,19 +95,36 @@
             android:orientation="horizontal">
 
             <Button
-                android:id="@+id/buttonEditBankAccounts"
+                android:id="@+id/buttonEditSplitwise"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Edit Banks" />
+                android:minHeight="0dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:text="Splitwise" />
+
+            <Button
+                android:id="@+id/buttonEditBankAccounts"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:minHeight="0dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:text="Banks" />
 
             <Button
                 android:id="@+id/buttonEditCreditCards"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
+                android:layout_marginStart="6dp"
                 android:layout_weight="1"
-                android:text="Edit Cards" />
+                android:minHeight="0dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:text="Cards" />
         </LinearLayout>
 
         <Button
