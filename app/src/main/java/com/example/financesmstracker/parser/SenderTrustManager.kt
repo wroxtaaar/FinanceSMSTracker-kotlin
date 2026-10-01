@@ -7,62 +7,137 @@ enum class SenderTrustStatus {
 }
 
 object SenderTrustManager {
-    // Authorized bank DLT headers / sender strings (e.g. VM-HDFCBK-S, AD-AXISBK-S, HDFC, AXIS)
-    private val TRUSTED_SENDERS = listOf("HDFC", "AXIS", "ICICI", "SBI", "KOTAK", "PAYTM", "PHONEPE", "HDFCBK", "AXISBK", "ICICIB", "SBICARD")
+    /*
+     * Sender triage is intentionally separate from transaction parsing.
+     * The structure is adapted from Umber (MIT), DeepakSilaych/umber:
+     * https://github.com/DeepakSilaych/umber
+     *
+     * A sender being trusted is only one signal. The message still has to pass
+     * the transaction parser and the receiver's confidence threshold.
+     */
+    private val BANK_CODES = setOf(
+        "hdfcbk", "hdfcbn", "sbiinb", "sbiupi", "sbibnk", "sbicrd", "atmsbi",
+        "icicib", "icicit", "axisbk", "axisbn", "kotakb", "kotak",
+        "pnbsms", "pnbbnk", "bobtxn", "bobibn", "canbnk", "cbssbi",
+        "unionb", "ubinet", "idfcfb", "yesbnk", "indusb", "aubank",
+        "rblbnk", "fedbnk", "citibk", "hsbcin", "scbank", "idbibk",
+        "bankin", "cbinbk", "iobchn", "ucobnk", "psbbnk", "dcbbnk",
+        "equtas", "esafbk", "jkbank", "karbnk", "kvbank", "tmbank",
+        "amexin", "onecrd", "slcebk"
+    )
+
+    private val PSP_CODES = setOf(
+        "paytmb", "paytm", "phonpe", "phnpay", "gpayin", "bhimup", "npcibh",
+        "amzonp", "amazon", "mobikw", "freechg", "cred", "slice", "jupitr",
+        "fisdom", "razrpy", "cashfr"
+    )
+
+    private val PERSONAL_NUMBER = Regex("""^(?:\+?91|0)?[6-9]\d{9}$""")
+    private val NON_ALNUM = Regex("""[^a-z0-9]""")
+
+    private val REJECT_OTP = Regex(
+        """\botp\b|one[\s-]?time[\s-]?password|verification code|\bcvv\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val REJECT_PROMO = Regex(
+        """pre[\s-]?approved|apply now|click here|hurry|limited period|offer ends|""" +
+            """t&c apply|download the app|you have won|congratulations|lowest interest|""" +
+            """upgrade your|refer and earn|reward points|cashback offer|special offer|""" +
+            """limited period offer|annual fee waiver|annual fee.{0,40}\bspends?\b|""" +
+            """\bspends?\s+(?:of|rs\.?|inr|₹)|\b(?:get|earn|save)\b.{0,40}\b(?:cashback|reward|bonus|points)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val REJECT_NOT_COMPLETED = Regex(
+        """will be (?:debited|deducted|credited|charged|transferred|reversed|refunded|blocked|processed)|""" +
+            """is due|due on|due date|(?:collect|payment|money) request|has requested|requesting|""" +
+            """(?:failed|declined|unsuccessful|not processed|could not be processed)|""" +
+            """\bnot (?:debited|credited|deducted|charged)\b|\brejection\b|""" +
+            """to (?:authorise|authorize|approve)|\bscheduled\b|\bpending\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val REJECT_INFO_ONLY = Regex(
+        """mini statement|statement is ready|statement has been generated|e-statement|""" +
+            """available balance|available limit|credit limit""",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun normalizeSender(sender: String): String =
+        NON_ALNUM.replace(sender.trim().lowercase(), "")
 
     fun classifySender(sender: String): SenderTrustStatus {
-        if (sender.isBlank() || sender.equals("UNKNOWN", ignoreCase = true)) {
+        val raw = sender.trim()
+        if (raw.isEmpty() || raw.equals("UNKNOWN", ignoreCase = true)) {
             return SenderTrustStatus.UNKNOWN
         }
-        val upperSender = sender.uppercase()
-        
-        // Strict sender/header inspection (isolated from message body)
-        for (trusted in TRUSTED_SENDERS) {
-            if (upperSender.contains(trusted)) {
-                return SenderTrustStatus.TRUSTED
-            }
+
+        val compact = normalizeSender(raw)
+        if (PERSONAL_NUMBER.matches(compact)) {
+            return SenderTrustStatus.UNTRUSTED
         }
 
-        // Standard DLT header pattern
-        if (upperSender.matches(Regex("^[A-Z]{2}-[A-Z0-9]+(-[A-Z0-9]+)?$"))) {
+        val segments = raw.lowercase()
+            .split('-', '_', '.')
+            .map { NON_ALNUM.replace(it, "") }
+            .filter { it.isNotEmpty() }
+
+        val candidates = segments + compact
+
+        if (candidates.any { candidate -> BANK_CODES.contains(candidate) || BANK_CODES.any { candidate.contains(it) } }) {
+            return SenderTrustStatus.TRUSTED
+        }
+
+        if (candidates.any { candidate -> PSP_CODES.contains(candidate) || PSP_CODES.any { candidate.contains(it) } }) {
+            return SenderTrustStatus.TRUSTED
+        }
+
+        // Preserve the old behavior for familiar human-readable sender names.
+        val upper = raw.uppercase()
+        if (listOf("HDFC", "AXIS", "ICICI", "SBI", "KOTAK", "PAYTM", "PHONEPE", "HDFCBK", "AXISBK", "ICICIB", "SBICARD")
+            .any { upper.contains(it) }) {
+            return SenderTrustStatus.TRUSTED
+        }
+
+        if (upper.matches(Regex("^[A-Z]{2}-[A-Z0-9]+(?:-[A-Z0-9]+)?$"))) {
             return SenderTrustStatus.UNKNOWN
         }
 
         return SenderTrustStatus.UNTRUSTED
     }
 
+    /**
+     * Hard rejection for messages that describe an offer, OTP, future/requested payment,
+     * failed/pending operation, or informational balance/statement event.
+     *
+     * This runs before bank-specific parsers so a trusted sender cannot accidentally turn a
+     * promotional message into a ledger transaction.
+     */
     fun isNonTransactionalFinancialMessage(messageBody: String): Boolean {
-        val lower = messageBody.lowercase()
-
-        return lower.contains("annual fee waiver") ||
-            lower.contains("annual fee") && lower.contains("spend") ||
-            lower.contains("spends of") ||
-            lower.contains("spend of") ||
-            lower.contains("spend rs") ||
-            lower.contains("spend inr") ||
-            lower.contains("reward points") ||
-            lower.contains("cashback offer") ||
-            lower.contains("limited period offer") ||
-            lower.contains("special offer") ||
-            lower.contains("pre-approved") ||
-            lower.contains("eligible for") && lower.contains("credit card") ||
-            lower.contains("enjoy") && lower.contains("credit card") ||
-            lower.contains("visit") && lower.contains("for details")
+        if (messageBody.isBlank()) return true
+        return REJECT_OTP.containsMatchIn(messageBody) ||
+            REJECT_PROMO.containsMatchIn(messageBody) ||
+            REJECT_NOT_COMPLETED.containsMatchIn(messageBody) ||
+            REJECT_INFO_ONLY.containsMatchIn(messageBody)
     }
 
     fun isFinancialLooking(messageBody: String): Boolean {
-        val lower = messageBody.lowercase()
-        val hasKeyword = lower.contains("debited") || lower.contains("credited") || 
-                         lower.contains("spent") || lower.contains("paid") || 
-                         lower.contains("received") || lower.contains("transfer") || 
-                         lower.contains("a/c") || lower.contains("account") || lower.contains("card")
-        val hasAmount = lower.contains("rs") || lower.contains("inr") || lower.contains("₹") || lower.contains("sgd") || lower.contains("usd")
-        val isOtpOrPromo = lower.contains("otp") || lower.contains("one time password") || 
-                           lower.contains("verification code") || lower.contains("promotional") || 
-                           lower.contains("offer") || lower.contains("discount") || lower.contains("win") ||
-                           lower.contains("loan") || lower.contains("pre-approved") || lower.contains("credit card limit") ||
-                           lower.contains("failed") || lower.contains("pending") || lower.contains("mandate")
+        if (isNonTransactionalFinancialMessage(messageBody)) return false
 
-        return hasKeyword && hasAmount && !isOtpOrPromo
+        val lower = messageBody.lowercase()
+        val hasTransactionKeyword =
+            lower.contains("debited") || lower.contains("credited") ||
+            lower.contains("spent") || lower.contains("paid") ||
+            lower.contains("received") || lower.contains("transfer") ||
+            lower.contains("transferred") || lower.contains("withdrawn") ||
+            lower.contains("purchase") || lower.contains("payment") ||
+            lower.contains("a/c") || lower.contains("account") || lower.contains("card")
+
+        val hasAmount = Regex(
+            """(?:inr|rs\.?|₹|sgd|usd|eur|gbp)\s*[0-9]"""
+        ).containsMatchIn(lower)
+
+        return hasTransactionKeyword && hasAmount
     }
 }
