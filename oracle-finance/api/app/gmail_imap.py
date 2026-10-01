@@ -226,6 +226,10 @@ class IMAPService:
         imap_limit = min(max_results, self.max_results)
         uid_set = {uid.decode("ascii") for uid in raw_uids[-imap_limit:]}
 
+        bank_senders = (
+            "alerts@axis.bank.in",
+            "credit_cards@icici.bank.in",
+        )
         bank_domains = (
             "hdfcbank.net", "hdfcbank.bank.in",
             "axisbank.com", "axis.bank.in",
@@ -234,11 +238,24 @@ class IMAPService:
             "hsbc.co.in", "hsbc.com",
             "indusind.com",
         )
+
+        # Search exact known senders first. Python's IMAP client supports
+        # SEARCH FROM criteria; using the exact address avoids relying on
+        # display names such as "Axis Bank Alerts" and guarantees the two
+        # transaction senders used by this account are included.
+        for sender in bank_senders:
+            status, sender_data = self._imap.uid(
+                "SEARCH", None, f'FROM "{sender}"'
+            )
+            if status == "OK" and sender_data and sender_data[0]:
+                sender_uids = [uid.decode("ascii") for uid in sender_data[0].split()]
+                uid_set.update(sender_uids[-50:])
+
+        # Keep domain-level discovery as a fallback for other supported bank
+        # sender addresses.
         for domain in bank_domains:
             status, bank_data = self._imap.uid(
-                "SEARCH", None, f'(FROM "{domain}" {search_criteria[1:-1]})'
-                if search_criteria.startswith("(") and search_criteria.endswith(")")
-                else f'FROM "{domain}"',
+                "SEARCH", None, f'FROM "{domain}"'
             )
             if status == "OK" and bank_data and bank_data[0]:
                 bank_uids = [uid.decode("ascii") for uid in bank_data[0].split()]
