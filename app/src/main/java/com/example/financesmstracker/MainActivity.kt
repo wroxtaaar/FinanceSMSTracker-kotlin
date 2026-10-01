@@ -66,6 +66,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var buttonViewAccounts: Button
     private lateinit var buttonOracleSettings: Button
     private lateinit var buttonReviewReconcile: Button
+    private lateinit var buttonEditSplitwise: Button
 
     private val oracleExecutor = Executors.newSingleThreadExecutor()
 
@@ -142,6 +143,11 @@ class MainActivity : AppCompatActivity() {
         buttonViewAccounts = findViewById(R.id.buttonViewAccounts)
         buttonOracleSettings = findViewById(R.id.buttonOracleSettings)
         buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
+        buttonEditSplitwise = findViewById(R.id.buttonEditSplitwise)
+
+        buttonEditSplitwise.setOnClickListener {
+            showManualSplitwiseDialog()
+        }
 
         buttonRefreshOracle.setOnClickListener {
             loadOracleSummary()
@@ -377,6 +383,59 @@ class MainActivity : AppCompatActivity() {
                     renderOracleSummary(summary)
                 }.onFailure { error ->
                     textViewOracleStatus.text = "Oracle ledger: " + (error.message ?: "Unavailable")
+                }
+            }
+        }
+    }
+
+    private fun showManualSplitwiseDialog() {
+        buttonEditSplitwise.isEnabled = false
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).fetchManualSplitwiseTotal()
+            runOnUiThread {
+                buttonEditSplitwise.isEnabled = true
+                result.onSuccess { currentMinor ->
+                    val input = EditText(this@MainActivity).apply {
+                        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                        setSingleLine(true)
+                        hint = "Amount you are owed"
+                        setText(String.format(Locale.getDefault(), "%.2f", currentMinor / 100.0))
+                        selectAll()
+                    }
+                    val dialog = AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Splitwise Owed")
+                        .setMessage("Enter the total amount currently owed to you on Splitwise.")
+                        .setView(input)
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Save", null)
+                        .create()
+                    dialog.setOnShowListener {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                            val amount = input.text.toString().trim().replace(",", "").toDoubleOrNull()
+                            if (amount == null || amount < 0) {
+                                input.error = "Enter a valid amount"
+                                return@setOnClickListener
+                            }
+                            val minor = kotlin.math.round(amount * 100.0).toLong()
+                            buttonEditSplitwise.isEnabled = false
+                            oracleExecutor.execute {
+                                val saveResult = FinanceSyncClient(this@MainActivity).updateManualSplitwiseTotal(minor)
+                                runOnUiThread {
+                                    buttonEditSplitwise.isEnabled = true
+                                    saveResult.onSuccess {
+                                        dialog.dismiss()
+                                        loadOracleSummary()
+                                        Toast.makeText(this@MainActivity, "Splitwise owed updated", Toast.LENGTH_SHORT).show()
+                                    }.onFailure { error ->
+                                        Toast.makeText(this@MainActivity, "Could not update Splitwise: " + (error.message ?: "Unavailable"), Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    dialog.show()
+                }.onFailure { error ->
+                    Toast.makeText(this@MainActivity, "Could not load Splitwise amount: " + (error.message ?: "Unavailable"), Toast.LENGTH_LONG).show()
                 }
             }
         }
