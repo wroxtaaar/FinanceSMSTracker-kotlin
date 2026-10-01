@@ -144,4 +144,28 @@ class AdversarialCorpusTest {
         assertTrue(result.isTransaction)
         assertEquals(40000L, result.amountPaise)
     }
+    @Test
+    fun testS_BareDebitedAmount() {
+        val sms = "Your account was debited by 120.0 for UPI payment. Ref 123456."
+        val result = parserManager.parse("JD-HDFCBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(12000L, result.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+    }
+
+    @Test
+    fun testT_FutureDebitWithAmountMustBeRejected() {
+        val sms = "Rs. 1200 will be debited from your account on 05-Oct-26."
+        val result = parserManager.parse("JD-HDFCBK-S", sms)
+        assertFalse(result.isTransaction)
+    }
+
+    @Test
+    fun testU_BalanceAmountMustNotBecomeTransactionAmount() {
+        val sms = "Rs. 750 debited from a/c xx9591. Available balance is Rs. 60,622.86."
+        val result = parserManager.parse("JD-HDFCBK-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(75000L, result.amountPaise)
+    }
+
 }
