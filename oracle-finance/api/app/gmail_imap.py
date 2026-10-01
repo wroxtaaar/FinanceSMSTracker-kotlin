@@ -194,15 +194,8 @@ class IMAPService:
         self.uidvalidity = "0"
         self._connect()
 
-    @staticmethod
-    def _mailbox_name_from_list_response(raw):
-        if not isinstance(raw, bytes):
-            return None
-        decoded = raw.decode(errors="replace").strip()
-
-        # RFC 3501 LIST responses end with the mailbox name. Gmail normally
-        # quotes it, but keep the parser tolerant of unquoted names too.
-        match = re.search(r'(?:"[^"]*"|[^\s]+)\s+(.+)        """Create and initialize the IMAP connection if it is not present."""
+    def _connect(self):
+        """Create and initialize the IMAP connection if it is not present."""
         if self._imap is not None:
             return self._imap
 
@@ -226,14 +219,37 @@ class IMAPService:
                 ) from exc
 
             stage = "mailbox selection"
-            selected_folder, selection_details = self._select_mailbox(imap)
-            if not selected_folder:
-                raise RuntimeError(
-                    "No selectable Gmail mailbox found. "
-                    f"Configured={self.folder}; {selection_details}"
-                )
-            self.folder = selected_folder
 
+            # Try the configured folder first.
+            status, data = imap.select(self.folder)
+            selection_attempts = [
+                f"{self.folder}=>{status}"
+                + (f" {data!r}" if data and status != "OK" else "")
+            ]
+
+            # Inbox is where the bank messages are currently visible in Gmail.
+            if status != "OK" and self.folder.casefold() != "inbox":
+                fallback_status, fallback_data = imap.select("INBOX")
+                selection_attempts.append(
+                    "INBOX=>"
+                    + str(fallback_status)
+                    + (f" {fallback_data!r}" if fallback_data and fallback_status != "OK" else "")
+                )
+                if fallback_status == "OK":
+                    self.folder = "INBOX"
+                    status = fallback_status
+
+            # If both names fail, ask the server for its actual mailbox names.
+            advertised = []
+            if status != "OK":
+                list_status, folders = imap.list("", "*")
+                for raw in folders or []:
+                    if isinstance(raw, bytes):
+                        line = raw.decode(errors="replace")
+                        advertised.append(line)
+                        # Gmail LIST responses normally put the mailbox name
+                        # in the final quoted field.
+                        mailbox_match = re.search(r'("[^"]+"|[^\\s]+)
             response_code, uidvalidity_data = imap.response("UIDVALIDITY")
             if response_code == "UIDVALIDITY" and uidvalidity_data:
                 self.uidvalidity = uidvalidity_data[-1].decode(errors="replace")
@@ -477,107 +493,29 @@ class IMAPService:
             imap.logout()
         except Exception:
             pass
-, decoded)
-        if not match:
-            return None
+, line)
+                        if not mailbox_match:
+                            continue
+                        mailbox = mailbox_match.group(1).strip('"')
+                        if mailbox.casefold() in {"inbox", self.folder.casefold()}:
+                            continue
+                        mailbox_status, mailbox_data = imap.select(mailbox)
+                        selection_attempts.append(
+                            f"{mailbox}=>{mailbox_status}"
+                            + (f" {mailbox_data!r}" if mailbox_data and mailbox_status != "OK" else "")
+                        )
+                        if mailbox_status == "OK":
+                            self.folder = mailbox
+                            status = mailbox_status
+                            break
 
-        name = match.group(1).strip()
-        if len(name) >= 2 and name[0] == '"' and name[-1] == '"':
-            name = name[1:-1]
-            name = name.replace(r'\\"', '"').replace(r"\\", "\")
-        return name
-
-    def _select_mailbox(self, imap):
-        """Select a usable Gmail mailbox, discovering the server's names."""
-        attempts = []
-        tried = set()
-
-        def try_select(folder):
-            normalized = folder.strip()
-            key = normalized.casefold()
-            if not normalized or key in tried:
-                return False
-            tried.add(key)
-            status, data = imap.select(normalized)
-            attempts.append(
-                f"{normalized}=>{status}"
-                + (f" {data!r}" if data and status != "OK" else "")
-            )
-            return status == "OK"
-
-        # Preserve the user's configured folder as the first choice.
-        if try_select(self.folder):
-            return self.folder, "; ".join(attempts)
-
-        # Inbox is the known location of the bank alerts shown in Gmail.
-        if try_select("INBOX"):
-            return "INBOX", "; ".join(attempts)
-
-        status, folders = imap.list("", "*")
-        advertised = []
-        if status == "OK":
-            for raw in folders or []:
-                name = self._mailbox_name_from_list_response(raw)
-                if not name:
-                    continue
-                advertised.append(name)
-
-            # Prefer the server-advertised special-use \All mailbox.
-            for raw in folders or []:
-                if not isinstance(raw, bytes):
-                    continue
-                decoded = raw.decode(errors="replace")
-                if "\\All" not in decoded:
-                    continue
-                name = self._mailbox_name_from_list_response(raw)
-                if name and try_select(name):
-                    return name, "; ".join(attempts)
-
-            # Finally try an advertised Inbox spelling, which handles unusual
-            # hierarchy/localization without hardcoding a path.
-            for name in advertised:
-                if name.casefold() == "inbox" and try_select(name):
-                    return name, "; ".join(attempts)
-
-        advertised_text = ", ".join(advertised[:20]) if advertised else "<none>"
-        details = (
-            f"select attempts: {'; '.join(attempts) or '<none>'}; "
-            f"LIST status={status}; advertised={advertised_text}"
-        )
-        return None, details
-
-    def _connect(self):
-        """Create and initialize the IMAP connection if it is not present."""
-        if self._imap is not None:
-            return self._imap
-
-        imap_timeout = max(
-            5,
-            min(30, int(os.getenv("GMAIL_IMAP_TIMEOUT_SECONDS", "20"))),
-        )
-        imap = None
-        stage = "SSL connection"
-        try:
-            imap = imaplib.IMAP4_SSL(
-                self.host, self.port, timeout=imap_timeout
-            )
-
-            stage = "authentication/login"
-            try:
-                imap.login(self.username, self.password)
-            except Exception as exc:
+            if status != "OK":
+                advertised_text = " | ".join(advertised[:20]) if advertised else "<none>"
                 raise RuntimeError(
-                    f"IMAP authentication failed for {self.username}: {exc}"
-                ) from exc
-
-            stage = "mailbox selection"
-            selected_folder, selection_details = self._select_mailbox(imap)
-            if not selected_folder:
-                raise RuntimeError(
-                    "No selectable Gmail mailbox found. "
-                    f"Configured={self.folder}; {selection_details}"
+                    f"Could not select Gmail folder. "
+                    f"Configured={self.folder}; attempts={' ; '.join(selection_attempts)}; "
+                    f"LIST={advertised_text}"
                 )
-            self.folder = selected_folder
 
             response_code, uidvalidity_data = imap.response("UIDVALIDITY")
             if response_code == "UIDVALIDITY" and uidvalidity_data:
