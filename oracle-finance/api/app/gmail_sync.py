@@ -205,10 +205,11 @@ def ingest_messages(service,query="newer_than:30d"):
                     "SELECT status FROM gmail_messages WHERE id=?",
                     (msg_id,),
                 ).fetchone()
-                # PENDING means the message was previously seen but could not
-                # be parsed. Retry it on the next sync so parser fixes and
-                # newly supported bank formats can recover old emails.
-                if existing and existing["status"] != "PENDING":
+                # Only PARSED is terminal. REVIEW/IGNORED/PENDING messages
+                # must be retried so parser fixes and newly supported bank
+                # formats can recover emails that were classified before the
+                # current parser rules were deployed.
+                if existing and existing["status"] == "PARSED":
                     stats["alreadyProcessed"] += 1
                     continue
 
