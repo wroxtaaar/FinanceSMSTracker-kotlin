@@ -43,8 +43,10 @@ jobs:
           script: |
             set -e
             cd ~/FinanceSMSTracker-kotlin
-            git fetch origin
+            git fetch origin main
             git reset --hard origin/main
+            echo "Deployed commit on VPS:"
+            git rev-parse HEAD
             git log -1 --oneline
 
       - name: 3. Configure Tailscale private access
@@ -81,7 +83,23 @@ jobs:
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
             docker compose down
 
-      - name: 5. Build finance services
+      - name: 5. Verify VPS commit
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          script: |
+            set -e
+            cd ~/FinanceSMSTracker-kotlin
+            EXPECTED="$GITHUB_SHA"
+            ACTUAL="$(git rev-parse HEAD)"
+            echo "Expected commit: $EXPECTED"
+            echo "Actual commit:   $ACTUAL"
+            test "$ACTUAL" = "$EXPECTED"
+
+      - name: 6. Build finance services
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
@@ -97,7 +115,7 @@ jobs:
               docker compose build --no-cache finance-api
             fi
 
-      - name: 6. Start finance services
+      - name: 7. Start finance services
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
@@ -113,7 +131,7 @@ jobs:
               docker compose up -d finance-api
             fi
 
-      - name: 7. Health check
+      - name: 8. Health check
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
