@@ -546,13 +546,13 @@ class MainActivity : AppCompatActivity() {
                     loadOracleSummary()
 
                     val message = buildString {
-                        append("Gmail checked\\n\\n")
-                        append("Messages scanned: ${sync.messagesScanned}\\n")
-                        append("New transaction emails: ${sync.parsedTransactions}\\n")
-                        append("Axis credits found: ${sync.axisCredits}\\n")
-                        append("Already processed: ${sync.alreadyProcessed}\\n")
-                        append("Duplicates skipped: ${sync.duplicateTransactions}\\n")
-                        append("Needs review: ${sync.reviewCount}\\n")
+                        append("Gmail checked\n\n")
+                        append("Messages scanned: ${sync.messagesScanned}\n")
+                        append("New transaction emails: ${sync.parsedTransactions}\n")
+                        append("Axis credits found: ${sync.axisCredits}\n")
+                        append("Already processed: ${sync.alreadyProcessed}\n")
+                        append("Duplicates skipped: ${sync.duplicateTransactions}\n")
+                        append("Needs review: ${sync.reviewCount}\n")
                         append("Ignored: ${sync.ignoredCount}")
                     }
 
