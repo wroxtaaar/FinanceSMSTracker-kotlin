@@ -163,20 +163,32 @@ def _reference(combined):
 def _merchant_or_payee(combined):
     normalized = _plain_text(combined)
 
-    # In Axis account alerts, "Transaction Info:" is the reference block, not
-    # a merchant field. Only a standalone "Info:" field should populate the
-    # merchant/payee value. This prevents the rest of the bank's disclaimer
-    # from being displayed as the merchant.
+    # In Axis account alerts, "Transaction Info:" contains transfer metadata,
+    # not a normal merchant field. First prefer a real standalone "Info:" field.
     match = re.search(
         r"(?is)(?<!Transaction )\bInfo\s*:\s*(.*?)(?=\s+(?:The\s+)?"
         r"(?:Available\s+Credit\s+Limit|Total\s+Credit\s+Limit|"
         r"Available\s+Balance|Credit\s+Limit)\b|$)",
         normalized,
     )
-    if not match:
-        return None
-    value = match.group(1).strip(" \t\r\n.,;:-")
-    return value or None
+    if match:
+        value = match.group(1).strip(" \t\r\n.,;:-")
+        if value:
+            return value
+
+    # Axis UPI account alerts expose the counterparty inside Transaction Info:
+    # UPI/P2A/<reference>/<counterparty>/... . Extract only that counterparty
+    # segment and never the following bank/footer text.
+    transfer_match = re.search(
+        r"(?i)\bTransaction\s+Info\s*:\s*"
+        r"UPI/[^/\s]+/[^/\s]+/([^/\n]+?)(?=\s*/|\s+If\b|$)",
+        normalized,
+    )
+    if transfer_match:
+        value = transfer_match.group(1).strip(" \t\r\n.,;:-")
+        return value or None
+
+    return None
 
 
 def _account_type_for_email(combined, subject, last4):
@@ -615,6 +627,94 @@ def _repair_legacy_gmail_merchants(service):
     return repaired
 
 
+def _repair_self_transfer_gmail_merchants(service):
+    """Enrich Gmail transfer names from a uniquely matching opposite entry.
+
+    Some bank templates truncate the counterparty name. When a Gmail
+    transaction has no useful merchant/payee, pair it with a single opposite
+    debit/credit in a different account within ten minutes, using amount,
+    currency, bank and account identity as guards. This updates descriptive
+    metadata only.
+    """
+    repaired = 0
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                t.id,
+                t.amount_minor,
+                t.type,
+                t.currency,
+                t.bank,
+                t.account_last4,
+                t.timestamp,
+                t.merchant_or_payee,
+                e.source_id
+            FROM transactions t
+            JOIN evidence e
+              ON e.transaction_id = t.id
+             AND e.source_type = 'GMAIL'
+            WHERE t.id LIKE 'gmail:%'
+              AND t.status = 'ACTIVE'
+              AND t.duplicate_of IS NULL
+              AND UPPER(TRIM(COALESCE(t.account_type,''))) = 'BANK_ACCOUNT'
+            ORDER BY t.timestamp ASC
+            """
+        ).fetchall()
+
+        for row in rows:
+            current = (row["merchant_or_payee"] or "").strip()
+            if current and not current.upper().startswith("ABDUL WAS"):
+                # A populated merchant should normally be preserved.
+                continue
+
+            partner_rows = conn.execute(
+                """
+                SELECT id,merchant_or_payee
+                FROM transactions
+                WHERE id <> ?
+                  AND id NOT LIKE 'gmail:%'
+                  AND status='ACTIVE'
+                  AND duplicate_of IS NULL
+                  AND amount_minor=?
+                  AND currency=?
+                  AND type=?
+                  AND UPPER(TRIM(COALESCE(bank,''))) <> UPPER(TRIM(COALESCE(?,'')))
+                  AND TRIM(COALESCE(account_last4,'')) <> TRIM(COALESCE(?,'')) 
+                  AND ABS(timestamp-?) <= 600000
+                  AND TRIM(COALESCE(merchant_or_payee,'')) <> ''
+                ORDER BY ABS(timestamp-?)
+                LIMIT 2
+                """,
+                (
+                    row["id"],
+                    row["amount_minor"],
+                    row["currency"],
+                    "CREDIT" if row["type"] == "DEBIT" else "DEBIT",
+                    row["bank"] or "",
+                    row["account_last4"] or "",
+                    row["timestamp"],
+                    row["timestamp"],
+                ),
+            ).fetchall()
+
+            candidates = [x for x in partner_rows if (x["merchant_or_payee"] or "").strip()]
+            if len(candidates) != 1:
+                continue
+
+            merchant = candidates[0]["merchant_or_payee"].strip()
+            if merchant == current:
+                continue
+
+            conn.execute(
+                "UPDATE transactions SET merchant_or_payee=? WHERE id=?",
+                (merchant, row["id"]),
+            )
+            repaired += 1
+
+    return repaired
+
+
 def _repair_legacy_gmail_merchant_values(service):
     """Repair stale Gmail merchant values using the current parser.
 
@@ -806,6 +906,7 @@ def ingest_messages(service,query="newer_than:30d"):
         + _repair_legacy_icici_credit_card_classifications(service)
         + _repair_legacy_gmail_merchants(service)
         + _repair_legacy_gmail_merchant_values(service)
+        + _repair_self_transfer_gmail_merchants(service)
     )
 
     # Gmail's API is paginated. IMAPService intentionally exposes only one
