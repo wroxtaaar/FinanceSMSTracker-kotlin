@@ -170,6 +170,86 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         }
     }
 
+    fun getUnresolvedEvidence(): List<SourceEvidence> {
+        val list = mutableListOf<SourceEvidence>()
+        val db = dbHelper.readableDatabase
+        val cursor = db.query(
+            FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_STATUS} IN (?, ?)",
+            arrayOf(EvidenceStatus.UNMATCHED.name, EvidenceStatus.AMBIGUOUS.name),
+            null,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_RECEIVED_AT} DESC"
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                list.add(cursorToEvidence(it))
+            }
+        }
+        return list
+    }
+
+    fun getUnresolvedEvidenceCount(): Int {
+        val db = dbHelper.readableDatabase
+        return db.query(
+            FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+            arrayOf("COUNT(*)"),
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_STATUS} IN (?, ?)",
+            arrayOf(EvidenceStatus.UNMATCHED.name, EvidenceStatus.AMBIGUOUS.name),
+            null,
+            null,
+            null
+        ).use {
+            if (it.moveToFirst()) it.getInt(0) else 0
+        }
+    }
+
+    fun getCandidateTransactionsForEvidence(evidence: SourceEvidence): List<Transaction> {
+        val candidates = getTransactionsByAmount(evidence.amountPaise)
+        return candidates.filter { tx ->
+            tx.currency.equals(evidence.currency, ignoreCase = true) &&
+                (evidence.direction.isBlank() ||
+                    evidence.direction.equals("UNKNOWN", ignoreCase = true) ||
+                    evidence.direction.equals(tx.transactionType.name, ignoreCase = true)) &&
+                (evidence.bankProvider.isNullOrBlank() ||
+                    tx.bank.isNullOrBlank() ||
+                    normalizeBank(evidence.bankProvider) == normalizeBank(tx.bank))
+        }
+    }
+
+    fun resolveEvidenceToTransaction(evidenceId: Long, transactionId: Long): SourceEvidence? {
+        val db = dbHelper.writableDatabase
+        val evidence = getSourceEvidenceById(evidenceId) ?: return null
+        if (getTransactionById(transactionId) == null) return null
+
+        val values = ContentValues().apply {
+            put(FinanceDatabaseHelper.COLUMN_EVIDENCE_TRANSACTION_ID, transactionId)
+            put(FinanceDatabaseHelper.COLUMN_EVIDENCE_STATUS, EvidenceStatus.MATCHED.name)
+        }
+        val updated = db.update(
+            FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+            values,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_ID} = ?",
+            arrayOf(evidenceId.toString())
+        )
+        return if (updated > 0) getSourceEvidenceById(evidenceId) else evidence
+    }
+
+    private fun normalizeBank(bank: String?): String? {
+        if (bank.isNullOrBlank()) return null
+        val upper = bank.trim().uppercase()
+        return when {
+            upper.contains("AXIS") -> "AXIS"
+            upper.contains("HDFC") -> "HDFC"
+            upper.contains("ICICI") -> "ICICI"
+            upper.contains("SBI") -> "SBI"
+            upper.contains("KOTAK") -> "KOTAK"
+            upper.contains("PAYTM") -> "PAYTM"
+            else -> upper.replace(" BANK", "").trim()
+        }
+    }
+
     fun getTransactionsByAmount(amountPaise: Long): List<Transaction> {
         val list = mutableListOf<Transaction>()
         val db = dbHelper.readableDatabase
