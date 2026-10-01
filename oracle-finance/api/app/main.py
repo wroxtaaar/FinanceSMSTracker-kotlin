@@ -36,6 +36,7 @@ class SyncEvidence(BaseModel):
 
 class SyncRequest(BaseModel):
     version:int=Field(ge=1); transactions:list[SyncTransaction]=[]; evidence:list[SyncEvidence]=[]
+    voidedTransactionIds:list[str]=[]
 
 class BalanceRequest(BaseModel):
     id:str; name:str; currency:str="INR"; accountType:str; bank:Optional[str]=None; last4:Optional[str]=None; balanceMinor:int
@@ -64,6 +65,11 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
     if payload.version!=1: raise HTTPException(400,"unsupported sync contract version")
     new_t=sum(sync_transaction(t) for t in payload.transactions)
     new_e=sum(sync_evidence(e) for e in payload.evidence)
+    voided=0
+    for transaction_id in payload.voidedTransactionIds:
+        result=void_transaction(transaction_id)
+        if result.get("status") in ("VOIDED","ALREADY_VOIDED"):
+            voided += 1
     for t in payload.transactions:
         reconcile_duplicate_transaction(t.id)
     for t in payload.transactions:
@@ -73,6 +79,7 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
     return {"acceptedTransactions":new_t,"acceptedEvidence":new_e,
             "duplicateTransactions":len(payload.transactions)-new_t,
             "duplicateEvidence":len(payload.evidence)-new_e,
+            "voidedTransactions":voided,
             "serverTime":int(datetime.now(timezone.utc).timestamp()*1000)}
 
 @app.get("/api/v1/accounts")
