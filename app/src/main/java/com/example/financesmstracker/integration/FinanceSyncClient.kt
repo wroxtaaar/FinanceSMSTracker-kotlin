@@ -45,6 +45,24 @@ class FinanceSyncClient(
         }
     }
 
+    fun updateAccountBalance(account: OracleAccount, balanceMinor: Long): Result<String> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+
+        val json = JSONObject().apply {
+            put("id", account.id)
+            put("name", account.name)
+            put("currency", account.currency)
+            put("accountType", account.accountType)
+            account.bank?.let { put("bank", it) }
+            account.last4?.let { put("last4", it) }
+            put("balanceMinor", balanceMinor)
+        }
+
+        val encodedId = java.net.URLEncoder.encode(account.id, "UTF-8")
+        return put("/api/v1/accounts/" + encodedId + "/balance", json.toString())
+    }
+
     fun fetchManualSplitwiseTotal(): Result<Long> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
