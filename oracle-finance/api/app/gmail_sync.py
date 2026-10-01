@@ -71,7 +71,15 @@ def _hard_reject_email(subject, text):
         _REJECT_INFO_ONLY.search(combined)
     )
 
-def _recognized_bank(combined):
+def _recognized_bank(combined, sender=""):
+    # Some bank alerts omit the bank name from the body. The authenticated
+    # sender domain is a strong bank identity signal and is especially useful
+    # for credit alerts such as Axis account credits.
+    sender_lower = sender.lower()
+    for candidate, domains in _BANK_SENDER_DOMAINS.items():
+        if any(sender_lower.endswith("@" + domain) or sender_lower.endswith("." + domain)
+               for domain in domains):
+            return candidate
     for candidate, pattern in (
         ("HDFC", r"(?i)HDFC"),
         ("AXIS", r"(?i)Axis Bank|\bAxis\b"),
@@ -129,7 +137,7 @@ def parse_bank_email(message):
     amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
     direction="CREDIT" if re.search(r"(?i)credited|credit alert|payment.*received|refund",combined) else (
         "DEBIT" if re.search(r"(?i)debited|spent|sent|purchase|withdrawn|payment.*successful",combined) else None)
-    bank=_recognized_bank(combined)
+    bank=_recognized_bank(combined, sender)
     last4=_account_last4(combined)
 
     if not bank or not last4 or not _looks_like_transaction(combined, amount, direction):
@@ -198,7 +206,7 @@ def ingest_messages(service,query="newer_than:30d"):
             # bank/card transaction. Ordinary newsletters and unrelated mail
             # are recorded as ignored evidence without flooding the review queue.
             has_amount = bool(re.search(r"(?i)(?:INR|Rs\.?)[\\s₹]*[0-9][0-9,]*(?:\\.\\d{1,2})?", combined))
-            has_bank = _recognized_bank(combined) is not None
+            has_bank = _recognized_bank(combined, sender) is not None
             has_financial_marker = bool(_TRANSACTION_SIGNAL.search(combined))
             h_status = "REVIEW" if has_amount and has_bank and has_financial_marker else "IGNORED"
             e=SyncEvidenceModel(
