@@ -63,7 +63,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textViewBankCash: TextView
     private lateinit var textViewCardOutstanding: TextView
     private lateinit var textViewSplitwiseReceivable: TextView
+    private lateinit var buttonRefreshOracle: Button
     private lateinit var buttonViewAccounts: Button
+    private lateinit var buttonOracleSettings: Button
     private lateinit var buttonReviewReconcile: Button
     private lateinit var buttonEditSplitwise: Button
     private lateinit var buttonEditBankAccounts: Button
@@ -140,7 +142,9 @@ class MainActivity : AppCompatActivity() {
         textViewBankCash = findViewById(R.id.textViewBankCash)
         textViewCardOutstanding = findViewById(R.id.textViewCardOutstanding)
         textViewSplitwiseReceivable = findViewById(R.id.textViewSplitwiseReceivable)
+        buttonRefreshOracle = findViewById(R.id.buttonRefreshOracle)
         buttonViewAccounts = findViewById(R.id.buttonViewAccounts)
+        buttonOracleSettings = findViewById(R.id.buttonOracleSettings)
         buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
         buttonEditSplitwise = findViewById(R.id.buttonEditSplitwise)
         buttonEditBankAccounts = findViewById(R.id.buttonEditBankAccounts)
@@ -158,7 +162,15 @@ class MainActivity : AppCompatActivity() {
             loadOracleAccountsForManualEdit("CREDIT_CARD")
         }
 
-        textViewOracleStatus.setOnClickListener {
+        buttonRefreshOracle.setOnClickListener {
+            loadOracleSummary()
+        }
+
+        buttonViewAccounts.setOnClickListener {
+            loadOracleAccounts()
+        }
+
+        buttonOracleSettings.setOnClickListener {
             showOracleSettingsDialog()
         }
 
