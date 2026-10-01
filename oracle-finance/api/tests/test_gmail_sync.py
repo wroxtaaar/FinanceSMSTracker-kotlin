@@ -413,7 +413,7 @@ def test_repair_legacy_axis_credit_moves_balance_to_bank_account():
             (
                 "gmail-evidence:"+gmail_id,
                 "GMAIL",
-                gmail_id,
+                "imap:[Gmail]/All Mail:"+gmail_id,
                 "UNMATCHED",
                 1950000000000,
                 transaction_id,
@@ -459,7 +459,36 @@ def test_icici_real_credit_card_alert_from_bank_in_sender():
         "Dear Customer, Your ICICI Bank Credit Card XX1012 has been used "
         "for a transaction of INR 548.00 on Oct 01, 2026 at 06:05:28. "
         "Info: AMAZON PAY IN RECHARGE. "
-        "The Available Credit Limit on your card is INR 346849.06 and Total Credit Limit is INR 380000.00.",
+        "The Available Credit Limit on your card is INR 346849.06 and Total Credit Limit is INR 380000.00. "
+        "You can pay your Credit Card bills from your bank account.",
+        subject="Transaction alert for your ICICI Bank Credit Card",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Transaction alert for your ICICI Bank Credit Card"},
+        {"name": "From", "value": "credit_cards@icici.bank.in"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, evidence = parsed
+    assert transaction.amountMinor == 54800
+    assert transaction.type == "DEBIT"
+    assert transaction.bank == "ICICI"
+    assert transaction.accountType == "CREDIT_CARD"
+    assert transaction.paymentMethod == "CARD"
+    assert transaction.accountLast4 == "1012"
+    assert transaction.merchantOrPayee == "AMAZON PAY IN RECHARGE"
+    assert transaction.reference is None
+    assert evidence.reference is None
+
+
+def test_icici_transaction_subject_is_not_a_reference():
+    message = _message(
+        "icici-no-fake-ref",
+        "Your ICICI Bank Credit Card XX1012 has been used for a transaction "
+        "of INR 641.00. Info: AMAZON PAY GROCERY. "
+        "The Available Credit Limit on your card is INR 100000.00.",
         subject="Transaction alert for your ICICI Bank Credit Card",
     )
     message["payload"]["headers"] = [
@@ -471,8 +500,5 @@ def test_icici_real_credit_card_alert_from_bank_in_sender():
 
     assert parsed is not None
     transaction, _ = parsed
-    assert transaction.amountMinor == 54800
-    assert transaction.type == "DEBIT"
-    assert transaction.bank == "ICICI"
-    assert transaction.accountType == "CREDIT_CARD"
-    assert transaction.accountLast4 == "1012"
+    assert transaction.reference is None
+    assert transaction.merchantOrPayee == "AMAZON PAY GROCERY"
