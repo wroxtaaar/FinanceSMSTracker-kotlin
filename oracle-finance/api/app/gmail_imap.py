@@ -65,6 +65,23 @@ def _part_to_payload(part):
     if part.is_multipart():
         return _message_to_payload(part)
 
+    filename = part.get_filename() or ""
+    raw = part.get_payload(decode=True)
+
+    # Keep PDF/binary attachments in the Gmail-like payload so downstream
+    # statement processing can consume them without a second IMAP fetch.
+    if filename and raw is not None:
+        encoded = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+        return {
+            "filename": filename,
+            "mimeType": part.get_content_type(),
+            "headers": [
+                {"name": str(name), "value": _decode_header_value(value)}
+                for name, value in part.items()
+            ],
+            "body": {"data": encoded, "size": len(raw)},
+        }
+
     text = _text_payload(part)
     if text is None:
         return None
@@ -74,7 +91,8 @@ def _part_to_payload(part):
     ).decode("ascii").rstrip("=")
 
     return {
-        "filename": part.get_filename() or "",
+        "filename": filename,
+        "mimeType": part.get_content_type(),
         "headers": [
             {"name": str(name), "value": _decode_header_value(value)}
             for name, value in part.items()
@@ -383,6 +401,19 @@ class IMAPService:
             "transactionalert@indusind.com",
             "indusind_bank@indusind.com",
             "IndusInd_Bank@indusind.com",
+            # Bank domains catch monthly statement senders whose exact
+            # mailbox address differs from transaction-alert mailboxes.
+            "hdfcbank.net",
+            "hdfcbank.bank.in",
+            "axisbank.com",
+            "axis.bank.in",
+            "icicibank.com",
+            "icici.bank.in",
+            "sbi.co.in",
+            "sbicard.com",
+            "hsbc.co.in",
+            "hsbc.com",
+            "indusind.com",
         )
 
         per_sender_limit = max(
