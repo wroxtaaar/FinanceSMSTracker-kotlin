@@ -286,3 +286,53 @@ def test_gmail_sync_reports_axis_credit_diagnostic():
     assert result["axisCredits"] == 1
     assert result["duplicateTransactions"] == 0
     assert result["reviewCount"] == 0
+
+def test_axis_real_bank_in_sender_and_html_style_credit_alert():
+    message = _message(
+        "axis-real-format",
+        "01-10-2026 Dear Customer, Here's the summary of your transaction: "
+        "Amount Credited: INR 1.00 Account Number: XX3370 "
+        "Date & Time: 01-10-26, 17:15:42 IST "
+        "Transaction Info: UPI/P2A/18335801167/ABDUL WAS/HDFC/Paym",
+        subject="INR 1.00 was credited to your A/c.",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "INR 1.00 was credited to your A/c."},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, _ = parsed
+    assert transaction.amountMinor == 100
+    assert transaction.type == "CREDIT"
+    assert transaction.bank == "AXIS"
+    assert transaction.accountLast4 == "3370"
+    assert transaction.reference == "UPI/P2A/18335801167/ABDUL"
+    assert transaction.accountType == "BANK_ACCOUNT"
+
+
+def test_icici_real_credit_card_alert_from_bank_in_sender():
+    message = _message(
+        "icici-real-format",
+        "Dear Customer, Your ICICI Bank Credit Card XX1012 has been used "
+        "for a transaction of INR 548.00 on Oct 01, 2026 at 06:05:28. "
+        "Info: AMAZON PAY IN RECHARGE. "
+        "The Available Credit Limit on your card is INR 346849.06 and Total Credit Limit is INR 380000.00.",
+        subject="Transaction alert for your ICICI Bank Credit Card",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Transaction alert for your ICICI Bank Credit Card"},
+        {"name": "From", "value": "credit_cards@icici.bank.in"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, _ = parsed
+    assert transaction.amountMinor == 54800
+    assert transaction.type == "DEBIT"
+    assert transaction.bank == "ICICI"
+    assert transaction.accountType == "CREDIT_CARD"
+    assert transaction.accountLast4 == "1012"
