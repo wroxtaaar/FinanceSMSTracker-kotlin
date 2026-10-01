@@ -67,6 +67,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var buttonOracleSettings: Button
     private lateinit var buttonReviewReconcile: Button
     private lateinit var buttonEditSplitwise: Button
+    private lateinit var buttonEditBankAccounts: Button
+    private lateinit var buttonEditCreditCards: Button
 
     private val oracleExecutor = Executors.newSingleThreadExecutor()
 
@@ -144,9 +146,19 @@ class MainActivity : AppCompatActivity() {
         buttonOracleSettings = findViewById(R.id.buttonOracleSettings)
         buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
         buttonEditSplitwise = findViewById(R.id.buttonEditSplitwise)
+        buttonEditBankAccounts = findViewById(R.id.buttonEditBankAccounts)
+        buttonEditCreditCards = findViewById(R.id.buttonEditCreditCards)
 
         buttonEditSplitwise.setOnClickListener {
             showManualSplitwiseDialog()
+        }
+
+        buttonEditBankAccounts.setOnClickListener {
+            loadOracleAccountsForManualEdit("BANK_ACCOUNT")
+        }
+
+        buttonEditCreditCards.setOnClickListener {
+            loadOracleAccountsForManualEdit("CREDIT_CARD")
         }
 
         buttonRefreshOracle.setOnClickListener {
@@ -223,6 +235,147 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    private fun loadOracleAccountsForManualEdit(accountType: String) {
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).fetchAccounts()
+
+            runOnUiThread {
+                result.onSuccess { accounts ->
+                    val filtered = accounts.filter { it.accountType == accountType }
+                    showManualAccountsDialog(filtered, accountType)
+                }.onFailure { error ->
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Could not load accounts: " + (error.message ?: "Unavailable"),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun showManualAccountsDialog(
+        accounts: List<OracleAccount>,
+        accountType: String
+    ) {
+        if (accounts.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle(if (accountType == "BANK_ACCOUNT") "Edit Bank Accounts" else "Edit Credit Cards")
+                .setMessage("No matching accounts configured on Oracle.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        val inputs = accounts.map { account ->
+            val label = TextView(this).apply {
+                text = buildString {
+                    append(account.name)
+                    account.last4?.let { append(" ••••").append(it) }
+                }
+                textSize = 14f
+                setPadding(0, 8, 0, 2)
+            }
+
+            val input = EditText(this).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                setSingleLine(true)
+                hint = if (accountType == "BANK_ACCOUNT") "Current balance" else "Current outstanding"
+                setText(formatDecimalMinor(account.balanceMinor))
+                selectAll()
+            }
+
+            label to input
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 0, 48, 0)
+            inputs.forEach { (label, input) ->
+                addView(label)
+                addView(input)
+            }
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (accountType == "BANK_ACCOUNT") "Edit Bank Accounts" else "Edit Credit Cards")
+            .setMessage(
+                if (accountType == "BANK_ACCOUNT") {
+                    "Manually set the current balance for each bank account."
+                } else {
+                    "Manually set the current outstanding amount for each credit card."
+                }
+            )
+            .setView(container)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val values = mutableListOf<Pair<OracleAccount, Long>>()
+
+                inputs.forEach { (label, input) ->
+                    val amount = input.text.toString().trim().replace(",", "").toDoubleOrNull()
+                    if (amount == null || amount < 0) {
+                        input.error = "Enter a valid amount"
+                        return@setOnClickListener
+                    }
+                    values += labelToAccount(label, accounts) to kotlin.math.round(amount * 100.0).toLong()
+                }
+
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+
+                oracleExecutor.execute {
+                    var failure: Throwable? = null
+                    for ((account, balanceMinor) in values) {
+                        val saveResult = FinanceSyncClient(this@MainActivity)
+                            .updateAccountBalance(account, balanceMinor)
+                        if (saveResult.isFailure) {
+                            failure = saveResult.exceptionOrNull()
+                            break
+                        }
+                    }
+
+                    runOnUiThread {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+                        if (failure == null) {
+                            dialog.dismiss()
+                            loadOracleSummary()
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Account balances updated",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Could not update accounts: " + (failure?.message ?: "Unavailable"),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun labelToAccount(label: TextView, accounts: List<OracleAccount>): OracleAccount {
+        val index = accounts.indexOfFirst { account ->
+            val expected = buildString {
+                append(account.name)
+                account.last4?.let { append(" ••••").append(it) }
+            }
+            label.text.toString() == expected
+        }
+        return accounts[index]
+    }
+
+    private fun formatDecimalMinor(minor: Long): String =
+        String.format(Locale.getDefault(), "%.2f", minor / 100.0)
 
     private fun showAccountsDialog(accounts: List<OracleAccount>) {
         if (accounts.isEmpty()) {
