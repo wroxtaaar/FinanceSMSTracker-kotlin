@@ -533,14 +533,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun triggerManualGmailSync() {
         buttonGmailSync.isEnabled = false
-        buttonGmailSync.text = "Checking..."
+        buttonGmailSync.text = "Checking Gmail..."
 
         oracleExecutor.execute {
             val result = FinanceSyncClient(this@MainActivity).triggerGmailSync()
 
             runOnUiThread {
                 buttonGmailSync.isEnabled = true
-                buttonGmailSync.text = "Gmail"
+                buttonGmailSync.text = "Check Gmail"
 
                 result.onSuccess { createdEvidence ->
                     loadOracleSummary()
