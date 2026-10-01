@@ -238,6 +238,11 @@ def ingest_messages(service,query="newer_than:30d"):
 
             if parsed:
                 t,e=parsed
+                with connection() as conn:
+                    conn.execute(
+                        "UPDATE gmail_messages SET status='PARSED' WHERE id=?",
+                        (msg_id,),
+                    )
                 sync_transaction(t)
                 sync_evidence(e)
                 stats["parsedTransactions"] += 1
