@@ -171,61 +171,128 @@ def parse_bank_email(message):
     return t,e
 
 def ingest_messages(service,query="newer_than:30d"):
-    result=service.users().messages().list(userId="me",q=query,maxResults=100).execute()
-    created=0
-    for item in result.get("messages",[]):
-        msg_id=item["id"]
-        with connection() as conn:
-            if conn.execute("SELECT 1 FROM gmail_messages WHERE id=?",(msg_id,)).fetchone(): continue
-        message=service.users().messages().get(userId="me",id=msg_id,format="full").execute()
-        parsed=parse_bank_email(message)
-        with connection() as conn:
-            h=_headers(message.get("payload",{})); sender=parseaddr(h.get("from",""))[1]
-            conn.execute("""INSERT OR IGNORE INTO gmail_messages
-            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
-            VALUES(?,?,?,?,?,?,?,?)""",(msg_id,message.get("threadId"),int(message.get("internalDate","0")),sender,h.get("subject"),
-            hashlib.sha256((msg_id+h.get("subject","")).encode()).hexdigest(),("PARSED" if parsed else "PENDING"),int(time.time()*1000)))
-        if parsed:
-            t,e=parsed
-            sync_transaction(t)
-            sync_evidence(e)
+    stats={
+        "messagesScanned":0,
+        "alreadyProcessed":0,
+        "parsedTransactions":0,
+        "axisCredits":0,
+        "duplicateTransactions":0,
+        "reviewCount":0,
+        "ignoredCount":0,
+        "createdEvidence":0,
+    }
 
-            # Gmail can be a second source for an SMS transaction. Delay its
-            # balance adjustment until after duplicate reconciliation so one
-            # real-world transaction never changes the balance twice.
-            reconcile_duplicate_transaction(t.id)
+    # Gmail's API is paginated. IMAPService intentionally exposes only one
+    # result page, so this loop also works with IMAP while consuming every
+    # Gmail API page when OAuth is enabled.
+    page_token=None
+    while True:
+        kwargs={"userId":"me","q":query,"maxResults":100}
+        if page_token:
+            kwargs["pageToken"]=page_token
+        result=service.users().messages().list(**kwargs).execute()
+
+        for item in result.get("messages",[]):
+            stats["messagesScanned"] += 1
+            msg_id=item["id"]
             with connection() as conn:
-                row=conn.execute("SELECT * FROM transactions WHERE id=?",(t.id,)).fetchone()
-                if row and not row["duplicate_of"]:
-                    apply_transaction_to_account(conn, t, int(time.time()*1000))
-            created+=1
-        else:
-            h=_headers(message.get("payload",{}))
-            combined=f"{h.get('subject','')}\n{_decode(message.get('payload',{}))}"
-            # Only create a review for messages that actually resemble a
-            # bank/card transaction. Ordinary newsletters and unrelated mail
-            # are recorded as ignored evidence without flooding the review queue.
-            has_amount = bool(re.search(r"(?i)(?:INR|Rs\.?)[\\s₹]*[0-9][0-9,]*(?:\\.\\d{1,2})?", combined))
-            has_bank = _recognized_bank(combined, sender) is not None
-            has_financial_marker = bool(_TRANSACTION_SIGNAL.search(combined))
-            h_status = "REVIEW" if has_amount and has_bank and has_financial_marker else "IGNORED"
-            e=SyncEvidenceModel(
-                id="gmail-evidence:"+msg_id,
-                sourceType="GMAIL",
-                sourceId=msg_id,
-                status="UNMATCHED",
-                observedAt=int(message.get("internalDate","0")),
-                transactionId=None,
-                amountMinor=None,
-                currency="INR",
-                direction=None,
-                bankProvider=None,
-                accountLast4=None,
-                reference=None,
-                contentHash=hashlib.sha256(combined.encode()).hexdigest(),
-                confidence=0.0,
-            )
-            sync_evidence(e)
-            if h_status == "REVIEW":
-                add_review("GMAIL","bank-like email could not be parsed safely",evidence_id=e.id)
-    return created
+                if conn.execute("SELECT 1 FROM gmail_messages WHERE id=?",(msg_id,)).fetchone():
+                    stats["alreadyProcessed"] += 1
+                    continue
+
+            message=service.users().messages().get(
+                userId="me",id=msg_id,format="full"
+            ).execute()
+            parsed=parse_bank_email(message)
+
+            with connection() as conn:
+                h=_headers(message.get("payload",{}))
+                sender=parseaddr(h.get("from",""))[1]
+                conn.execute(
+                    """INSERT OR IGNORE INTO gmail_messages
+                    (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+                    VALUES(?,?,?,?,?,?,?,?)""",
+                    (
+                        msg_id,
+                        message.get("threadId"),
+                        int(message.get("internalDate","0")),
+                        sender,
+                        h.get("subject"),
+                        hashlib.sha256((msg_id+h.get("subject","")).encode()).hexdigest(),
+                        ("PARSED" if parsed else "PENDING"),
+                        int(time.time()*1000),
+                    ),
+                )
+
+            if parsed:
+                t,e=parsed
+                sync_transaction(t)
+                sync_evidence(e)
+                stats["parsedTransactions"] += 1
+                stats["createdEvidence"] += 1
+                if t.bank == "AXIS" and t.type == "CREDIT":
+                    stats["axisCredits"] += 1
+
+                # Gmail can be a second source for an SMS transaction. Delay
+                # its balance adjustment until after duplicate reconciliation
+                # so one real-world transaction never changes the balance twice.
+                reconcile_duplicate_transaction(t.id)
+                with connection() as conn:
+                    row=conn.execute(
+                        "SELECT * FROM transactions WHERE id=?",(t.id,)
+                    ).fetchone()
+                    if row and row["duplicate_of"]:
+                        stats["duplicateTransactions"] += 1
+                    elif row:
+                        apply_transaction_to_account(
+                            conn,t,int(time.time()*1000)
+                        )
+            else:
+                h=_headers(message.get("payload",{}))
+                combined=f"{h.get('subject','')}\\n{_decode(message.get('payload',{}))}"
+
+                # Only create a review for messages that actually resemble a
+                # bank/card transaction. Ordinary newsletters and unrelated
+                # mail are recorded as ignored evidence without flooding the
+                # review queue.
+                has_amount=bool(re.search(
+                    r"(?i)(?:INR|Rs\\.?)[\\s₹]*[0-9][0-9,]*(?:\\.\\d{1,2})?",
+                    combined,
+                ))
+                has_bank=_recognized_bank(combined,sender) is not None
+                has_financial_marker=bool(_TRANSACTION_SIGNAL.search(combined))
+                h_status="REVIEW" if has_amount and has_bank and has_financial_marker else "IGNORED"
+
+                e=SyncEvidenceModel(
+                    id="gmail-evidence:"+msg_id,
+                    sourceType="GMAIL",
+                    sourceId=msg_id,
+                    status="UNMATCHED",
+                    observedAt=int(message.get("internalDate","0")),
+                    transactionId=None,
+                    amountMinor=None,
+                    currency="INR",
+                    direction=None,
+                    bankProvider=None,
+                    accountLast4=None,
+                    reference=None,
+                    contentHash=hashlib.sha256(combined.encode()).hexdigest(),
+                    confidence=0.0,
+                )
+                sync_evidence(e)
+
+                if h_status == "REVIEW":
+                    stats["reviewCount"] += 1
+                    add_review(
+                        "GMAIL",
+                        "bank-like email could not be parsed safely",
+                        evidence_id=e.id,
+                    )
+                else:
+                    stats["ignoredCount"] += 1
+
+        page_token=result.get("nextPageToken")
+        if not page_token:
+            break
+
+    return stats
