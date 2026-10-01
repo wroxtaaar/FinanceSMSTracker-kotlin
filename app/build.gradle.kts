@@ -22,7 +22,28 @@ android {
 
     buildFeatures { buildConfig = true }
 
+    val ciKeystorePath = System.getenv("FINANCE_KEYSTORE_PATH")
+    val ciKeyAlias = System.getenv("FINANCE_KEY_ALIAS")
+    val ciStorePassword = System.getenv("FINANCE_KEYSTORE_PASSWORD")
+    val ciKeyPassword = System.getenv("FINANCE_KEY_PASSWORD")
+
+    if (!ciKeystorePath.isNullOrBlank()) {
+        signingConfigs {
+            create("ciDebug") {
+                storeFile = file(ciKeystorePath)
+                storePassword = ciStorePassword
+                keyAlias = ciKeyAlias
+                keyPassword = ciKeyPassword
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (!ciKeystorePath.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("ciDebug")
+            }
+        }
         release {
             optimization {
                 enable = false
