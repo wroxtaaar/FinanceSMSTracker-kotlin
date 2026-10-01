@@ -101,6 +101,13 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:text="View All Accounts" />
+
+        <Button
+            android:id="@+id/buttonOracleSettings"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Oracle Sync Settings" />
     </LinearLayout>
 
     <Button
