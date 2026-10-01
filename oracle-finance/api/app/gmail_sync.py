@@ -3,6 +3,7 @@ from email.utils import parseaddr
 from .db import connection
 from .ledger import sync_transaction,sync_evidence,add_review,apply_transaction_to_account,reconcile_duplicate_transaction
 from .main_models import SyncTransactionModel,SyncEvidenceModel
+from .statement_sync import process_statement_attachments
 
 GMAIL_READONLY_SCOPE="https://www.googleapis.com/auth/gmail.readonly"
 
@@ -898,6 +899,11 @@ def ingest_messages(service,query="newer_than:30d"):
         "ignoredCount":0,
         "createdEvidence":0,
         "repairedTransactions":0,
+        "statementAttachmentsScanned":0,
+        "statementAttachmentsParsed":0,
+        "statementTransactionsAdded":0,
+        "statementTransactionsMatched":0,
+        "statementErrors":[],
         "gmailDiagnostics":None,
     }
 
@@ -946,27 +952,53 @@ def ingest_messages(service,query="newer_than:30d"):
                     stats["ignoredCount"] += 1
                     continue
 
+            subject_preview = item.get("subject", "") or ""
+            statement_hint = bool(re.search(
+                r"(?i)\\bstatement\\b|\\be[- ]?statement\\b",
+                subject_preview,
+            ))
+
             with connection() as conn:
                 existing = conn.execute(
                     "SELECT status FROM gmail_messages WHERE id=?",
                     (msg_id,),
                 ).fetchone()
-                # Only PARSED is terminal. REVIEW/IGNORED/PENDING messages
-                # must be retried so parser fixes and newly supported bank
-                # formats can recover emails that were classified before the
-                # current parser rules were deployed.
-                if existing and existing["status"] == "PARSED":
+                # Normal parsed transaction mail is terminal. Statement mail is
+                # allowed through once more so a newly added PDF attachment
+                # parser can process the attachment without reparsing the mail
+                # as a transaction.
+                if existing and existing["status"] == "PARSED" and not statement_hint:
                     stats["alreadyProcessed"] += 1
                     continue
 
             message=service.users().messages().get(
                 userId="me",id=msg_id,format="full"
             ).execute()
+
+            statement_stats = process_statement_attachments(service, message)
+            stats["statementAttachmentsScanned"] += statement_stats["attachmentsScanned"]
+            stats["statementAttachmentsParsed"] += statement_stats["attachmentsParsed"]
+            stats["statementTransactionsAdded"] += statement_stats["transactionsAdded"]
+            stats["statementTransactionsMatched"] += statement_stats["transactionsMatched"]
+            stats["statementErrors"].extend(statement_stats["errors"])
+
+            # If this message was already fully processed and its statement
+            # attachments have now been checked, do not feed the statement
+            # notification itself back through the transaction parser.
+            if existing and existing["status"] == "PARSED":
+                stats["alreadyProcessed"] += 1
+                continue
+
             parsed=parse_bank_email(message)
 
             with connection() as conn:
                 h=_headers(message.get("payload",{}))
                 sender=parseaddr(h.get("from",""))[1]
+                message_status = (
+                    "PARSED"
+                    if parsed or statement_stats["attachmentsParsed"] > 0
+                    else "PENDING"
+                )
                 conn.execute(
                     """INSERT OR IGNORE INTO gmail_messages
                     (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
@@ -978,10 +1010,15 @@ def ingest_messages(service,query="newer_than:30d"):
                         sender,
                         h.get("subject"),
                         hashlib.sha256((msg_id+h.get("subject","")).encode()).hexdigest(),
-                        ("PARSED" if parsed else "PENDING"),
+                        message_status,
                         int(time.time()*1000),
                     ),
                 )
+                if statement_stats["attachmentsParsed"] > 0:
+                    conn.execute(
+                        "UPDATE gmail_messages SET status='PARSED' WHERE id=?",
+                        (msg_id,),
+                    )
 
             if parsed:
                 t,e=parsed
