@@ -139,3 +139,16 @@ class SenderTrustAndReviewTest {
         assertEquals(SenderTrustStatus.UNTRUSTED, trust)
     }
 }
+
+
+    @Test
+    fun axisAnnualFeeWaiverIsNotTransactional() {
+        val message = "Dear Customer, enjoy an Annual Fee waiver on your Axis Bank ACE Credit Card XX1175 on annual spends of INR 200000 by 31-07-27. Visit https://ccm.axis.bank.in/ for details."
+        assertTrue(SenderTrustManager.isNonTransactionalFinancialMessage(message))
+    }
+
+    @Test
+    fun ordinaryAxisDebitIsNotClassifiedAsPromotion() {
+        val message = "INR 239 debited from A/c no. XX3370 towards GOOGLE on 01-10-26."
+        assertFalse(SenderTrustManager.isNonTransactionalFinancialMessage(message))
+    }
