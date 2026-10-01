@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
-from email.utils import parsedate_to_datetime
+from email.utils import parsedate_to_datetime, parseaddr
 
 
 def _decode_header_value(value):
