@@ -266,13 +266,36 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
     fun getCandidateTransactionsForEvidence(evidence: SourceEvidence): List<Transaction> {
         val candidates = getTransactionsByAmount(evidence.amountPaise)
         return candidates.filter { tx ->
-            tx.currency.equals(evidence.currency, ignoreCase = true) &&
-                (evidence.direction.isBlank() ||
-                    evidence.direction.equals("UNKNOWN", ignoreCase = true) ||
-                    evidence.direction.equals(tx.transactionType.name, ignoreCase = true)) &&
-                (evidence.bankProvider.isNullOrBlank() ||
-                    tx.bank.isNullOrBlank() ||
-                    normalizeBank(evidence.bankProvider) == normalizeBank(tx.bank))
+            if (!tx.currency.equals(evidence.currency, ignoreCase = true)) return@filter false
+
+            val directionKnown = !evidence.direction.isBlank() &&
+                !evidence.direction.equals("UNKNOWN", ignoreCase = true)
+            if (directionKnown && !evidence.direction.equals(tx.transactionType.name, ignoreCase = true)) {
+                return@filter false
+            }
+
+            if (!evidence.bankProvider.isNullOrBlank() &&
+                !tx.bank.isNullOrBlank() &&
+                normalizeBank(evidence.bankProvider) != normalizeBank(tx.bank)
+            ) {
+                return@filter false
+            }
+
+            if (!evidence.accountLastFour.isNullOrBlank() &&
+                !tx.accountLastFour.isNullOrBlank() &&
+                evidence.accountLastFour != tx.accountLastFour
+            ) {
+                return@filter false
+            }
+
+            val timeDiff = kotlin.math.abs(tx.timestamp - evidence.receivedAt)
+            if (timeDiff <= 120_000L) {
+                true
+            } else {
+                !evidence.reference.isNullOrBlank() &&
+                    !tx.refNumber.isNullOrBlank() &&
+                    evidence.reference.equals(tx.refNumber, ignoreCase = true)
+            }
         }
     }
 
