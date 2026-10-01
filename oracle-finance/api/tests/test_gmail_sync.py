@@ -19,6 +19,7 @@ from app.gmail_sync import (
     _repair_legacy_icici_credit_card_classifications,
     _repair_legacy_gmail_merchants,
     _repair_legacy_gmail_merchant_values,
+    _repair_self_transfer_gmail_merchants,
 )
 from app.ledger import set_balance, sync_transaction
 
@@ -728,6 +729,96 @@ def test_repair_legacy_gmail_merchant_reparses_existing_row():
         ).fetchone()
 
     assert tx["merchant_or_payee"] == "AMAZON PAY IN RECHARGE"
+
+
+def test_axis_self_transfer_merchant_can_use_matching_hdfc_entry():
+    axis_message = _message(
+        "imap:[Gmail]/All Mail:11:99005",
+        "Dear Abdul Wasiq, Here's the summary of your transaction. "
+        "Amount Credited: INR 6.00 Account Number: XX3370 "
+        "Transaction Info: UPI/P2A/930624306800/ABDUL WAS/HDFC/Paym",
+        subject="INR 6.00 was credited to your A/c.",
+        internal_date="1790805600000",
+    )
+    axis_message["payload"]["headers"] = [
+        {"name": "Subject", "value": "INR 6.00 was credited to your A/c."},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+    parsed = parse_bank_email(axis_message)
+    assert parsed is not None
+    axis_tx, _ = parsed
+
+    class Hdfc:
+        id = "sms-hdfc-self-transfer"
+        amountMinor = 600
+        currency = "INR"
+        type = "DEBIT"
+        paymentMethod = "UPI"
+        accountType = "BANK_ACCOUNT"
+        bank = "HDFC"
+        merchantOrPayee = "ABDUL WASIQ"
+        accountLast4 = "9591"
+        reference = "930624306800"
+        timestamp = 1790805595000
+        category = "TRANSFER"
+        confidence = 1.0
+
+    sync_transaction(Hdfc())
+
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO transactions
+            (id,amount_minor,currency,type,payment_method,account_type,bank,
+             merchant_or_payee,account_last4,reference,timestamp,category,
+             confidence,duplicate_of,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                axis_tx.id, 600, "INR", "CREDIT", "UPI", "BANK_ACCOUNT",
+                "AXIS", None, "3370", axis_tx.reference,
+                1790805600000, "OTHER", 1.0, None, "ACTIVE", 1790805600000
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                "11:99005", "thread-axis-self-transfer", 1790805600000,
+                "alerts@axis.bank.in", "INR 6.00 was credited to your A/c.",
+                "axis-self-transfer-fingerprint", "PARSED", 1790805600000
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO evidence
+            (id,source_type,source_id,status,observed_at,transaction_id,
+             matched_transaction_id,amount_minor,currency,direction,
+             bank_provider,account_last4,reference,content_hash,confidence,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "gmail-evidence:" + axis_message["id"], "GMAIL",
+                axis_message["id"], "UNMATCHED", 1790805600000, axis_tx.id,
+                None, 600, "INR", "CREDIT", "AXIS", "3370",
+                axis_tx.reference, "axis-self-transfer-hash", 1.0,
+                1790805600000
+            ),
+        )
+
+    assert _repair_self_transfer_gmail_merchants(FakeService([axis_message])) == 1
+    assert _repair_self_transfer_gmail_merchants(FakeService([axis_message])) == 0
+
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT merchant_or_payee FROM transactions WHERE id=?",
+            (axis_tx.id,),
+        ).fetchone()
+
+    assert row["merchant_or_payee"] == "ABDUL WASIQ"
 
 
 def test_axis_transaction_info_is_not_merchant():
