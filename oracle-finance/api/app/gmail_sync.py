@@ -103,10 +103,16 @@ def _recognized_bank(combined, sender=""):
 
 
 def _account_last4(combined):
+    # Bank HTML emails can split a label and its masked number across table
+    # cells with a large amount of whitespace and markup. Normalize only this
+    # field so existing transaction detection remains unchanged.
+    normalized = re.sub(r"<[^>]*>", " ", combined)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+
     match = re.search(
-        r"(?i)(?:A/c|account|card(?:\s+(?:no\.?|ending|ending\s+in))?)[^\d]{0,24}"
-        r"(?:X{0,4}|\*{0,6}|[#\- ]*)?(\d{4})(?!\d)",
-        combined,
+        r"(?i)(?:A/c|account|card(?:\s+(?:no\.?|ending|ending\s+in))?)[^\d]{0,64}"
+        r"(?:X{0,6}|\*{0,8}|[#\- ]*)?(\d{4})(?!\d)",
+        normalized,
     )
     return match.group(1) if match else None
 
