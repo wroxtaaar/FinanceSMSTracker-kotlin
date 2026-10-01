@@ -46,6 +46,11 @@ CREATE TABLE IF NOT EXISTS review_queue (
   id TEXT PRIMARY KEY, kind TEXT NOT NULL, transaction_id TEXT, evidence_id TEXT, reason TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'OPEN', created_at INTEGER NOT NULL, resolved_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS gmail_attachments (
+  id TEXT PRIMARY KEY, message_id TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT,
+  content_hash TEXT NOT NULL, bank TEXT, status TEXT NOT NULL,
+  transaction_count INTEGER NOT NULL DEFAULT 0, error TEXT, created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS gmail_messages (
   id TEXT PRIMARY KEY, thread_id TEXT, internal_date INTEGER, sender TEXT, subject TEXT,
   fingerprint TEXT UNIQUE, status TEXT NOT NULL DEFAULT 'SEEN', created_at INTEGER NOT NULL
@@ -54,7 +59,7 @@ CREATE TABLE IF NOT EXISTS balance_adjustments (
   transaction_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, delta_minor INTEGER NOT NULL,
   applied_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(timestamp);
+CREATE INDEX IF NOT EXISTS idx_gmail_attachments_message ON gmail_attachments(message_id);\nCREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_transactions_match ON transactions(amount_minor,currency,timestamp);
 CREATE INDEX IF NOT EXISTS idx_evidence_transaction ON evidence(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_match ON evidence(amount_minor,currency,observed_at);
