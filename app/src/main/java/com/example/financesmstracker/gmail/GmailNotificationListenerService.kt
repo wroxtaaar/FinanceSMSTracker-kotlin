@@ -46,8 +46,44 @@ class GmailNotificationListenerService : NotificationListenerService() {
         private val lastGmailSyncTriggerAt = AtomicLong(0L)
     }
 
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        Log.i(TAG, "Notification listener connected")
+
+        // If the service was disconnected/killed while Gmail posted the
+        // notification, onNotificationPosted may already have been missed.
+        // Process currently visible Gmail notifications once after binding.
+        runCatching {
+            getActiveNotifications()
+                .filter { it.packageName == GMAIL_PACKAGE }
+                .forEach { sbn ->
+                    processNotificationSafely(sbn)
+                }
+        }.onFailure { error ->
+            Log.e(TAG, "Could not inspect active Gmail notifications", error)
+        }
+    }
+
+    override fun onListenerDisconnected() {
+        Log.w(TAG, "Notification listener disconnected; requesting rebind")
+        super.onListenerDisconnected()
+        runCatching {
+            requestRebind(android.content.ComponentName(this, GmailNotificationListenerService::class.java))
+        }.onFailure { error ->
+            Log.w(TAG, "Notification listener rebind request failed", error)
+        }
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName != GMAIL_PACKAGE) return
+
+        Log.d(
+            TAG,
+            "Gmail notification posted: title=" +
+                sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE) +
+                " text=" +
+                sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT)
+        )
 
         val extras = sbn.notification.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
@@ -68,6 +104,26 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 // Only after the fast notification path has run do we start the
                 // slower Gmail/IMAP clarification pass.
                 triggerBackgroundGmailSync()
+            }
+        }
+    }
+
+    private fun processNotificationSafely(sbn: StatusBarNotification) {
+        val extras = sbn.notification.extras
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
+
+        if (!GmailNotificationClassifier.isLikelyBankNotification(title, text, bigText, subText)) {
+            return
+        }
+
+        notificationExecutor.execute {
+            try {
+                processNotification(sbn, title, text, bigText, subText)
+            } catch (error: Exception) {
+                Log.e(TAG, "Active Gmail notification processing failed", error)
             }
         }
     }
