@@ -956,3 +956,9 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         )
     }
 }
+
+data class LocalHistoryClearResult(
+    val transactions: Int,
+    val evidence: Int,
+    val unrecognizedSms: Int
+)
