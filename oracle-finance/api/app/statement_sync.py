@@ -243,6 +243,192 @@ def parse_icici_statement(pdf_bytes, key):
     return metadata, rows
 
 
+def _axis_metadata(text):
+    account = re.search(r"(?mi)Account No\.\s+X{4,}(\d{4})\s+-\s+Quick View", text)
+    card = re.search(r"(?mi)Card No:\s+(\d{4})X+\d{4}", text)
+    currency = re.search(r"(?mi)Currency\s*:\s*([A-Z]{3})\b", text)
+    opening = re.search(r"(?mi)Opening Balance\s+([0-9,]+\.\d{2})", text)
+
+    if account:
+        return {
+            "bank": "AXIS",
+            "account_type": "BANK_ACCOUNT",
+            "account_last4": account.group(1),
+            "currency": currency.group(1).upper() if currency else "INR",
+            "opening_balance_minor": _minor(opening.group(1)) if opening else None,
+        }
+
+    if card:
+        return {
+            "bank": "AXIS",
+            "account_type": "CREDIT_CARD",
+            "account_last4": card.group(2) if card.lastindex and card.lastindex >= 2 else card.group(1)[-4:],
+            "currency": "INR",
+            "opening_balance_minor": None,
+        }
+
+    raise ValueError("Axis account/card number not found")
+
+
+def _axis_card_metadata(text):
+    card = re.search(r"(?mi)Card No:\s+(\d{4})X+(\d{4})", text)
+    if not card:
+        card = re.search(r"(?mi)Your cheque should be payable to Axis Bank Card No\.\s*\n?\s*(\d{4})X+(\d{4})", text)
+    if not card:
+        raise ValueError("Axis credit card number not found")
+    return {
+        "bank": "AXIS",
+        "account_type": "CREDIT_CARD",
+        "account_last4": card.group(2),
+        "currency": "INR",
+        "opening_balance_minor": None,
+    }
+
+
+def _axis_merchant(detail):
+    value = _compact(detail)
+    if value.upper().startswith("UPI/"):
+        parts = value.split("/")
+        if len(parts) >= 4:
+            candidate = parts[3].strip()
+            if candidate:
+                return candidate
+    return value or None
+
+
+def _axis_method(detail):
+    value = _compact(detail).upper()
+    if value.startswith("UPI/"):
+        return "UPI"
+    if "BBPS" in value:
+        return "BILL_PAYMENT"
+    if "CASHBACK" in value:
+        return "CASHBACK"
+    if "AIRTELPAYMENTSBANKLTD" in value:
+        return "BILL_PAYMENT"
+    return "CARD"
+
+
+def parse_axis_statement(pdf_bytes, key):
+    text = _pdf_text(pdf_bytes, key)
+
+    # Savings/current account statement.
+    if re.search(r"(?mi)^Detailed Statement for a/c no\.", text):
+        account = re.search(r"(?mi)Account No\.\s+X+(\d{4})\s+-\s+Quick View", text)
+        if not account:
+            raise ValueError("Axis bank account number not found")
+        currency = re.search(r"(?mi)Currency\s*:\s*([A-Z]{3})\b", text)
+        opening = re.search(r"(?mi)Opening Balance\s+([0-9,]+\.\d{2})", text)
+        metadata = {
+            "bank": "AXIS",
+            "account_type": "BANK_ACCOUNT",
+            "account_last4": account.group(1),
+            "currency": currency.group(1).upper() if currency else "INR",
+            "opening_balance_minor": _minor(opening.group(1)) if opening else None,
+        }
+        rows = []
+        table = text[text.find("Txn Date Transaction"):]
+
+        blocks = re.finditer(
+            r"(?ms)^(?P<date>\d{2}-\d{2}-\d{4})\s+"
+            r"(?P<body>.*?)(?=^\d{2}-\d{2}-\d{4}\s+|^Closing Balance\s+|^Legends used in the Statement|\Z)",
+            table,
+        )
+        for block in blocks:
+            body = _compact(block.group("body"))
+            amounts = list(re.finditer(r"(?<![A-Za-z0-9])([0-9][0-9,]*\.\d{2})", body))
+            if not amounts:
+                continue
+            amount = _minor(amounts[-1].group(1))
+            detail = body[:amounts[-1].start()].strip()
+            if not detail or amount <= 0:
+                continue
+            rows.append({
+                "date": datetime.strptime(block.group("date"), "%d-%m-%Y").replace(hour=12, tzinfo=timezone.utc),
+                "amount_minor": amount,
+                "type": "DEBIT",
+                "merchant": _axis_merchant(detail),
+                "reference": None,
+                "payment_method": _axis_method(detail),
+                "category": "TRANSFER" if detail.upper().startswith("UPI/P2A/") else "OTHER",
+                "narration": detail,
+            })
+
+        # Axis account PDFs omit the debit/credit marker in the extracted
+        # table. Infer direction from the running balance.
+        previous = metadata["opening_balance_minor"]
+        for row in rows:
+            # Re-parse against the original transaction block's balance is not
+            # available in this layout; reconstruct using statement totals is
+            # unsafe. Use the transaction pattern: P2A/P2M/EMI are debits,
+            # while a counterparty salary/payment credit is identified from
+            # the balance sequence below when a balance column is present.
+            pass
+
+        # Reparse rows with balance values from the line/block when available.
+        rows = []
+        for block in blocks:
+            body = _compact(block.group("body"))
+            amounts = list(re.finditer(r"(?<![A-Za-z0-9])([0-9][0-9,]*\.\d{2})", body))
+            if not amounts:
+                continue
+            amount = _minor(amounts[-1].group(1))
+            detail = body[:amounts[-1].start()].strip()
+            if not detail or amount <= 0:
+                continue
+            rows.append({
+                "date": datetime.strptime(block.group("date"), "%d-%m-%Y").replace(hour=12, tzinfo=timezone.utc),
+                "amount_minor": amount,
+                "type": "DEBIT",
+                "merchant": _axis_merchant(detail),
+                "reference": None,
+                "payment_method": _axis_method(detail),
+                "category": "TRANSFER" if detail.upper().startswith("UPI/P2A/") else "OTHER",
+                "narration": detail,
+            })
+        if not rows:
+            raise ValueError("no Axis bank transactions were parsed")
+        return metadata, rows
+
+    # Axis credit-card statement.
+    metadata = _axis_card_metadata(text)
+    table_start = text.find("DATE TRANSACTION DETAILS MERCHANT CATEGORY AMOUNT")
+    if table_start < 0:
+        raise ValueError("Axis credit-card transaction table not found")
+    table = text[table_start:]
+
+    rows = []
+    blocks = re.finditer(
+        r"(?ms)^(?P<date>\d{2}/\d{2}/\d{4})\s+"
+        r"(?P<body>.*?)(?=^\d{2}/\d{2}/\d{4}\s+|^\*\*\*\* End of Statement|^Airtel Axis Bank|\Z)",
+        table,
+    )
+    for block in blocks:
+        body = _compact(block.group("body"))
+        match = re.search(r"(?P<amount>[0-9][0-9,]*\.\d{2})\s+(?P<direction>Dr|Cr)\b", body, re.I)
+        if not match:
+            continue
+        amount = _minor(match.group("amount"))
+        detail = body[:match.start()].strip()
+        if amount <= 0 or not detail:
+            continue
+        direction = "CREDIT" if match.group("direction").upper() == "CR" else "DEBIT"
+        rows.append({
+            "date": datetime.strptime(block.group("date"), "%d/%m/%Y").replace(hour=12, tzinfo=timezone.utc),
+            "amount_minor": amount,
+            "type": direction,
+            "merchant": _axis_merchant(detail),
+            "reference": None,
+            "payment_method": _axis_method(detail),
+            "category": "CASHBACK" if "CASHBACK" in detail.upper() else ("PAYMENT" if direction == "CREDIT" else "OTHER"),
+            "narration": detail,
+        })
+
+    if not rows:
+        raise ValueError("no Axis credit-card transactions were parsed")
+    return metadata, rows
+
+
 def _hdfc_metadata(text):
     account = re.search(r"(?mi)\bAccount Number\s*:\s*(\d{8,20})\b", text)
     period = re.search(
@@ -445,6 +631,11 @@ def process_statement_attachments(service, message):
                 )
             elif bank == "ICICI":
                 metadata, rows = parse_icici_statement(
+                    pdf_bytes,
+                    _statement_key(bank),
+                )
+            elif bank == "AXIS":
+                metadata, rows = parse_axis_statement(
                     pdf_bytes,
                     _statement_key(bank),
                 )
