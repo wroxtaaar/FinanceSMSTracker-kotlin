@@ -948,7 +948,7 @@ def _retry_pending_statement_messages(service, stats):
                   )
                 LIMIT 1
                 """,
-                (msg_id,),
+                (msg_id, msg_id),
             ).fetchone()
 
             if statement_stats["attachmentsParsed"] > 0 or parsed_attachment:
@@ -964,6 +964,32 @@ def _retry_pending_statement_messages(service, stats):
 
     stats["pendingStatementRetries"] = retried
     return retried
+
+_LEGACY_REPAIRS_COMPLETED = False
+
+
+def _run_legacy_repairs_once(service):
+    """Run historical Gmail repair/backfill work once per API process.
+
+    These repairs are migration/backfill operations, not part of the normal
+    incremental Gmail scan. Running them on every manual "Gmail" click causes
+    unnecessary mailbox fetches and makes a fresh transaction alert appear
+    slow. The functions remain available for explicit maintenance/tests.
+    """
+    global _LEGACY_REPAIRS_COMPLETED
+    if _LEGACY_REPAIRS_COMPLETED:
+        return 0
+
+    repaired = (
+        _repair_legacy_gmail_account_classifications()
+        + _repair_legacy_icici_credit_card_classifications(service)
+        + _repair_legacy_gmail_merchants(service)
+        + _repair_legacy_gmail_merchant_values(service)
+        + _repair_self_transfer_gmail_merchants(service)
+    )
+    _LEGACY_REPAIRS_COMPLETED = True
+    return repaired
+
 
 def ingest_messages(service,query="newer_than:30d"):
     stats={
@@ -984,13 +1010,7 @@ def ingest_messages(service,query="newer_than:30d"):
         "gmailDiagnostics":None,
     }
 
-    stats["repairedTransactions"] = (
-        _repair_legacy_gmail_account_classifications()
-        + _repair_legacy_icici_credit_card_classifications(service)
-        + _repair_legacy_gmail_merchants(service)
-        + _repair_legacy_gmail_merchant_values(service)
-        + _repair_self_transfer_gmail_merchants(service)
-    )
+    stats["repairedTransactions"] = _run_legacy_repairs_once(service)
 
     # Retry previously discovered statement emails before the normal date-bounded
     # mailbox scan. This is intentionally limited to PENDING statement rows,
@@ -1043,7 +1063,7 @@ def ingest_messages(service,query="newer_than:30d"):
             with connection() as conn:
                 existing = conn.execute(
                     "SELECT status FROM gmail_messages WHERE id=?",
-                    (msg_id, msg_id),
+                    (msg_id,),
                 ).fetchone()
                 # Normal parsed transaction mail is terminal. Statement mail is
                 # allowed through once more so a newly added PDF attachment
