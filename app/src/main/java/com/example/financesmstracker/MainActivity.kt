@@ -460,8 +460,9 @@ class MainActivity : AppCompatActivity() {
             val dialog = AlertDialog.Builder(this)
                 .setTitle(title)
                 .setMessage(
-                    "Bill is the current statement amount remaining. Active Spend is new spend after the bill. " +
-                        "Purchases increase Active Spend; card payments reduce Bill first."
+                    "These values reconcile the current card balance. Bill is the statement amount remaining; " +
+                        "Active Spend is new spend after the bill. Historical transactions already discovered " +
+                        "will not change this reconciled balance. New transactions after the save continue to update it."
                 )
                 .setView(scrollView)
                 .setNegativeButton("Cancel", null)
