@@ -827,63 +827,63 @@ def _method(narration):
 
 
 def _parse_hdfc_rows(text, metadata):
-        money = r"(?:[0-9][0-9,]*\.[0-9]{2}|-)"
-        blocks = re.finditer(
-            r"(?ms)^(?P<date>\d{2}/\d{2}/\d{4})\s+(?P<body>.*?)(?=^\d{2}/\d{2}/\d{4}\s+|^Page \d+ of \d+\s*$|\Z)",
-            text,
-        )
+    money = r"(?:[0-9][0-9,]*\.[0-9]{2}|-)"
+    blocks = re.finditer(
+        r"(?ms)^(?P<date>\d{2}/\d{2}/\d{4})\s+(?P<body>.*?)(?=^\d{2}/\d{2}/\d{4}\s+|^Page \d+ of \d+\s*$|\Z)",
+        text,
+    )
     
-        rows = []
-        previous_closing = metadata["opening_balance_minor"]
-        for block in blocks:
-            body = block.group("body").strip()
-            lines = body.splitlines()
-            if not lines:
-                continue
+    rows = []
+    previous_closing = metadata["opening_balance_minor"]
+    for block in blocks:
+        body = block.group("body").strip()
+        lines = body.splitlines()
+        if not lines:
+            continue
     
-            first_line = lines[0]
-            amounts = list(re.finditer(rf"(?<![A-Za-z0-9])({money})", first_line))
-            if len(amounts) < 3:
-                continue
+        first_line = lines[0]
+        amounts = list(re.finditer(rf"(?<![A-Za-z0-9])({money})", first_line))
+        if len(amounts) < 3:
+            continue
     
-            withdrawal_value, deposit_value, closing_value = [item.group(1) for item in amounts[-3:]]
-            narration = first_line[:amounts[-3].start()].strip()
-            remainder = first_line[amounts[-1].end():].strip()
-            if remainder:
-                narration = _compact(f"{narration} {remainder}")
-            if len(lines) > 1:
-                narration = (narration + "\n" + "\n".join(lines[1:])).strip()
+        withdrawal_value, deposit_value, closing_value = [item.group(1) for item in amounts[-3:]]
+        narration = first_line[:amounts[-3].start()].strip()
+        remainder = first_line[amounts[-1].end():].strip()
+        if remainder:
+            narration = _compact(f"{narration} {remainder}")
+        if len(lines) > 1:
+            narration = (narration + "\n" + "\n".join(lines[1:])).strip()
     
-            withdrawals = _minor(withdrawal_value) if withdrawal_value != "-" else 0
-            deposits = _minor(deposit_value) if deposit_value != "-" else 0
-            closing = _minor(closing_value) if closing_value != "-" else None
-            if withdrawals and deposits or closing is None:
-                continue
+        withdrawals = _minor(withdrawal_value) if withdrawal_value != "-" else 0
+        deposits = _minor(deposit_value) if deposit_value != "-" else 0
+        closing = _minor(closing_value) if closing_value != "-" else None
+        if withdrawals and deposits or closing is None:
+            continue
     
-            amount = withdrawals or deposits
-            if amount <= 0:
-                continue
+        amount = withdrawals or deposits
+        if amount <= 0:
+            continue
     
-            if previous_closing is not None:
-                expected = previous_closing - withdrawals + deposits
-                if expected != closing:
-                    raise ValueError(f"HDFC balance sequence mismatch on {block.group('date')}")
-            previous_closing = closing
+        if previous_closing is not None:
+            expected = previous_closing - withdrawals + deposits
+            if expected != closing:
+                raise ValueError(f"HDFC balance sequence mismatch on {block.group('date')}")
+        previous_closing = closing
     
-            payment_method = _method(narration)
-            rows.append({
-                "date": datetime.strptime(block.group("date"), "%d/%m/%Y").replace(hour=12, tzinfo=timezone.utc),
-                "amount_minor": amount,
-                "type": "DEBIT" if withdrawals else "CREDIT",
-                "merchant": _hdfc_merchant(narration),
-                "reference": _hdfc_reference(narration),
-                "payment_method": payment_method,
-                "category": "TRANSFER" if payment_method == "BANK_TRANSFER" else "OTHER",
-                "narration": _compact(narration),
-            })
+        payment_method = _method(narration)
+        rows.append({
+            "date": datetime.strptime(block.group("date"), "%d/%m/%Y").replace(hour=12, tzinfo=timezone.utc),
+            "amount_minor": amount,
+            "type": "DEBIT" if withdrawals else "CREDIT",
+            "merchant": _hdfc_merchant(narration),
+            "reference": _hdfc_reference(narration),
+            "payment_method": payment_method,
+            "category": "TRANSFER" if payment_method == "BANK_TRANSFER" else "OTHER",
+            "narration": _compact(narration),
+        })
     
-        if not rows:
-            raise ValueError("no HDFC transactions were parsed")
+    if not rows:
+        raise ValueError("no HDFC transactions were parsed")
     
     return rows
 
