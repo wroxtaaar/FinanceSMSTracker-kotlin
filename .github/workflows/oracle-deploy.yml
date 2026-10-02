@@ -64,9 +64,15 @@ jobs:
             if ! sudo tailscale status >/dev/null 2>&1; then
               sudo tailscale up --auth-key="$ORACLE_TAILSCALE_AUTHKEY" --hostname=oracle-finance
             fi
+            # Keep the finance API private on the default HTTPS port.
+            # Public Sheets traffic uses a separate Funnel HTTPS port so that
+            # configuring Funnel does not replace the private Serve endpoint.
             sudo tailscale serve --bg 127.0.0.1:8090
+            sudo tailscale funnel --bg --https=8443 127.0.0.1:8091
             echo "Tailscale private endpoint:"
             sudo tailscale serve status
+            echo "Tailscale public Sheets endpoint:"
+            sudo tailscale funnel status
 
       - name: 4. Stop current finance services
         uses: appleboy/ssh-action@v1.2.2
