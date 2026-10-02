@@ -1043,7 +1043,7 @@ def ingest_messages(service,query="newer_than:30d"):
             with connection() as conn:
                 existing = conn.execute(
                     "SELECT status FROM gmail_messages WHERE id=?",
-                    (msg_id,),
+                    (msg_id, msg_id),
                 ).fetchone()
                 # Normal parsed transaction mail is terminal. Statement mail is
                 # allowed through once more so a newly added PDF attachment
