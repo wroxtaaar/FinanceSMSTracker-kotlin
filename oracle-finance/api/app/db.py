@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS evidence (
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL, account_type TEXT NOT NULL,
   bank TEXT, last4 TEXT, opening_balance_minor INTEGER NOT NULL DEFAULT 0, balance_minor INTEGER NOT NULL DEFAULT 0,
-  bill_balance_minor INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
+  bill_balance_minor INTEGER NOT NULL DEFAULT 0, balance_reconciled_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS splitwise_receivables (
   id TEXT PRIMARY KEY, description TEXT NOT NULL, amount_minor INTEGER NOT NULL, currency TEXT NOT NULL,
@@ -122,6 +122,9 @@ def init_db():
                  WHERE account_type='CREDIT_CARD'"""
             )
 
+        if "balance_reconciled_at" not in account_columns:
+            conn.execute("ALTER TABLE accounts ADD COLUMN balance_reconciled_at INTEGER NOT NULL DEFAULT 0")
+
         # Existing accounts predate the opening-balance field. Reconstruct the
         # opening snapshot from their current balance and already-applied
         # transaction adjustments so upgrades preserve the live balance.
@@ -147,8 +150,8 @@ def init_db():
             conn.execute(
                 """INSERT OR IGNORE INTO accounts(
                     id,name,currency,account_type,bank,last4,opening_balance_minor,
-                    balance_minor,bill_balance_minor,updated_at
-                ) VALUES(?,?,?,?,?,?,0,0,0,?)""",
+                    balance_minor,bill_balance_minor,balance_reconciled_at,updated_at
+                ) VALUES(?,?,?,?,?,?,0,0,0,0,?)""",
                 (account_id, name, currency, account_type, bank, last4, now_ms),
             )
 
