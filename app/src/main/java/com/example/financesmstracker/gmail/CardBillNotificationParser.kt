@@ -17,7 +17,7 @@ object CardBillNotificationParser {
     )
 
     private val cardRegex = Regex(
-        """(?i)\b(?:credit\s+card|card)\s+(?:no\.?|number|ending(?:\s+in)?)\s*(?:X{1,8}|\*{1,8})?\s*[- ]?(\d{2,4})\b"""
+        """(?i)\b(?:credit\s+card|card)(?:\s+statement)?\s+(?:no\.?|number|ending(?:\s+in)?)\s*(?:X{1,8}|\*{1,8})?\s*[- ]?(\d{2,4})\b"""
     )
 
     private val bankRegexes = listOf(
