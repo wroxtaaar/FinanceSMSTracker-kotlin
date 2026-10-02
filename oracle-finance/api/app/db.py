@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS evidence (
 );
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL, account_type TEXT NOT NULL,
-  bank TEXT, last4 TEXT, opening_balance_minor INTEGER NOT NULL DEFAULT 0, balance_minor INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
+  bank TEXT, last4 TEXT, opening_balance_minor INTEGER NOT NULL DEFAULT 0, balance_minor INTEGER NOT NULL DEFAULT 0,
+  bill_balance_minor INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS splitwise_receivables (
   id TEXT PRIMARY KEY, description TEXT NOT NULL, amount_minor INTEGER NOT NULL, currency TEXT NOT NULL,
@@ -100,6 +101,17 @@ def init_db():
         }
         if "opening_balance_minor" not in account_columns:
             conn.execute("ALTER TABLE accounts ADD COLUMN opening_balance_minor INTEGER")
+
+        if "bill_balance_minor" not in account_columns:
+            conn.execute("ALTER TABLE accounts ADD COLUMN bill_balance_minor INTEGER NOT NULL DEFAULT 0")
+            # Existing credit-card accounts only had one live outstanding balance.
+            # Seed the new bill bucket from that value so the new two-column UI
+            # starts without changing the existing ledger total.
+            conn.execute(
+                """UPDATE accounts
+                   SET bill_balance_minor = balance_minor
+                 WHERE account_type='CREDIT_CARD'"""
+            )
 
         # Existing accounts predate the opening-balance field. Reconstruct the
         # opening snapshot from their current balance and already-applied
