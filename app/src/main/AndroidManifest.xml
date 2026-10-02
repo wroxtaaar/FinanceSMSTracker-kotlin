@@ -27,11 +27,14 @@
 
         <service
             android:name=".gmail.GmailNotificationListenerService"
-            android:exported="true"
+            android:exported="false"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+            <meta-data
+                android:name="android.service.notification.default_autobind_listenerservice"
+                android:value="true" />
         </service>
 
         <activity
