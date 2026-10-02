@@ -813,15 +813,15 @@ class MainActivity : AppCompatActivity() {
             } else {
                 " • no Gmail event yet"
             }
-            textViewNotificationStatus.text = "Gmail notification trigger: Enabled" + detail
+            textViewNotificationStatus.text = "Bank/card notification trigger: Enabled" + detail
             textViewNotificationStatus.setTextColor(Color.parseColor("#2E7D32"))
             buttonOpenNotificationSettings.visibility = View.GONE
         } else if (granted) {
-            textViewNotificationStatus.text = "Gmail notification trigger: Enabled (reconnecting...)"
+            textViewNotificationStatus.text = "Bank/card notification trigger: Enabled (reconnecting...)"
             textViewNotificationStatus.setTextColor(Color.parseColor("#EF6C00"))
             buttonOpenNotificationSettings.visibility = View.GONE
         } else {
-            textViewNotificationStatus.text = "Gmail notification trigger: Disabled"
+            textViewNotificationStatus.text = "Bank/card notification trigger: Disabled"
             textViewNotificationStatus.setTextColor(Color.parseColor("#C62828"))
             buttonOpenNotificationSettings.visibility = View.VISIBLE
         }
