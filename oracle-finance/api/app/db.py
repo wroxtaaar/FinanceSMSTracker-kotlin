@@ -85,7 +85,16 @@ def connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA journal_mode=WAL")
+
+    # The isolated Sheets service mounts the database read-only. SQLite's
+    # journal_mode=WAL pragma writes to the database, so do not execute it in
+    # read-only mode. query_only also prevents accidental writes from the
+    # snapshot service while leaving the normal API/worker behavior unchanged.
+    read_only = os.getenv("DATABASE_READ_ONLY", "").strip().lower() in {"1", "true", "yes"}
+    if read_only:
+        conn.execute("PRAGMA query_only=ON")
+    else:
+        conn.execute("PRAGMA journal_mode=WAL")
     try:
         yield conn
         conn.commit()
