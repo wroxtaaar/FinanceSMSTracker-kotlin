@@ -78,7 +78,11 @@ jobs:
           script: |
             set -e
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
-            docker compose down --remove-orphans
+
+            # The worker is profile-gated, so enable the profile during teardown.
+            # Otherwise docker compose down leaves finance-worker running and
+            # keeps the default network in use.
+            docker compose -f docker-compose.yml -f docker-compose.sheets.yml               --profile worker down --remove-orphans
 
             # Remove a legacy Sheets container left behind by an older Compose
             # project name so the current project can recreate it cleanly.
