@@ -323,6 +323,7 @@ def _sbi_card_metadata(text):
         "bank": "SBI",
         "account_type": "CREDIT_CARD",
         "account_last4": suffix.zfill(4),
+        "account_last2": suffix,
         "currency": "INR",
         "opening_balance_minor": None,
     }
@@ -759,6 +760,26 @@ def _find_existing(conn, row, metadata):
             metadata["account_type"], timestamp,
         ),
     ).fetchall()
+
+    # SBI Card PDFs expose only the final two card digits. If the local
+    # transaction has the full four-digit suffix (for example 7345), allow
+    # the masked statement to match on those visible final two digits.
+    if not candidates and metadata.get("account_last2"):
+        candidates = conn.execute(
+            """SELECT * FROM transactions
+               WHERE status='ACTIVE' AND duplicate_of IS NULL
+                 AND currency=? AND amount_minor=? AND type=?
+                 AND ABS(timestamp-?) <= ?
+                 AND UPPER(TRIM(COALESCE(bank,'')))=?
+                 AND TRIM(COALESCE(account_last4,'')) LIKE ?
+                 AND UPPER(TRIM(COALESCE(account_type,'')))=?
+               ORDER BY ABS(timestamp-?) LIMIT 10""",
+            (
+                metadata["currency"], row["amount_minor"], row["type"], timestamp,
+                2 * 24 * 60 * 60 * 1000, metadata["bank"],
+                "%" + metadata["account_last2"], metadata["account_type"], timestamp,
+            ),
+        ).fetchall()
 
     if len(candidates) == 1:
         return candidates[0]
