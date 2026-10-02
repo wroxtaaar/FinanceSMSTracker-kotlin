@@ -56,6 +56,15 @@ CREATE TABLE IF NOT EXISTS gmail_messages (
   id TEXT PRIMARY KEY, thread_id TEXT, internal_date INTEGER, sender TEXT, subject TEXT,
   fingerprint TEXT UNIQUE, status TEXT NOT NULL DEFAULT 'SEEN', created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS card_bill_evidence (
+  id TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_key TEXT NOT NULL,
+  observed_at INTEGER NOT NULL, amount_minor INTEGER, currency TEXT NOT NULL DEFAULT 'INR',
+  bank TEXT, account_last4 TEXT, account_last2 TEXT, confidence REAL NOT NULL,
+  applied INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+  UNIQUE(source_type, source_key)
+);
+CREATE INDEX IF NOT EXISTS idx_card_bill_evidence_card
+  ON card_bill_evidence(bank, account_last4, account_last2, observed_at);
 CREATE TABLE IF NOT EXISTS balance_adjustments (
   transaction_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, delta_minor INTEGER NOT NULL,
   applied_at INTEGER NOT NULL
