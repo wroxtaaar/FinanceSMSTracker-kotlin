@@ -138,7 +138,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         dbHelper = FinanceDatabaseHelper(this)
-        repository = TransactionRepository(dbHelper)
+        repository = TransactionRepository(dbHelper, this)
 
         recyclerView = findViewById(R.id.recyclerViewTransactions)
         textViewEmpty = findViewById(R.id.textViewEmpty)
