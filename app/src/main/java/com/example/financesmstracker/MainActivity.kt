@@ -1205,11 +1205,32 @@ class MainActivity : AppCompatActivity() {
                 selectedCategory
             )
 
+            val transactionsToSync =
+                if (
+                    hasStableMemoryKey &&
+                    checkboxRememberPayee.isChecked &&
+                    !memoryKey.isNullOrBlank()
+                ) {
+                    repository.saveCategoryMemory(
+                        memoryKey,
+                        selectedCategory
+                    )
+
+                    repository.updateCategoriesForMemoryKey(
+                        memoryKey,
+                        selectedCategory
+                    )
+
+                    repository.getTransactionsByMemoryKey(memoryKey)
+                } else {
+                    listOfNotNull(repository.getTransactionById(tx.id))
+                }
+
             // Category changes are ledger-affecting because Splitwise uses
-            // OTHER as the explicit opt-out. Push the updated existing row to
-            // Oracle so it can add/remove this transaction's Splitwise share
-            // without applying the bank/card balance a second time.
-            repository.getTransactionById(tx.id)?.let { updatedTransaction ->
+            // OTHER as the explicit opt-out. Push the updated existing rows to
+            // Oracle so it can add/remove each row's Splitwise share without
+            // applying any bank/card balance a second time.
+            transactionsToSync.forEach { updatedTransaction ->
                 FinanceSyncBridge.enqueueCategoryUpdate(this, updatedTransaction)
             }
 
@@ -1218,16 +1239,6 @@ class MainActivity : AppCompatActivity() {
                 checkboxRememberPayee.isChecked &&
                 !memoryKey.isNullOrBlank()
             ) {
-                repository.saveCategoryMemory(
-                    memoryKey,
-                    selectedCategory
-                )
-
-                repository.updateCategoriesForMemoryKey(
-                    memoryKey,
-                    selectedCategory
-                )
-
                 Toast.makeText(
                     this,
                     "Category updated and remembered for matching transactions",
