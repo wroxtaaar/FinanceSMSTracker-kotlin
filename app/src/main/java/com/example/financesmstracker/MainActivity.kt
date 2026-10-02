@@ -982,16 +982,16 @@ class MainActivity : AppCompatActivity() {
 
         buttonVoidTransaction.setOnClickListener {
             AlertDialog.Builder(this)
-                .setTitle("Void Transaction?")
-                .setMessage("This removes the transaction from this phone's history and queues the void for Oracle. It does not delete the original SMS.")
+                .setTitle("Delete Transaction?")
+                .setMessage("This removes the transaction from the app history and queues the removal for Oracle. It does not delete the original SMS.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Void") { _, _ ->
+                .setPositiveButton("Delete") { _, _ ->
                     val updated = repository.voidTransaction(tx.id)
                     if (updated > 0) {
                         dialog.dismiss()
                         loadTransactions()
                         FinanceSyncBridge.enqueueVoidedTransaction(this, tx.id)
-                        Toast.makeText(this, "Transaction voided and queued for Oracle sync", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Transaction deleted and queued for Oracle sync", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(this, "Could not void transaction", Toast.LENGTH_LONG).show()
                     }
