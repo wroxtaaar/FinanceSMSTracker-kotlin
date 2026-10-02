@@ -15,9 +15,19 @@ import com.example.financesmstracker.parser.PaymentMethod
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.integration.OracleTransaction
 
-class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
+class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private val context: Context) {
+
+    private val localHistoryPrefs = context.getSharedPreferences("local_history_state", Context.MODE_PRIVATE)
+
+    private fun wasClearedBefore(transaction: Transaction): Boolean {
+        val clearedAt = localHistoryPrefs.getLong("cleared_at", 0L)
+        return clearedAt > 0L && transaction.timestamp <= clearedAt
+    }
+
 
     fun insertTransaction(transaction: Transaction): Long {
+        if (wasClearedBefore(transaction)) return 0L
+
         val db = dbHelper.writableDatabase
 
         // A Gmail notification can arrive before the bank SMS. When the SMS
