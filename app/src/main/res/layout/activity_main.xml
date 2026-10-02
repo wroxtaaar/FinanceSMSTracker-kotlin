@@ -206,6 +206,17 @@
 
     </LinearLayout>
 
+    <Button
+        android:id="@+id/buttonClearLocalHistory"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:minHeight="0dp"
+        android:text="Clear Local History"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow2" />
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerViewTransactions"
         android:layout_width="0dp"
@@ -214,7 +225,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow2"
+        app:layout_constraintTop_toBottomOf="@id/buttonClearLocalHistory"
         tools:listitem="@layout/item_transaction" />
 
     <TextView
