@@ -48,6 +48,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        NotificationAccessHelper.setListenerConnected(applicationContext, true)
         Log.i(TAG, "Notification listener connected")
 
         // If the service was disconnected/killed while Gmail posted the
@@ -59,6 +60,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 .forEach { sbn ->
                     processNotificationSafely(sbn)
                 }
+            triggerBackgroundGmailSync()
         }.onFailure { error ->
             Log.e(TAG, "Could not inspect active Gmail notifications", error)
         }
@@ -66,6 +68,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         Log.w(TAG, "Notification listener disconnected; requesting rebind")
+        NotificationAccessHelper.setListenerConnected(applicationContext, false)
         super.onListenerDisconnected()
         runCatching {
             requestRebind(android.content.ComponentName(this, GmailNotificationListenerService::class.java))
