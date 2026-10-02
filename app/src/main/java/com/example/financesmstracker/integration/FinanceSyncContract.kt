@@ -51,3 +51,15 @@ data class SyncEvidence(
     val confidence: Float,
     val status: EvidenceStatus
 )
+
+
+data class SyncCardBill(
+    val sourceType: String,
+    val sourceKey: String,
+    val timestamp: Long,
+    val amountMinor: Long?,
+    val bank: String?,
+    val accountLastFour: String?,
+    val accountLastTwo: String?,
+    val confidence: Float
+)
