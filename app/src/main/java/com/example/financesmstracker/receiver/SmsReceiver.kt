@@ -16,6 +16,7 @@ import com.example.financesmstracker.evidence.EvidenceStatus
 import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
 import com.example.financesmstracker.integration.FinanceSyncBridge
+import com.example.financesmstracker.integration.SyncCardBill
 import com.example.financesmstracker.parser.SenderTrustManager
 import com.example.financesmstracker.parser.SenderTrustStatus
 import com.example.financesmstracker.parser.SmsParserManager
@@ -41,6 +42,43 @@ class SmsReceiver : BroadcastReceiver() {
                     val fullBody = messages.joinToString(separator = "") { it.messageBody ?: "" }
 
                     val trustStatus = SenderTrustManager.classifySender(sender)
+
+                    // A credit-card statement SMS is a bill signal, not a card
+                    // purchase. Handle it before the normal transaction parser
+                    // so phrases such as "Total amt ... Dr." can never become
+                    // a fake DEBIT transaction.
+                    val cardBill = CardBillStatementParser.parse(sender, fullBody)
+                    if (cardBill != null && trustStatus == SenderTrustStatus.TRUSTED) {
+                        val billKey = "sms-card-bill:" + smsHash
+                        FinanceSyncBridge.enqueueCardBill(
+                            context,
+                            SyncCardBill(
+                                sourceType = "SMS",
+                                sourceKey = billKey,
+                                timestamp = timestamp,
+                                amountMinor = cardBill.amountPaise,
+                                bank = cardBill.bank,
+                                accountLastFour = cardBill.accountLastFour,
+                                accountLastTwo = cardBill.accountLastTwo,
+                                confidence = cardBill.confidence
+                            )
+                        )
+                        Log.d(
+                            TAG,
+                            "CARD_BILL_SMS_DETECTED -> amount=" + cardBill.amountPaise +
+                                ", bank=" + cardBill.bank +
+                                ", last4=" + cardBill.accountLastFour +
+                                ", last2=" + cardBill.accountLastTwo
+                        )
+
+                        dbHelper.close()
+                        val updateIntent = Intent(ACTION_TRANSACTION_DATA_CHANGED).apply {
+                            setPackage(context.packageName)
+                        }
+                        context.sendBroadcast(updateIntent)
+                        return@runCatching
+                    }
+
                     val parserManager = SmsParserManager()
                     val parserResult = parserManager.parse(sender, fullBody)
 
