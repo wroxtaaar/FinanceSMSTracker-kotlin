@@ -34,8 +34,15 @@ def _secret(name):
         return ""
 
 
-def _statement_key(bank):
-    return _secret(f"{bank.upper()}_STATEMENT_SECRET")
+def _statement_keys(bank):
+    name = bank.upper()
+    values = os.getenv(f"{name}_STATEMENT_SECRETS", "").strip()
+    keys = [item.strip() for item in re.split(r"[,
+]+", values) if item.strip()]
+    single = _secret(f"{name}_STATEMENT_SECRET")
+    if single and single not in keys:
+        keys.append(single)
+    return keys
 
 
 def _headers(message):
@@ -980,33 +987,32 @@ def process_statement_attachments(service, message):
             if existing and existing["status"] == "PARSED":
                 continue
 
-            if bank == "HDFC":
-                metadata, rows = parse_hdfc_statement(
-                    pdf_bytes,
-                    _statement_key(bank),
-                )
-            elif bank == "ICICI":
-                metadata, rows = parse_icici_statement(
-                    pdf_bytes,
-                    _statement_key(bank),
-                )
-            elif bank == "SBI":
-                metadata, rows = parse_sbi_statement(
-                    pdf_bytes,
-                    _statement_key(bank),
-                )
-            elif bank == "INDUSIND":
-                metadata, rows = parse_indusind_statement(
-                    pdf_bytes,
-                    _statement_key(bank),
-                )
-            elif bank == "AXIS":
-                metadata, rows = parse_axis_statement(
-                    pdf_bytes,
-                    _statement_key(bank),
-                )
-            else:
-                raise ValueError(f"statement parser for {bank} is not implemented")
+            keys = _statement_keys(bank)
+            if not keys:
+                raise ValueError(f"{bank} statement password is not configured")
+
+            parse_error = None
+            for key in keys:
+                try:
+                    if bank == "HDFC":
+                        metadata, rows = parse_hdfc_statement(pdf_bytes, key)
+                    elif bank == "ICICI":
+                        metadata, rows = parse_icici_statement(pdf_bytes, key)
+                    elif bank == "SBI":
+                        metadata, rows = parse_sbi_statement(pdf_bytes, key)
+                    elif bank == "INDUSIND":
+                        metadata, rows = parse_indusind_statement(pdf_bytes, key)
+                    elif bank == "AXIS":
+                        metadata, rows = parse_axis_statement(pdf_bytes, key)
+                    else:
+                        raise ValueError(f"statement parser for {bank} is not implemented")
+                    parse_error = None
+                    break
+                except Exception as exc:
+                    parse_error = exc
+
+            if parse_error is not None:
+                raise parse_error
 
             for index, row in enumerate(rows):
                 timestamp = int(row["date"].timestamp() * 1000)
