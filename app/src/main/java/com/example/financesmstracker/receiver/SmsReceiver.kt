@@ -19,6 +19,7 @@ import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.integration.SyncCardBill
 import com.example.financesmstracker.parser.CardBillPaymentSmsParser
 import com.example.financesmstracker.parser.CardBillStatementParser
+import com.example.financesmstracker.parser.CardBillStatementParser
 import com.example.financesmstracker.parser.SenderTrustManager
 import com.example.financesmstracker.parser.SenderTrustStatus
 import com.example.financesmstracker.parser.SmsParserManager
