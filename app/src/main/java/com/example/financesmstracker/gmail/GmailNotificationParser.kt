@@ -72,13 +72,17 @@ object GmailNotificationParser {
 
         if (direction == TransactionType.UNKNOWN || amountPaise <= 0L) return null
 
+        // Identify the issuer from an explicit bank name, not arbitrary
+        // substrings. For example, HDFC UPI notifications can contain a VPA
+        // such as "cred.club@axisb"; that "axisb" is the counterparty handle,
+        // not the issuing bank.
         val bank = when {
-            lower.contains("axis") -> "AXIS"
-            lower.contains("hdfc") -> "HDFC"
-            lower.contains("icici") -> "ICICI"
-            lower.contains("sbi") -> "SBI"
-            lower.contains("indusind") -> "INDUSIND"
-            lower.contains("hsbc") -> "HSBC"
+            Regex("""\baxis(?:\s+bank)?\b""").containsMatchIn(lower) -> "AXIS"
+            Regex("""\bhdfc(?:\s+bank)?\b""").containsMatchIn(lower) -> "HDFC"
+            Regex("""\bicici(?:\s+bank)?\b""").containsMatchIn(lower) -> "ICICI"
+            Regex("""\bsbi(?:\s+card|\s+bank)?\b""").containsMatchIn(lower) -> "SBI"
+            Regex("""\bindusind(?:\s+bank)?\b""").containsMatchIn(lower) -> "INDUSIND"
+            Regex("""\bhsbc(?:\s+bank)?\b""").containsMatchIn(lower) -> "HSBC"
             else -> null
         }
 
