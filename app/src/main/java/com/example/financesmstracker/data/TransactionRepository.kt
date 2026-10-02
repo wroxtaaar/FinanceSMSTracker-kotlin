@@ -824,6 +824,42 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         }
     }
 
+    /** Finds likely notification/SMS duplicates that deserve human review. */
+    fun getPotentialTransactionConflicts(): List<TransactionConflict> {
+        val transactions = getAllTransactions()
+        val conflicts = mutableListOf<TransactionConflict>()
+        for (i in transactions.indices) {
+            val first = transactions[i]
+            for (j in i + 1 until transactions.size) {
+                val second = transactions[j]
+                val firstNotification = first.smsHash.startsWith("notification:")
+                val secondNotification = second.smsHash.startsWith("notification:")
+                if (firstNotification == secondNotification) continue
+                if (first.amountPaise != second.amountPaise) continue
+                if (!first.currency.equals(second.currency, ignoreCase = true)) continue
+                if (first.transactionType != second.transactionType) continue
+                if (kotlin.math.abs(first.timestamp - second.timestamp) > 2L * 60L * 1000L) continue
+
+                val bankConflict = !first.bank.isNullOrBlank() && !second.bank.isNullOrBlank() &&
+                    !first.bank.equals(second.bank, ignoreCase = true)
+                val accountConflict = !first.accountLastFour.isNullOrBlank() &&
+                    !second.accountLastFour.isNullOrBlank() && first.accountLastFour != second.accountLastFour
+                val referenceConflict = !first.refNumber.isNullOrBlank() &&
+                    !second.refNumber.isNullOrBlank() && !first.refNumber.equals(second.refNumber, ignoreCase = true)
+
+                if (bankConflict || accountConflict || referenceConflict) {
+                    val reasons = buildList {
+                        if (bankConflict) add("different banks: " + first.bank + " vs " + second.bank)
+                        if (accountConflict) add("different accounts: " + first.accountLastFour + " vs " + second.accountLastFour)
+                        if (referenceConflict) add("different references")
+                    }
+                    conflicts += TransactionConflict(first, second, reasons.joinToString(", "))
+                }
+            }
+        }
+        return conflicts
+    }
+
     fun getAllTransactions(): List<Transaction> {
         val list = mutableListOf<Transaction>()
         val db = dbHelper.readableDatabase
@@ -1135,4 +1171,11 @@ data class LocalHistoryClearResult(
     val transactions: Int,
     val evidence: Int,
     val unrecognizedSms: Int
+)
+
+
+data class TransactionConflict(
+    val first: Transaction,
+    val second: Transaction,
+    val reason: String
 )
