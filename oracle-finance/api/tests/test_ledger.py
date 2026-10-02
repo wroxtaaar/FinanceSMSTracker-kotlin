@@ -216,6 +216,104 @@ def test_card_bill_and_active_spend_are_separate():
     assert row["bill_balance_minor"] == 0
 
 
+def test_card_bill_evidence_updates_bill_without_touching_active_spend():
+    from app.ledger import sync_card_bill, sync_transaction
+
+    class T:
+        id = "bill-card-purchase"
+        amountMinor = 9767
+        currency = "INR"
+        type = "DEBIT"
+        paymentMethod = "CARD"
+        accountType = "CREDIT_CARD"
+        bank = "AXIS"
+        merchantOrPayee = "ACTIVE SPEND"
+        accountLast4 = "9206"
+        reference = None
+        timestamp = 2100000000000
+        category = "OTHER"
+        confidence = 0.99
+
+    set_balance(
+        "bill-axis-9206",
+        "Axis 9206",
+        "INR",
+        "CREDIT_CARD",
+        "AXIS",
+        "9206",
+        6290306,
+        0,
+    )
+    sync_transaction(T())
+
+    result = sync_card_bill({
+        "sourceType": "SMS",
+        "sourceKey": "sms-card-bill:test-9206",
+        "timestamp": 2100000001000,
+        "amountMinor": 5313606,
+        "currency": "INR",
+        "bank": "AXIS",
+        "accountLast4": "9206",
+        "confidence": 0.98,
+    })
+
+    assert result["status"] == "APPLIED"
+
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT balance_minor,bill_balance_minor FROM accounts WHERE id='bill-axis-9206'"
+        ).fetchone()
+
+    assert row["balance_minor"] == 6290306
+    assert row["bill_balance_minor"] == 5313606
+
+
+def test_full_gmail_bill_overrides_lower_priority_sms_bill():
+    from app.ledger import sync_card_bill
+
+    set_balance(
+        "bill-axis-1175",
+        "Axis 1175",
+        "INR",
+        "CREDIT_CARD",
+        "AXIS",
+        "1175",
+        4585900,
+        0,
+    )
+
+    sms = sync_card_bill({
+        "sourceType": "SMS",
+        "sourceKey": "sms-card-bill:test-1175",
+        "timestamp": 2100000010000,
+        "amountMinor": 4500000,
+        "currency": "INR",
+        "bank": "AXIS",
+        "accountLast4": "1175",
+        "confidence": 0.98,
+    })
+    assert sms["status"] == "APPLIED"
+
+    email = sync_card_bill({
+        "sourceType": "GMAIL",
+        "sourceKey": "gmail-card-bill:test-1175",
+        "timestamp": 2100000011000,
+        "amountMinor": 4585900,
+        "currency": "INR",
+        "bank": "AXIS",
+        "accountLast4": "1175",
+        "confidence": 0.99,
+    })
+    assert email["status"] == "APPLIED"
+
+    with connection() as conn:
+        bill = conn.execute(
+            "SELECT bill_balance_minor FROM accounts WHERE id='bill-axis-1175'"
+        ).fetchone()["bill_balance_minor"]
+
+    assert bill == 4585900
+
+
 def test_bank_credit_increases_cash():
     from app.ledger import sync_transaction
 
