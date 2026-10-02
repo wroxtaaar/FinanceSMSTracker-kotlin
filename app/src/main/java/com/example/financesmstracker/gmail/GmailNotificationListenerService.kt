@@ -64,10 +64,12 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 processNotification(sbn, title, text, bigText, subText)
             } catch (error: Exception) {
                 Log.e(TAG, "Immediate Gmail notification processing failed", error)
+            } finally {
+                // Only after the fast notification path has run do we start the
+                // slower Gmail/IMAP clarification pass.
+                triggerBackgroundGmailSync()
             }
         }
-
-        triggerBackgroundGmailSync()
     }
 
     private fun processNotification(
