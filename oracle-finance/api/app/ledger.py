@@ -5,7 +5,11 @@ def now_ms(): return int(time.time()*1000)
 
 def sync_transaction(t, apply_balance=True):
     with connection() as conn:
-        before=conn.execute("SELECT id FROM transactions WHERE id=?",(t.id,)).fetchone()
+        before=conn.execute(
+            """SELECT id,amount_minor,currency,type,category,status
+               FROM transactions WHERE id=?""",
+            (t.id,)
+        ).fetchone()
         created_at=now_ms()
         conn.execute("""INSERT OR IGNORE INTO transactions
         (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at)
@@ -18,8 +22,8 @@ def sync_transaction(t, apply_balance=True):
 
         # Splitwise is intentionally simple: every new debit increases the
         # manual owed amount, except transactions explicitly categorized OTHER.
-        # Credits never change it. Gmail rows are deferred/duplicate candidates
-        # and therefore must not increment it here.
+        # Credits never change it. Gmail rows are never allowed to create a
+        # Splitwise contribution.
         if (
             before is None
             and apply_balance
@@ -35,6 +39,41 @@ def sync_transaction(t, apply_balance=True):
                        updated_at=excluded.updated_at""",
                 (t.currency, int(t.amountMinor), created_at),
             )
+
+        # Category edits are sent as the same transaction ID. They must update
+        # the ledger metadata and Splitwise contribution without reapplying the
+        # bank/card balance. OTHER is the explicit Splitwise opt-out; every
+        # other debit category contributes its full amount.
+        if (
+            before is not None
+            and before["status"] == "ACTIVE"
+            and not str(t.id).startswith("gmail:")
+            and str(before["category"] or "").strip().upper()
+                != str(t.category or "").strip().upper()
+        ):
+            old_contributes = (
+                str(before["type"] or "").upper() == "DEBIT"
+                and str(before["category"] or "").strip().upper() != "OTHER"
+            )
+            new_contributes = (
+                str(t.type or "").upper() == "DEBIT"
+                and str(t.category or "").strip().upper() != "OTHER"
+            )
+            conn.execute(
+                "UPDATE transactions SET category=? WHERE id=?",
+                (t.category, t.id),
+            )
+
+            if old_contributes != new_contributes:
+                delta = int(t.amountMinor) if new_contributes else -int(t.amountMinor)
+                conn.execute(
+                    """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
+                       VALUES(?,?,?)
+                       ON CONFLICT(currency) DO UPDATE SET
+                           amount_minor=MAX(0, manual_splitwise_total.amount_minor + excluded.amount_minor),
+                           updated_at=excluded.updated_at""",
+                    (t.currency, delta, created_at),
+                )
 
         return before is None
 
