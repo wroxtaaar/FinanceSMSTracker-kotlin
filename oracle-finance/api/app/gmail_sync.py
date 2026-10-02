@@ -941,8 +941,11 @@ def _retry_pending_statement_messages(service, stats):
                 """
                 SELECT 1
                 FROM gmail_attachments
-                WHERE message_id=?
-                  AND status='PARSED'
+                WHERE status='PARSED'
+                  AND (
+                      message_id=?
+                      OR message_id LIKE 'imap:%:' || ?
+                  )
                 LIMIT 1
                 """,
                 (msg_id,),
