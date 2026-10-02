@@ -26,7 +26,7 @@ def apply_transaction_to_account(conn, t, applied_at):
     last4=(t.accountLast4 or "").strip()
 
     query="""
-        SELECT id, balance_minor
+        SELECT id, balance_minor, bill_balance_minor
         FROM accounts
         WHERE account_type=?
           AND currency=?
@@ -55,6 +55,18 @@ def apply_transaction_to_account(conn, t, applied_at):
             "UPDATE accounts SET balance_minor=balance_minor+?, updated_at=? WHERE id=?",
             (delta,applied_at,account["id"])
         )
+
+        # Keep the statement bill separate from live/unbilled card spend.
+        # Card debits are new spend and therefore do not increase the bill
+        # bucket. Card credits (bill payments, refunds, etc.) reduce the bill
+        # bucket first; any amount beyond the bill reduces live spend.
+        if t.accountType == "CREDIT_CARD" and t.type == "CREDIT":
+            conn.execute(
+                """UPDATE accounts
+                   SET bill_balance_minor=MAX(0, COALESCE(bill_balance_minor,0)-?)
+                 WHERE id=?""",
+                (t.amountMinor, account["id"])
+            )
 
 def sync_evidence(e):
     with connection() as conn:
@@ -125,16 +137,34 @@ def balances():
     with connection() as conn:
         return [dict(r) for r in conn.execute("SELECT * FROM accounts ORDER BY name").fetchall()]
 
-def set_balance(account_id,name,currency,account_type,bank,last4,balance_minor):
+def set_balance(account_id,name,currency,account_type,bank,last4,balance_minor,bill_balance_minor=None):
     with connection() as conn:
         adjustment_total=conn.execute(
             "SELECT COALESCE(SUM(delta_minor),0) value FROM balance_adjustments WHERE account_id=?",
             (account_id,)
         ).fetchone()["value"]
+
+        existing=conn.execute(
+            "SELECT bill_balance_minor FROM accounts WHERE id=?",
+            (account_id,)
+        ).fetchone()
+
+        if account_type == "CREDIT_CARD":
+            if bill_balance_minor is None:
+                bill_value = (
+                    int(existing["bill_balance_minor"])
+                    if existing and existing["bill_balance_minor"] is not None
+                    else int(balance_minor)
+                )
+            else:
+                bill_value = max(0, min(int(bill_balance_minor), int(balance_minor)))
+        else:
+            bill_value = 0
+
         opening_balance=balance_minor-adjustment_total
         conn.execute("""INSERT INTO accounts(
-            id,name,currency,account_type,bank,last4,opening_balance_minor,balance_minor,updated_at
-        ) VALUES(?,?,?,?,?,?,?,?,?)
+            id,name,currency,account_type,bank,last4,opening_balance_minor,balance_minor,bill_balance_minor,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
             name=excluded.name,
             currency=excluded.currency,
@@ -143,8 +173,9 @@ def set_balance(account_id,name,currency,account_type,bank,last4,balance_minor):
             last4=excluded.last4,
             opening_balance_minor=excluded.opening_balance_minor,
             balance_minor=excluded.balance_minor,
+            bill_balance_minor=excluded.bill_balance_minor,
             updated_at=excluded.updated_at""",
-        (account_id,name,currency,account_type,bank,last4,opening_balance,balance_minor,now_ms()))
+        (account_id,name,currency,account_type,bank,last4,opening_balance,balance_minor,bill_value,now_ms()))
 
 def add_receivable(item):
     with connection() as conn:
