@@ -38,6 +38,9 @@ class GmailNotificationListenerService : NotificationListenerService() {
     companion object {
         private const val TAG = "GmailNotificationListener"
         private const val GMAIL_PACKAGE = "com.google.android.gm"
+        // CRED exposes the exact card issuer + last four in its bill-payment
+        // notification, which is the destination-side evidence for card liability.
+        private const val CRED_PACKAGE = "com.dreamplug.androidapp"
         private const val GMAIL_NOTIFICATION_DEBOUNCE_MS = 15_000L
 
         private val gmailSyncExecutor = Executors.newSingleThreadExecutor()
@@ -56,7 +59,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
         // Process currently visible Gmail notifications once after binding.
         runCatching {
             getActiveNotifications()
-                .filter { it.packageName == GMAIL_PACKAGE }
+                .filter { it.packageName == GMAIL_PACKAGE || it.packageName == CRED_PACKAGE }
                 .forEach { sbn ->
                     processNotificationSafely(sbn)
                 }
@@ -83,7 +86,19 @@ class GmailNotificationListenerService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (sbn.packageName != GMAIL_PACKAGE) return
+        if (sbn.packageName != GMAIL_PACKAGE && sbn.packageName != CRED_PACKAGE) return
+
+        if (sbn.packageName == CRED_PACKAGE) {
+            Log.d(
+                TAG,
+                "CRED notification posted: title=" +
+                    sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE) +
+                    " text=" +
+                    sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT)
+            )
+            processCardBillNotificationSafely(sbn)
+            return
+        }
 
         Log.d(
             TAG,
@@ -128,6 +143,116 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 // slower Gmail/IMAP clarification pass.
                 triggerBackgroundGmailSync()
             }
+        }
+    }
+
+    private fun processCardBillNotificationSafely(sbn: StatusBarNotification) {
+        val extras = sbn.notification.extras
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+        val titleBig = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
+        val summary = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.joinToString("\n") { it.toString() }
+
+        val payloadText = listOfNotNull(title, titleBig, text, bigText, subText, summary, textLines)
+            .joinToString("\n")
+
+        if (CardBillPaymentNotificationParser.parse(title, payloadText, null, null) == null) {
+            Log.d(TAG, "CRED notification is not a supported card bill payment")
+            return
+        }
+
+        notificationExecutor.execute {
+            try {
+                processCardBillNotification(sbn, title, payloadText, null, null)
+            } catch (error: Exception) {
+                Log.e(TAG, "Immediate CRED card bill notification processing failed", error)
+            } finally {
+                triggerBackgroundGmailSync()
+            }
+        }
+    }
+
+    private fun processCardBillNotification(
+        sbn: StatusBarNotification,
+        title: String?,
+        text: String?,
+        bigText: String?,
+        subText: String?
+    ) {
+        val parsed = CardBillPaymentNotificationParser.parse(title, text, bigText, subText) ?: return
+        val content = listOfNotNull(title, text, bigText, subText).joinToString("\n")
+        val contentHash = HashUtil.sha256(content)
+        val sourceKey = "app-notification:card-bill:" + contentHash
+
+        val dbHelper = FinanceDatabaseHelper(applicationContext)
+        val repository = TransactionRepository(dbHelper)
+
+        try {
+            val evidence = SourceEvidence(
+                sourceType = SourceType.APP_NOTIFICATION,
+                sourceKey = sourceKey,
+                receivedAt = sbn.postTime,
+                amountPaise = parsed.amountPaise,
+                currency = "INR",
+                direction = "CREDIT",
+                bankProvider = parsed.cardBank,
+                accountLastFour = parsed.cardLastFour,
+                reference = null,
+                contentHash = contentHash,
+                confidence = parsed.confidence,
+                status = EvidenceStatus.UNMATCHED
+            )
+
+            val evidenceId = repository.insertSourceEvidence(evidence)
+            if (evidenceId == -1L) {
+                Log.d(TAG, "Duplicate CRED card bill evidence skipped")
+                return
+            }
+
+            // HDFC/SMS records the bank debit. This record is the destination
+            // side of the payment: a CREDIT against the paid card reduces its
+            // outstanding balance without reducing bank cash a second time.
+            val transaction = Transaction(
+                amountPaise = parsed.amountPaise,
+                currency = "INR",
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = com.example.financesmstracker.parser.PaymentMethod.UPI,
+                accountType = com.example.financesmstracker.parser.AccountType.CREDIT_CARD,
+                bank = parsed.cardBank,
+                merchantName = parsed.merchantName,
+                payeeId = null,
+                accountLastFour = parsed.cardLastFour,
+                refNumber = null,
+                timestamp = sbn.postTime,
+                smsHash = "notification:card-bill:" + contentHash,
+                category = "TRANSFER",
+                parserConfidence = parsed.confidence
+            )
+
+            val rowId = repository.insertTransaction(transaction)
+            if (rowId == -1L) {
+                Log.d(TAG, "CRED card bill transaction already exists")
+                return
+            }
+
+            repository.resolveEvidenceToTransaction(evidenceId, rowId)?.let {
+                FinanceSyncBridge.enqueueEvidence(applicationContext, it)
+            }
+
+            repository.getTransactionById(rowId)?.let { canonical ->
+                FinanceSyncBridge.enqueueCanonical(applicationContext, canonical)
+            }
+
+            Log.i(
+                TAG,
+                "Card bill payment applied: card=${parsed.cardBank}-${parsed.cardLastFour}, amount=${parsed.amountPaise}"
+            )
+        } finally {
+            dbHelper.close()
         }
     }
 
