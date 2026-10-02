@@ -221,7 +221,7 @@ def test_card_bill_evidence_updates_bill_without_touching_active_spend():
 
     class T:
         id = "bill-card-purchase"
-        amountMinor = 9767
+        amountMinor = 976700
         currency = "INR"
         type = "DEBIT"
         paymentMethod = "CARD"
@@ -241,7 +241,7 @@ def test_card_bill_evidence_updates_bill_without_touching_active_spend():
         "CREDIT_CARD",
         "AXIS",
         "9206",
-        6290306,
+        5313606,
         0,
     )
     sync_transaction(T())
