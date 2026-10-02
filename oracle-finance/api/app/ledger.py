@@ -178,7 +178,7 @@ def sync_card_bill(bill):
         account = None
         if last4:
             account = conn.execute(
-                """SELECT id,balance_minor,bill_balance_minor
+                """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at
                    FROM accounts
                    WHERE account_type='CREDIT_CARD' AND currency=?
                      AND UPPER(TRIM(COALESCE(bank,'')))=?
@@ -189,7 +189,7 @@ def sync_card_bill(bill):
 
         if not account and last2:
             candidates = conn.execute(
-                """SELECT id,balance_minor,bill_balance_minor,last4
+                """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at,last4
                    FROM accounts
                    WHERE account_type='CREDIT_CARD' AND currency=?
                      AND UPPER(TRIM(COALESCE(bank,'')))=?
@@ -202,6 +202,18 @@ def sync_card_bill(bill):
 
         if not account:
             return {"status":"REVIEW","reason":"card_not_found","bank":bank,"last4":last4,"last2":last2}
+
+        # A manual card balance is a reconciliation point. Older statement
+        # evidence discovered later must not rewrite the manually verified
+        # Bill/Active Spend split. A statement observed after reconciliation
+        # is allowed to establish the new bill bucket.
+        reconciled_at = int(account["balance_reconciled_at"] or 0)
+        if reconciled_at and observed_at <= reconciled_at:
+            return {
+                "status":"RETAINED_MANUAL_RECONCILIATION",
+                "accountId":account["id"],
+                "sourceType":source_type,
+            }
 
         # Compare the strongest already-applied evidence for this exact card.
         previous = conn.execute(
