@@ -36,6 +36,29 @@ object FinanceSyncBridge {
         enqueue(context, emptyList(), listOf(evidence))
     }
 
+    /**
+     * Sends an existing transaction back to Oracle when a user edits metadata
+     * such as its category. Unlike canonical ingestion, this intentionally
+     * allows the Oracle-Gmail mirror prefix because the server treats an
+     * existing ID as an update rather than a new balance event.
+     */
+    fun enqueueCategoryUpdate(
+        context: Context,
+        transaction: Transaction
+    ) {
+        val appContext = context.applicationContext
+        executor.execute {
+            runCatching {
+                val service = FinanceSyncService(appContext)
+                service.enqueue(
+                    transactions = listOf(FinanceSyncMapper.toSyncTransaction(transaction)),
+                    evidence = emptyList()
+                )
+                service.flush()
+            }
+        }
+    }
+
     fun enqueueCardBill(
         context: Context,
         bill: SyncCardBill
