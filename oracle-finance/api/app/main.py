@@ -39,7 +39,9 @@ class SyncRequest(BaseModel):
     voidedTransactionIds:list[str]=[]
 
 class BalanceRequest(BaseModel):
-    id:str; name:str; currency:str="INR"; accountType:str; bank:Optional[str]=None; last4:Optional[str]=None; balanceMinor:int
+    id:str; name:str; currency:str="INR"; accountType:str; bank:Optional[str]=None; last4:Optional[str]=None
+    balanceMinor:int
+    billBalanceMinor:Optional[int]=None
 
 class ReceivableRequest(BaseModel):
     id:str; description:str; amountMinor:int; currency:str="INR"; splitwiseExpenseId:Optional[str]=None
@@ -90,7 +92,19 @@ def get_accounts(x_sync_token:str=Header(default="")):
 def update_balance(account_id:str,payload:BalanceRequest,x_sync_token:str=Header(default="")):
     require_token(x_sync_token)
     if account_id!=payload.id: raise HTTPException(400,"account id mismatch")
-    set_balance(payload.id,payload.name,payload.currency,payload.accountType,payload.bank,payload.last4,payload.balanceMinor)
+    if payload.accountType == "CREDIT_CARD" and payload.billBalanceMinor is not None:
+        if payload.billBalanceMinor < 0 or payload.billBalanceMinor > payload.balanceMinor:
+            raise HTTPException(400,"bill balance must be between 0 and current card outstanding")
+    set_balance(
+        payload.id,
+        payload.name,
+        payload.currency,
+        payload.accountType,
+        payload.bank,
+        payload.last4,
+        payload.balanceMinor,
+        payload.billBalanceMinor
+    )
     return {"status":"ok"}
 
 @app.post("/api/v1/splitwise/receivables")
