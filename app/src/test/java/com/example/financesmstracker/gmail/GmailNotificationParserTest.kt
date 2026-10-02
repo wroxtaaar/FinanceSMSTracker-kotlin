@@ -50,6 +50,25 @@ class GmailNotificationParserTest {
     }
 
     @Test
+    fun hdfcNotificationDoesNotMistakeAxisVpaForIssuingBank() {
+        val result = GmailNotificationParser.parse(
+            "HDFC Bank InstaAlerts",
+            "Rs.7773.00 is debited from your account ending 9591 towards VPA cred.club@axisb (CRED Club) on 02-10-26. UPI transaction reference no.: 664110896238.",
+            null,
+            null
+        )
+
+        assertNotNull(result)
+        assertEquals(TransactionType.DEBIT, result!!.transactionType)
+        assertEquals("HDFC", result.bank)
+        assertEquals(AccountType.BANK_ACCOUNT, result.accountType)
+        assertEquals(PaymentMethod.UPI, result.paymentMethod)
+        assertEquals("9591", result.accountLastFour)
+        assertEquals("cred.club@axisb", result.payeeId)
+        assertEquals("664110896238", result.refNumber)
+    }
+
+    @Test
     fun parsesAxisCreditCardSpendNotificationAsDebit() {
         val result = GmailNotificationParser.parse(
             "Axis Bank Alerts",
