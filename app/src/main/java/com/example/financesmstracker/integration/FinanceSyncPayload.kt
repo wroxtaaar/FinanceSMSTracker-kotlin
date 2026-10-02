@@ -63,6 +63,25 @@ object FinanceSyncPayload {
         }
         out.append("]")
 
+        out.append(",\"cardBills\":[")
+        cardBills.forEachIndexed { index, bill ->
+            if (index > 0) out.append(",")
+            out.append("{")
+            out.append("\"sourceType\":").append(jsonString(bill.sourceType))
+            out.append(",\"sourceKey\":").append(jsonString(bill.sourceKey))
+            out.append(",\"timestamp\":").append(bill.timestamp)
+            if (bill.amountMinor != null) {
+                out.append(",\"amountMinor\":").append(bill.amountMinor)
+            }
+            appendNullableString(out, "bank", bill.bank)
+            appendNullableString(out, "accountLast4", bill.accountLastFour)
+            appendNullableString(out, "accountLast2", bill.accountLastTwo)
+            require(bill.confidence.isFinite()) { "card bill confidence must be finite" }
+            out.append(",\"confidence\":").append(bill.confidence)
+            out.append("}")
+        }
+        out.append("]")
+
         out.append(",\"voidedTransactionIds\":[")
         voidedTransactionIds.forEachIndexed { index, id ->
             if (index > 0) out.append(",")
