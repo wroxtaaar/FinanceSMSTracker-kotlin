@@ -1254,6 +1254,7 @@ class MainActivity : AppCompatActivity() {
 
             dialog.dismiss()
             loadTransactions()
+            loadOracleSummary()
         }
 
         dialog.show()
