@@ -1,0 +1,10 @@
+services:
+  finance-sheets:
+    build: ./api
+    env_file: .env
+    command: ["uvicorn","app.sheets_public:app","--host","0.0.0.0","--port","8091"]
+    ports:
+      - "127.0.0.1:8091:8091"
+    volumes:
+      - ./data:/app/data:ro
+    restart: unless-stopped
