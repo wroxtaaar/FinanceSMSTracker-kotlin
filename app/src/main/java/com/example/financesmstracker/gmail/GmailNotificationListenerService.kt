@@ -232,6 +232,33 @@ class GmailNotificationListenerService : NotificationListenerService() {
                             ", duplicates=" + sync.duplicateTransactions +
                             ", reviews=" + sync.reviewCount
                     )
+
+                    // Pull the clarified Gmail rows immediately so the local
+                    // notification transaction is enriched even when the app
+                    // UI is not currently open.
+                    FinanceSyncClient(applicationContext).fetchGmailTransactions()
+                        .onSuccess { transactions ->
+                            val dbHelper = FinanceDatabaseHelper(applicationContext)
+                            val repository = TransactionRepository(dbHelper)
+                            try {
+                                transactions.forEach { remote ->
+                                    val rowId = repository.upsertOracleGmailTransaction(remote)
+                                    if (rowId != 0L) {
+                                        repository.getTransactionById(rowId)?.let { local ->
+                                            FinanceSyncBridge.enqueueCanonical(
+                                                applicationContext,
+                                                local
+                                            )
+                                        }
+                                    }
+                                }
+                            } finally {
+                                dbHelper.close()
+                            }
+                        }
+                        .onFailure { error ->
+                            Log.w(TAG, "Could not pull Gmail clarification rows: " + error.message, error)
+                        }
                 }.onFailure { error ->
                     Log.w(TAG, "Background Gmail clarification failed: " + error.message, error)
                 }
