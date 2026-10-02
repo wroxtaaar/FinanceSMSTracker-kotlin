@@ -540,9 +540,64 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
             }
         }
 
-        if (matchingLocal != null) {
-            val localId = matchingLocal.first
-            val localMerchant = matchingLocal.second
+        val notificationLocal = db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            arrayOf(
+                FinanceDatabaseHelper.COLUMN_ID,
+                FinanceDatabaseHelper.COLUMN_MERCHANT_NAME,
+                FinanceDatabaseHelper.COLUMN_BANK,
+                FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
+                FinanceDatabaseHelper.COLUMN_REF_NUMBER,
+                FinanceDatabaseHelper.COLUMN_PAYEE_ID,
+                FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD,
+                FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE
+            ),
+            FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ? AND " +
+                FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
+                "ABS(" + FinanceDatabaseHelper.COLUMN_TIMESTAMP + " - ?) <= ?",
+            arrayOf(
+                "notification:%",
+                "ACTIVE",
+                transaction.amountMinor.toString(),
+                transaction.currency,
+                transaction.transactionType,
+                transaction.timestamp.toString(),
+                (6L * 60L * 60L * 1000L).toString()
+            ),
+            null,
+            null,
+            FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
+            "20"
+        ).use {
+            var found: Pair<Long, String?>? = null
+            while (it.moveToNext()) {
+                val localBank = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_BANK))
+                val localLast4 = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR))
+                val bankCompatible = localBank.isNullOrBlank() ||
+                    transaction.bank.isNullOrBlank() ||
+                    localBank.equals(transaction.bank, ignoreCase = true)
+                val last4Compatible = localLast4.isNullOrBlank() ||
+                    transaction.accountLast4.isNullOrBlank() ||
+                    localLast4 == transaction.accountLast4
+                if (bankCompatible && last4Compatible) {
+                    found = Pair(
+                        it.getLong(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_ID)),
+                        it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME))?.trim()
+                    )
+                    break
+                }
+            }
+            found
+        }
+
+        val resolvedLocal = matchingLocal ?: notificationLocal
+
+        if (resolvedLocal != null) {
+            val localId = resolvedLocal.first
+            val localMerchant = resolvedLocal.second
 
             val remoteMerchant = transaction.merchantOrPayee?.trim()
                 ?.takeIf { it.isNotBlank() }
@@ -567,7 +622,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
                 ) > 0
             }
 
-            if (existingRemoteId != null) {
+            if (existingRemoteId != null && existingRemoteId != localId) {
                 db.delete(
                     FinanceDatabaseHelper.TABLE_TRANSACTIONS,
                     FinanceDatabaseHelper.COLUMN_ID + " = ?",
