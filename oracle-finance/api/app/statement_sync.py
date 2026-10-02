@@ -1085,7 +1085,15 @@ def process_statement_attachments(service, message):
                 # Use the normal ledger path so the statement transaction
                 # gets its balance adjustment exactly once. sync_transaction()
                 # is idempotent and INSERT OR IGNORE protects repeated imports.
-                sync_transaction(transaction)
+                inserted = sync_transaction(transaction)
+
+                # Statement rows must update the account balance when they
+                # are newly inserted. Keep the explicit application here
+                # because statement imports intentionally bypass the normal
+                # Gmail balance rules.
+                if inserted:
+                    with connection() as conn:
+                        apply_transaction_to_account(conn, transaction, timestamp)
 
                 sync_evidence(
                     SyncEvidenceModel(
