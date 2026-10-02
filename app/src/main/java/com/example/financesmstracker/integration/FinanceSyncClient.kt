@@ -37,7 +37,11 @@ class FinanceSyncClient(
                             bank = item.optString("bank").takeIf { it.isNotBlank() },
                             last4 = item.optString("last4").takeIf { it.isNotBlank() },
                             openingBalanceMinor = item.optLong("opening_balance_minor"),
-                            balanceMinor = item.getLong("balance_minor")
+                            balanceMinor = item.getLong("balance_minor"),
+                            billBalanceMinor = item.optLong(
+                                "bill_balance_minor",
+                                if (item.optString("account_type") == "CREDIT_CARD") item.getLong("balance_minor") else 0L
+                            )
                         )
                     )
                 }
@@ -45,7 +49,11 @@ class FinanceSyncClient(
         }
     }
 
-    fun updateAccountBalance(account: OracleAccount, balanceMinor: Long): Result<String> {
+    fun updateAccountBalance(
+        account: OracleAccount,
+        balanceMinor: Long,
+        billBalanceMinor: Long? = null
+    ): Result<String> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
 
@@ -57,6 +65,9 @@ class FinanceSyncClient(
             account.bank?.let { put("bank", it) }
             account.last4?.let { put("last4", it) }
             put("balanceMinor", balanceMinor)
+            if (account.accountType == "CREDIT_CARD" && billBalanceMinor != null) {
+                put("billBalanceMinor", billBalanceMinor)
+            }
         }
 
         val encodedId = java.net.URLEncoder.encode(account.id, "UTF-8")
@@ -284,7 +295,8 @@ data class OracleAccount(
     val bank: String?,
     val last4: String?,
     val openingBalanceMinor: Long,
-    val balanceMinor: Long
+    val balanceMinor: Long,
+    val billBalanceMinor: Long = 0L
 )
 
 data class OracleLedgerSummary(
