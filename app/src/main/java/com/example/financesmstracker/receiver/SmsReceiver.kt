@@ -17,6 +17,7 @@ import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
 import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.integration.SyncCardBill
+import com.example.financesmstracker.parser.CardBillPaymentSmsParser
 import com.example.financesmstracker.parser.SenderTrustManager
 import com.example.financesmstracker.parser.SenderTrustStatus
 import com.example.financesmstracker.parser.SmsParserManager
@@ -42,6 +43,27 @@ class SmsReceiver : BroadcastReceiver() {
                     val fullBody = messages.joinToString(separator = "") { it.messageBody ?: "" }
 
                     val trustStatus = SenderTrustManager.classifySender(sender)
+                    val smsHash = HashUtil.sha256(fullBody)
+
+                    // A card-payment confirmation is a payment signal, not a
+                    // generic debit/credit. Only accept it when the message
+                    // explicitly says the payment was applied to a credit
+                    // card. A normal "Sent/Debited from bank account" SMS
+                    // must remain a bank transaction.
+                    val cardBillPayment = CardBillPaymentSmsParser.parse(sender, fullBody)
+                    if (cardBillPayment != null && trustStatus == SenderTrustStatus.TRUSTED) {
+                        processCardBillPayment(
+                            context = context,
+                            timestamp = timestamp,
+                            smsHash = smsHash,
+                            parsed = cardBillPayment
+                        )
+                        val updateIntent = Intent(ACTION_TRANSACTION_DATA_CHANGED).apply {
+                            setPackage(context.packageName)
+                        }
+                        context.sendBroadcast(updateIntent)
+                        return@runCatching
+                    }
 
                     // A credit-card statement SMS is a bill signal, not a card
                     // purchase. Handle it before the normal transaction parser
@@ -84,7 +106,6 @@ class SmsReceiver : BroadcastReceiver() {
 
                     val dbHelper = FinanceDatabaseHelper(context)
                     val repository = TransactionRepository(dbHelper)
-                    val smsHash = HashUtil.sha256(fullBody)
 
                     val nonTransactionalMessage =
                         SenderTrustManager.isNonTransactionalFinancialMessage(fullBody)
@@ -207,5 +228,82 @@ class SmsReceiver : BroadcastReceiver() {
                 Log.e(TAG, "Error processing received SMS pipeline", e)
             }
         }
+    private fun processCardBillPayment(
+        context: Context,
+        timestamp: Long,
+        smsHash: String,
+        parsed: com.example.financesmstracker.parser.CardBillPaymentSms
+    ) {
+        val dbHelper = FinanceDatabaseHelper(context)
+        val repository = TransactionRepository(dbHelper)
+        try {
+            val evidence = SourceEvidence(
+                sourceType = SourceType.SMS,
+                sourceKey = "sms-card-bill-payment:" + smsHash,
+                receivedAt = timestamp,
+                amountPaise = parsed.amountPaise,
+                currency = "INR",
+                direction = "CREDIT",
+                bankProvider = parsed.cardBank,
+                accountLastFour = parsed.cardLastFour,
+                reference = parsed.reference,
+                contentHash = smsHash,
+                confidence = parsed.confidence,
+                status = EvidenceStatus.MATCHED
+            )
+
+            val evidenceId = repository.insertSourceEvidence(evidence)
+            if (evidenceId == -1L) {
+                Log.d(TAG, "Duplicate card bill payment SMS skipped: " + smsHash)
+                return
+            }
+
+            val transaction = Transaction(
+                amountPaise = parsed.amountPaise,
+                currency = "INR",
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = parsed.paymentMethod,
+                accountType = com.example.financesmstracker.parser.AccountType.CREDIT_CARD,
+                bank = parsed.cardBank,
+                merchantName = "Credit Card Bill Payment",
+                payeeId = null,
+                accountLastFour = parsed.cardLastFour,
+                refNumber = parsed.reference,
+                timestamp = timestamp,
+                smsHash = "card-bill-payment:" + smsHash,
+                category = "TRANSFER",
+                parserConfidence = parsed.confidence
+            )
+
+            val rowId = repository.insertTransaction(transaction)
+            if (rowId == -1L) {
+                Log.d(TAG, "Card bill payment transaction already exists")
+                return
+            }
+
+            repository.resolveEvidenceToTransaction(evidenceId, rowId)?.let {
+                FinanceSyncBridge.enqueueEvidence(context, it)
+            }
+
+            repository.getTransactionById(rowId)?.let { canonical ->
+                FinanceSyncBridge.enqueueCanonical(
+                    context = context,
+                    transaction = canonical,
+                    evidence = repository.getSourceEvidenceById(evidenceId)
+                )
+            }
+
+            Log.i(
+                TAG,
+                "CARD_BILL_PAYMENT_SMS_SAVED -> card=" + parsed.cardBank + "-" + parsed.cardLastFour +
+                    ", amount=" + parsed.amountPaise +
+                    ", method=" + parsed.paymentMethod +
+                    ", ref=" + parsed.reference
+            )
+        } finally {
+            dbHelper.close()
+        }
+    }
+
     }
 }
