@@ -33,7 +33,7 @@ class ManualTransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
                 put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, reference?.trim()?.takeIf { it.isNotEmpty() })
                 put(FinanceDatabaseHelper.COLUMN_TIMESTAMP, unrecognized.receivedAt)
                 put(FinanceDatabaseHelper.COLUMN_SMS_HASH, unrecognized.contentHash)
-                put(FinanceDatabaseHelper.COLUMN_CATEGORY, category?.trim()?.takeIf { it.isNotEmpty() } ?: "OTHER")
+                put(FinanceDatabaseHelper.COLUMN_CATEGORY, category?.trim()?.takeIf { it.isNotEmpty() } ?: "GROCERIES")
                 put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, 1.0f)
             }
             val transactionId = db.insertWithOnConflict(FinanceDatabaseHelper.TABLE_TRANSACTIONS, null, tx, SQLiteDatabase.CONFLICT_IGNORE)
