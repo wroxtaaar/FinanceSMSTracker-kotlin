@@ -85,6 +85,69 @@ class FakeService:
     def users(self):
         return self._users
 
+def test_pending_statement_is_retried_outside_incremental_date_window(monkeypatch):
+    import app.gmail_sync as gmail_sync
+
+    message = _message(
+        "11:88696",
+        "statement attachment placeholder",
+        subject="Amazon Pay ICICI Bank Credit Card Statement for the period August 29, 2026 to September 28, 2026",
+        internal_date="1788177600000",
+    )
+
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                message["id"],
+                "thread-pending-statement",
+                1788177600000,
+                "credit_cards@icici.bank.in",
+                message["payload"]["headers"][0]["value"],
+                "pending-statement-fingerprint",
+                "PENDING",
+                1788177600000,
+            ),
+        )
+
+    calls = []
+
+    def fake_statement_processor(service, fetched_message):
+        calls.append(fetched_message["id"])
+        return {
+            "attachmentsScanned": 1,
+            "attachmentsParsed": 1,
+            "transactionsAdded": 1,
+            "transactionsMatched": 2,
+            "errors": [],
+        }
+
+    monkeypatch.setattr(gmail_sync, "process_statement_attachments", fake_statement_processor)
+
+    stats = gmail_sync.ingest_messages(
+        FakeService([message]),
+        query="after:2026/10/01",
+    )
+
+    assert calls == ["11:88696"]
+    assert stats["pendingStatementRetries"] == 1
+    assert stats["statementAttachmentsParsed"] == 1
+    assert stats["statementTransactionsAdded"] == 1
+    assert stats["statementTransactionsMatched"] == 2
+
+    with connection() as conn:
+        status = conn.execute(
+            "SELECT status FROM gmail_messages WHERE id=?",
+            (message["id"],),
+        ).fetchone()["status"]
+
+    assert status == "PARSED"
+
+
 def test_gmail_parser_supports_card_and_supported_banks():
     message = _message(
         "parser-1",
