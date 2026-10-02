@@ -839,12 +839,20 @@ def parse_bank_email(message):
 
     m=re.search(r"(?i)(?:INR|Rs\.?)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)",combined)
     amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
-    direction="CREDIT" if re.search(r"(?i)credited|credit alert|payment.*received|refund",combined) else (
-        "DEBIT" if re.search(
-            r"(?i)debited|spent|sent|purchase|withdrawn|payment.*successful|"
-            r"used\s+for\s+(?:a\s+)?transaction",
+    # Debit signals must be evaluated first. A credit-card purchase can contain
+    # "credit card" and therefore the word "credit" must never by itself make
+    # the transaction a CREDIT.
+    direction="DEBIT" if re.search(
+        r"(?i)debited|spent|sent|purchase|withdrawn|payment.*successful|"
+        r"used\s+for\s+(?:a\s+)?transaction|charged",
+        combined,
+    ) else (
+        "CREDIT" if re.search(
+            r"(?i)credited|credit alert|payment.*received|refund|"
+            r"amount\s+credited",
             combined,
-        ) else None)
+        ) else None
+    )
     bank=_recognized_bank(combined, sender)
     last4=_account_last4(combined)
 
@@ -1219,3 +1227,28 @@ def ingest_messages(service,query="newer_than:30d"):
             break
 
     return stats
+
+def test_axis_credit_card_spend_email_is_debit():
+    message = _message(
+        "axis-card-spend",
+        "Dear Abdul Wasiq, Here's the summary of your Axis Bank Credit Card Transaction: "
+        "Transaction Amount: INR 100 spent on credit card no. XX9206. "
+        "Available Limit: INR 129893.14.",
+        subject="Axis Bank Alerts",
+        internal_date="1790951871000",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Axis Bank Alerts"},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, evidence = parsed
+    assert transaction.amountMinor == 10000
+    assert transaction.type == "DEBIT"
+    assert transaction.bank == "AXIS"
+    assert transaction.accountType == "CREDIT_CARD"
+    assert transaction.accountLast4 == "9206"
+    assert evidence.direction == "DEBIT"
