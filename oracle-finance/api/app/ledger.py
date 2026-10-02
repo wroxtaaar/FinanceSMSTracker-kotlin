@@ -97,6 +97,153 @@ def sync_evidence(e):
          e.direction,e.bankProvider,e.accountLast4,e.reference,e.contentHash,e.confidence,now_ms()))
         return before is None
 
+def sync_card_bill(bill):
+    """Record bill evidence and apply only the strongest confirmed bill amount.
+
+    Source precedence:
+      Gmail/full statement email or PDF > SMS > notification.
+    Lower-priority evidence is retained but cannot overwrite a stronger
+    conflicting bill amount.
+    """
+    source_type = str(bill.get("sourceType") or "").upper()
+    source_key = str(bill.get("sourceKey") or "")
+    bank = (bill.get("bank") or "").strip().upper() or None
+    last4 = (bill.get("accountLast4") or "").strip() or None
+    last2 = (bill.get("accountLast2") or "").strip() or None
+    amount = bill.get("amountMinor")
+    amount = int(amount) if amount is not None else None
+    observed_at = int(bill.get("timestamp") or now_ms())
+    confidence = float(bill.get("confidence") or 0.0)
+    if not source_key or amount is None or amount < 0:
+        return {"status":"IGNORED","reason":"missing_bill_amount_or_source"}
+
+    priority = {
+        "GMAIL": 300,
+        "GMAIL_STATEMENT_PDF": 300,
+        "SMS": 200,
+        "GMAIL_NOTIFICATION": 100,
+    }.get(source_type, 0)
+
+    with connection() as conn:
+        inserted = conn.execute(
+            """INSERT OR IGNORE INTO card_bill_evidence
+               (id,source_type,source_key,observed_at,amount_minor,currency,bank,
+                account_last4,account_last2,confidence,applied,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,0,?)""",
+            (
+                f"card-bill:{source_type}:{source_key}",
+                source_type,
+                source_key,
+                observed_at,
+                amount,
+                bill.get("currency") or "INR",
+                bank,
+                last4,
+                last2,
+                confidence,
+                now_ms(),
+            ),
+        ).rowcount
+
+        # Find the configured card. Prefer a full last-4 match; fall back to
+        # a unique visible last-two suffix from statement notifications.
+        account = None
+        if last4:
+            account = conn.execute(
+                """SELECT id,balance_minor,bill_balance_minor
+                   FROM accounts
+                   WHERE account_type='CREDIT_CARD' AND currency=?
+                     AND UPPER(TRIM(COALESCE(bank,'')))=?
+                     AND TRIM(COALESCE(last4,''))=?
+                   ORDER BY updated_at DESC LIMIT 1""",
+                (bill.get("currency") or "INR", bank or "", last4),
+            ).fetchone()
+
+        if not account and last2:
+            candidates = conn.execute(
+                """SELECT id,balance_minor,bill_balance_minor,last4
+                   FROM accounts
+                   WHERE account_type='CREDIT_CARD' AND currency=?
+                     AND UPPER(TRIM(COALESCE(bank,'')))=?
+                     AND substr(TRIM(COALESCE(last4,'')),-2)=?
+                   ORDER BY updated_at DESC""",
+                (bill.get("currency") or "INR", bank or "", last2),
+            ).fetchall()
+            if len(candidates) == 1:
+                account = candidates[0]
+
+        if not account:
+            return {"status":"REVIEW","reason":"card_not_found","bank":bank,"last4":last4,"last2":last2}
+
+        # Compare the strongest already-applied evidence for this exact card.
+        previous = conn.execute(
+            """SELECT e.source_type,e.amount_minor
+               FROM card_bill_evidence e
+               JOIN accounts a ON a.id=?
+               WHERE e.applied=1
+                 AND e.currency=?
+                 AND UPPER(TRIM(COALESCE(e.bank,'')))=?
+                 AND (
+                      (e.account_last4 IS NOT NULL AND TRIM(e.account_last4)=TRIM(a.last4))
+                      OR (e.account_last2 IS NOT NULL AND substr(TRIM(COALESCE(a.last4,'')),-2)=TRIM(e.account_last2))
+                 )
+               ORDER BY e.observed_at DESC
+               LIMIT 1""",
+            (account["id"], bill.get("currency") or "INR", bank or ""),
+        ).fetchone()
+
+        if previous:
+            previous_priority = {
+                "GMAIL": 300,
+                "GMAIL_STATEMENT_PDF": 300,
+                "SMS": 200,
+                "GMAIL_NOTIFICATION": 100,
+            }.get(str(previous["source_type"]).upper(), 0)
+
+            if amount != previous["amount_minor"] and priority < previous_priority:
+                return {
+                    "status":"RETAINED_LOWER_PRIORITY",
+                    "accountId":account["id"],
+                    "currentBillMinor":previous["amount_minor"],
+                    "receivedBillMinor":amount,
+                    "sourceType":source_type,
+                }
+
+            if amount != previous["amount_minor"] and priority == previous_priority:
+                # Same-tier disagreement is a review condition. Do not silently
+                # choose one source.
+                add_review(
+                    "CARD_BILL_CONFLICT",
+                    f"Card bill disagreement for {bank} {account['id']}: {previous['amount_minor']} vs {amount}",
+                )
+                return {
+                    "status":"REVIEW",
+                    "reason":"same_priority_bill_conflict",
+                    "accountId":account["id"],
+                }
+
+        bill_value = min(amount, int(account["balance_minor"]))
+        conn.execute(
+            """UPDATE accounts
+               SET bill_balance_minor=?, updated_at=?
+             WHERE id=?""",
+            (bill_value, now_ms(), account["id"]),
+        )
+        conn.execute(
+            """UPDATE card_bill_evidence
+               SET applied=1
+             WHERE source_type=? AND source_key=?""",
+            (source_type, source_key),
+        )
+
+        return {
+            "status":"APPLIED",
+            "accountId":account["id"],
+            "billBalanceMinor":bill_value,
+            "sourceType":source_type,
+        }
+
+
 def void_transaction(transaction_id):
     with connection() as conn:
         tx=conn.execute(
