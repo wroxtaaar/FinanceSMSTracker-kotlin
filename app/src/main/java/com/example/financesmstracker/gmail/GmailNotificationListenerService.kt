@@ -16,6 +16,8 @@ import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
 import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.integration.FinanceSyncClient
+import com.example.financesmstracker.integration.FinanceSyncBridge
+import com.example.financesmstracker.integration.SyncCardBill
 import com.example.financesmstracker.parser.ParserResult
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.util.HashUtil
@@ -123,6 +125,55 @@ class GmailNotificationListenerService : NotificationListenerService() {
 
         val payloadText = listOfNotNull(title, titleBig, text, bigText, subText, summary, textLines)
             .joinToString("\n")
+
+        // Statement emails are a separate evidence type. The notification
+        // may contain the card identity and statement wording but no amount
+        // (as happens with Gmail's compact notification in many cases). In that
+        // case immediately trigger the full Gmail/IMAP pass instead of treating
+        // the notification as an unrecognized transaction.
+        val cardBillNotification = CardBillNotificationParser.parse(
+            title,
+            payloadText,
+            null,
+            null
+        )
+        if (cardBillNotification != null) {
+            val contentHash = HashUtil.sha256(payloadText)
+            if (cardBillNotification.amountPaise != null) {
+                FinanceSyncBridge.enqueueCardBill(
+                    applicationContext,
+                    SyncCardBill(
+                        sourceType = "GMAIL_NOTIFICATION",
+                        sourceKey = "gmail-notification-card-bill:" + contentHash,
+                        timestamp = sbn.postTime,
+                        amountMinor = cardBillNotification.amountPaise,
+                        bank = cardBillNotification.bank,
+                        accountLastFour = cardBillNotification.accountLastFour,
+                        accountLastTwo = cardBillNotification.accountLastTwo,
+                        confidence = 0.90f
+                    )
+                )
+            }
+            NotificationAccessHelper.recordGmailNotificationParsed(
+                applicationContext,
+                parsed = true,
+                error = if (cardBillNotification.amountPaise == null)
+                    "Card statement detected; amount not present in notification, Gmail clarification triggered"
+                else
+                    null
+            )
+            Log.i(
+                TAG,
+                "CARD_BILL_GMAIL_NOTIFICATION -> bank=" + cardBillNotification.bank +
+                    ", last4=" + cardBillNotification.accountLastFour +
+                    ", last2=" + cardBillNotification.accountLastTwo +
+                    ", amount=" + cardBillNotification.amountPaise
+            )
+            notificationExecutor.execute {
+                triggerBackgroundGmailSync()
+            }
+            return
+        }
 
         if (GmailNotificationParser.parse(title, payloadText, null, null) == null) {
             NotificationAccessHelper.recordGmailNotificationParsed(
