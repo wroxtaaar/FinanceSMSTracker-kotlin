@@ -162,6 +162,60 @@ def test_card_direction_rules_are_opposite_of_bank_rules():
     assert balance == 55800
 
 
+def test_card_bill_and_active_spend_are_separate():
+    from app.ledger import sync_transaction
+
+    class T:
+        def __init__(self, id, typ, amount):
+            self.id = id
+            self.amountMinor = amount
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "CREDIT_CARD"
+            self.bank = "SBI"
+            self.merchantOrPayee = "TEST"
+            self.accountLastFour = "0065"
+            self.accountLast4 = "0065"
+            self.reference = None
+            self.timestamp = 1910000000000
+            self.category = "TRANSFER"
+            self.confidence = 0.98
+
+    set_balance(
+        "bill-card",
+        "SBI Card",
+        "INR",
+        "CREDIT_CARD",
+        "SBI",
+        "0065",
+        50000,
+        50000,
+    )
+
+    # A new purchase belongs to active/unbilled spend; it must not grow the bill.
+    sync_transaction(T("card-purchase", "DEBIT", 7000))
+
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT balance_minor, bill_balance_minor FROM accounts WHERE id='bill-card'"
+        ).fetchone()
+
+    assert row["balance_minor"] == 57000
+    assert row["bill_balance_minor"] == 50000
+
+    # Paying the bill reduces the bill bucket while leaving the active spend.
+    sync_transaction(T("card-payment", "CREDIT", 50000))
+
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT balance_minor, bill_balance_minor FROM accounts WHERE id='bill-card'"
+        ).fetchone()
+
+    assert row["balance_minor"] == 7000
+    assert row["bill_balance_minor"] == 0
+
+
 def test_bank_credit_increases_cash():
     from app.ledger import sync_transaction
 
