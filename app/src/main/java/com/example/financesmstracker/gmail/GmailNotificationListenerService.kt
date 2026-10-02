@@ -131,7 +131,12 @@ class GmailNotificationListenerService : NotificationListenerService() {
             val coordinator = CrossSourceMatchCoordinator(
                 repository = repository,
                 onEvidenceReconciled = { reconciledEvidence ->
-                    FinanceSyncBridge.enqueueEvidence(applicationContext, reconciledEvidence)
+                    // Notification evidence is local-first. Oracle currently
+                    // receives the canonical transaction; Gmail/SMS remain the
+                    // durable cross-source evidence paths.
+                    if (reconciledEvidence.sourceType != SourceType.GMAIL_NOTIFICATION) {
+                        FinanceSyncBridge.enqueueEvidence(applicationContext, reconciledEvidence)
+                    }
                 }
             )
 
@@ -183,9 +188,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 FinanceSyncBridge.enqueueCanonical(
                     applicationContext,
                     canonical,
-                    persistedEvidence?.takeIf {
-                        it.status == EvidenceStatus.MATCHED && it.transactionId == rowId
-                    }
+                    null
                 )
             }
 
