@@ -13,6 +13,7 @@ from .splitwise import (
     groups as splitwise_groups,
     sync_receivables,
 )
+from .sheets_snapshot import get_snapshot
 from .gmail_auth import (
     auth_url as gmail_auth_url,
     finish_callback as gmail_finish,
@@ -110,6 +111,10 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
             "voidedTransactions":voided,
             "cardBillResults":bill_results,
             "serverTime":int(datetime.now(timezone.utc).timestamp()*1000)}
+
+@app.get("/api/v1/sheets/snapshot")
+def sheets_snapshot(x_sheets_token: str = Header(default="")):
+    return get_snapshot(x_sheets_token)
 
 @app.get("/api/v1/accounts")
 def get_accounts(x_sync_token:str=Header(default="")):
