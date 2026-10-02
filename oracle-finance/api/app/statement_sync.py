@@ -209,7 +209,7 @@ def parse_icici_statement(pdf_bytes, key):
         # decimal money token in the transaction block rather than requiring it
         # to be the final characters.
         amount_matches = list(re.finditer(
-            r"(?P<amount>[0-9][0-9,]*\\.\\d{2})(?:\\s+(?P<credit>CR))?",
+            r"(?P<amount>[0-9][0-9,]*\.[0-9]{2})(?:\s+(?P<credit>CR))?",
             body,
             flags=re.IGNORECASE,
         ))
@@ -793,6 +793,12 @@ def parse_hdfc_credit_card_statement(pdf_bytes, key):
 
 def _hdfc_merchant(narration):
     compact = _compact(re.sub(r"(?i)\s+Value Dt\b.*$", "", narration))
+    # HDFC FT rows may put the beneficiary on the following line:
+    # "FT-A2A - - - 0.00 200.00 1,050.00" followed by
+    # "WBS SALARY ACCOUNT Value Dt ...". Keep the beneficiary text.
+    if compact.upper().startswith("FT-"):
+        compact = re.sub(r"(?i)^FT-[^\s]+(?:\s+-){1,3}\s*", "", compact).strip()
+        compact = re.sub(r"(?i)\s+Value Dt\b.*$", "", compact).strip()
     if compact.upper().startswith("UPI-"):
         body = compact[4:].strip()
         if "@" in body:
@@ -1029,7 +1035,7 @@ def process_statement_attachments(service, message):
                     currency=metadata["currency"],
                     type=row["type"],
                     paymentMethod=row["payment_method"],
-                    accountType=metadata["account_type"],
+                    accountType=metadata.get("account_type", "BANK_ACCOUNT"),
                     bank=metadata["bank"],
                     merchantOrPayee=row.get("merchant"),
                     accountLast4=metadata["account_last4"],
@@ -1040,7 +1046,11 @@ def process_statement_attachments(service, message):
                 )
 
                 with connection() as conn:
-                    existing_tx = _find_existing(conn, row, metadata)
+                    existing_tx = _find_existing(
+                        conn,
+                        row,
+                        {**metadata, "account_type": metadata.get("account_type", "BANK_ACCOUNT")},
+                    )
                     if existing_tx:
                         conn.execute(
                             """UPDATE transactions
