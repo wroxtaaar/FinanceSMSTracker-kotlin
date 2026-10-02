@@ -888,6 +888,80 @@ def parse_bank_email(message):
        contentHash=hashlib.sha256(combined.encode()).hexdigest(),confidence=min(score, 1.0))
     return t,e
 
+def _retry_pending_statement_messages(service, stats):
+    """Retry statement emails that are still pending, regardless of date query.
+
+    Normal incremental Gmail/IMAP syncs intentionally use a recent date window.
+    A statement can remain PENDING after a parser/password failure, however,
+    and that message may be older than the next incremental window. Retry only
+    statement messages already recorded as PENDING so older statements can
+    recover without broadening the normal mailbox search.
+    """
+    retried = 0
+
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, subject
+            FROM gmail_messages
+            WHERE status='PENDING'
+              AND (
+                  LOWER(COALESCE(subject,'')) LIKE '%statement%'
+                  OR LOWER(COALESCE(subject,'')) LIKE '%e-statement%'
+              )
+            ORDER BY internal_date DESC
+            LIMIT 50
+            """
+        ).fetchall()
+
+    for row in rows:
+        msg_id = row["id"]
+        try:
+            message = service.users().messages().get(
+                userId="me",
+                id=msg_id,
+                format="full",
+            ).execute()
+        except Exception as exc:
+            stats["statementErrors"].append(
+                {"messageId": msg_id, "error": str(exc)}
+            )
+            continue
+
+        retried += 1
+        statement_stats = process_statement_attachments(service, message)
+        stats["statementAttachmentsScanned"] += statement_stats["attachmentsScanned"]
+        stats["statementAttachmentsParsed"] += statement_stats["attachmentsParsed"]
+        stats["statementTransactionsAdded"] += statement_stats["transactionsAdded"]
+        stats["statementTransactionsMatched"] += statement_stats["transactionsMatched"]
+        stats["statementErrors"].extend(statement_stats["errors"])
+
+        with connection() as conn:
+            parsed_attachment = conn.execute(
+                """
+                SELECT 1
+                FROM gmail_attachments
+                WHERE message_id=?
+                  AND status='PARSED'
+                LIMIT 1
+                """,
+                (msg_id,),
+            ).fetchone()
+
+            if statement_stats["attachmentsParsed"] > 0 or parsed_attachment:
+                conn.execute(
+                    "UPDATE gmail_messages SET status='PARSED' WHERE id=?",
+                    (msg_id,),
+                )
+            elif statement_stats["attachmentsScanned"] > 0:
+                conn.execute(
+                    "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
+                    (msg_id,),
+                )
+
+    stats["pendingStatementRetries"] = retried
+    return retried
+
 def ingest_messages(service,query="newer_than:30d"):
     stats={
         "messagesScanned":0,
@@ -914,6 +988,11 @@ def ingest_messages(service,query="newer_than:30d"):
         + _repair_legacy_gmail_merchant_values(service)
         + _repair_self_transfer_gmail_merchants(service)
     )
+
+    # Retry previously discovered statement emails before the normal date-bounded
+    # mailbox scan. This is intentionally limited to PENDING statement rows,
+    # so historical statements do not require a full mailbox search.
+    _retry_pending_statement_messages(service, stats)
 
     # Gmail's API is paginated. IMAPService intentionally exposes only one
     # result page, so this loop also works with IMAP while consuming every
