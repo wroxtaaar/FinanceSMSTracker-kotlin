@@ -32,7 +32,7 @@ object GmailNotificationParser {
         """(?i)(?:INR|Rs\.?|₹)\s*([0-9][0-9,]*(?:\.\d{1,2})?)"""
     )
     private val lastFourRegex = Regex(
-        """(?i)(?:account|a/c)\s*(?:ending|no\.?|number)?\s*[:#-]?\s*(?:x{2,}|\*{2,})?\s*(\d{4})"""
+        """(?i)(?:(?:account|a/c)\s*(?:ending|no\.?|number)?|(?:credit\s+)?card\s*(?:ending|no\.?|number)?)\s*[:#-]?\s*(?:x{2,}|\*{2,})?\s*(\d{4})"""
     )
     private val referenceRegex = Regex(
         """(?i)(?:transaction\s+)?reference\s*(?:no\.?|number)?\s*[:#-]?\s*([A-Za-z0-9-]{6,})"""
