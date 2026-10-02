@@ -802,9 +802,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateNotificationAccessStatus() {
         val granted = NotificationAccessHelper.isNotificationAccessGranted(this)
-        if (granted) {
+        val connected = NotificationAccessHelper.isListenerConnected(this)
+        if (granted && connected) {
             textViewNotificationStatus.text = "Gmail notification trigger: Enabled"
             textViewNotificationStatus.setTextColor(Color.parseColor("#2E7D32"))
+            buttonOpenNotificationSettings.visibility = View.GONE
+        } else if (granted) {
+            textViewNotificationStatus.text = "Gmail notification trigger: Enabled (reconnecting...)"
+            textViewNotificationStatus.setTextColor(Color.parseColor("#EF6C00"))
             buttonOpenNotificationSettings.visibility = View.GONE
         } else {
             textViewNotificationStatus.text = "Gmail notification trigger: Disabled"
