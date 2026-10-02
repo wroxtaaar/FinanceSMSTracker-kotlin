@@ -1082,9 +1082,10 @@ def process_statement_attachments(service, message):
                     stats["transactionsMatched"] += 1
                     continue
 
-                sync_transaction(transaction, apply_balance=False)
-                with connection() as conn:
-                    apply_transaction_to_account(conn, transaction, timestamp)
+                # Use the normal ledger path so the statement transaction
+                # gets its balance adjustment exactly once. sync_transaction()
+                # is idempotent and INSERT OR IGNORE protects repeated imports.
+                sync_transaction(transaction)
 
                 sync_evidence(
                     SyncEvidenceModel(
