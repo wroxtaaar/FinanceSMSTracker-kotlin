@@ -53,6 +53,40 @@
             android:orientation="vertical"
             android:paddingBottom="16dp">
 
+
+            <TextView
+                android:id="@+id/textViewConflictSection"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Potential transaction mismatches"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/textViewConflictHelp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="These are notification/SMS pairs with the same amount and timing but conflicting bank, account, or reference details. Review them before any automatic correction."
+                android:textSize="13sp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyclerViewConflicts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:nestedScrollingEnabled="false" />
+
+            <TextView
+                android:id="@+id/textViewNoConflicts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="No potential transaction mismatches."
+                android:textSize="14sp"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/textViewEvidenceSection"
                 android:layout_width="wrap_content"
