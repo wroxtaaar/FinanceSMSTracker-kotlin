@@ -21,7 +21,11 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
 
     private fun wasClearedBefore(transaction: Transaction): Boolean {
         val clearedAt = localHistoryPrefs.getLong("cleared_at", 0L)
-        return clearedAt > 0L && transaction.timestamp <= clearedAt
+        if (clearedAt > 0L && transaction.timestamp <= clearedAt) return true
+
+        val clearedHashes =
+            localHistoryPrefs.getStringSet("cleared_sms_hashes", emptySet()) ?: emptySet()
+        return transaction.smsHash.isNotBlank() && transaction.smsHash in clearedHashes
     }
 
 
