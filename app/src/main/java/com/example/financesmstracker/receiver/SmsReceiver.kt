@@ -62,7 +62,7 @@ class SmsReceiver : BroadcastReceiver() {
                             setPackage(context.packageName)
                         }
                         context.sendBroadcast(updateIntent)
-                        return@runCatching
+                        return
                     }
 
                     // A credit-card statement SMS is a bill signal, not a card
@@ -98,7 +98,7 @@ class SmsReceiver : BroadcastReceiver() {
                             setPackage(context.packageName)
                         }
                         context.sendBroadcast(updateIntent)
-                        return@runCatching
+                        return
                     }
 
                     val parserManager = SmsParserManager()
