@@ -76,6 +76,10 @@ class MainActivity : AppCompatActivity() {
 
     private val oracleExecutor = Executors.newSingleThreadExecutor()
 
+    private val localHistoryPrefs by lazy {
+        getSharedPreferences("local_history_state", Context.MODE_PRIVATE)
+    }
+
     private val categories = listOf(
         "FOOD", "GROCERIES", "SHOPPING", "FUEL", "TRAVEL",
         "SUBSCRIPTION", "BILLS", "TRANSFER", "ATM",
@@ -253,6 +257,10 @@ class MainActivity : AppCompatActivity() {
         buttonClearLocalHistory.isEnabled = false
         oracleExecutor.execute {
             val cleared = repository.clearLocalHistory()
+            localHistoryPrefs.edit()
+                .putLong(KEY_LOCAL_HISTORY_CLEARED_AT, System.currentTimeMillis())
+                .apply()
+
             val queue = com.example.financesmstracker.integration.FinanceSyncQueue(this@MainActivity)
             val pending = queue.size()
             queue.clear()
@@ -849,20 +857,35 @@ class MainActivity : AppCompatActivity() {
 
             runOnUiThread {
                 result.onSuccess { transactions ->
+                    val clearedAt = localHistoryPrefs.getLong(KEY_LOCAL_HISTORY_CLEARED_AT, 0L)
                     var changed = 0
+
                     transactions.forEach { transaction ->
+                        // Clear Local History is intentionally local-only. Oracle
+                        // keeps Gmail processing history, but old Gmail ledger
+                        // rows must not repopulate the phone after a clear.
+                        if (clearedAt > 0L && transaction.timestamp <= clearedAt) {
+                            return@forEach
+                        }
+
                         val rowId = repository.upsertOracleGmailTransaction(transaction)
                         if (rowId != 0L) {
                             changed++
 
-                            // Gmail is the clarification pass. If it repaired or
-                            // enriched a notification/SMS transaction, push the
-                            // clarified canonical row back to Oracle.
+                            // A transaction created from Oracle's Gmail ledger is
+                            // a local mirror, not new financial evidence. Never
+                            // send that mirror back to Oracle or it can be treated
+                            // as a new transaction and apply the bank/card balance
+                            // again. If Gmail instead enriched an existing SMS or
+                            // notification row, that canonical local row is safe
+                            // to push back.
                             repository.getTransactionById(rowId)?.let { local ->
-                                FinanceSyncBridge.enqueueCanonical(
-                                    this@MainActivity,
-                                    local
-                                )
+                                if (!local.smsHash.startsWith("oracle:gmail:")) {
+                                    FinanceSyncBridge.enqueueCanonical(
+                                        this@MainActivity,
+                                        local
+                                    )
+                                }
                             }
                         }
                     }
@@ -1235,6 +1258,10 @@ class MainActivity : AppCompatActivity() {
         oracleExecutor.shutdownNow()
         super.onDestroy()
         dbHelper.close()
+    }
+
+    companion object {
+        private const val KEY_LOCAL_HISTORY_CLEARED_AT = "cleared_at"
     }
 
     private fun checkAndRequestSmsPermission() {
