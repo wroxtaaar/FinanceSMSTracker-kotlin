@@ -37,8 +37,7 @@ def _secret(name):
 def _statement_keys(bank):
     name = bank.upper()
     values = os.getenv(f"{name}_STATEMENT_SECRETS", "").strip()
-    keys = [item.strip() for item in re.split(r"[,
-]+", values) if item.strip()]
+    keys = [item.strip() for item in re.split(r"[,\n]+", values) if item.strip()]
     single = _secret(f"{name}_STATEMENT_SECRET")
     if single and single not in keys:
         keys.append(single)
