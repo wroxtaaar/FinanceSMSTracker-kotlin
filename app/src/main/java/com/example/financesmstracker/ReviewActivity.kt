@@ -20,6 +20,7 @@ import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.data.ReviewStatus
 import com.example.financesmstracker.data.TransactionRepository
 import com.example.financesmstracker.data.UnrecognizedSms
+import com.example.financesmstracker.data.TransactionConflict
 import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.CrossSourceMatcher
 import com.example.financesmstracker.evidence.MatchOutcome
@@ -30,6 +31,7 @@ import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.receiver.SmsReceiver
 import com.example.financesmstracker.ui.ReviewAdapter
 import com.example.financesmstracker.ui.UnrecognizedSmsAdapter
+import com.example.financesmstracker.ui.TransactionConflictAdapter
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.SimpleDateFormat
@@ -46,6 +48,9 @@ class ReviewActivity : AppCompatActivity() {
     private lateinit var unrecognizedAdapter: UnrecognizedSmsAdapter
     private lateinit var unrecognizedRecyclerView: RecyclerView
     private lateinit var emptyUnrecognizedText: TextView
+    private lateinit var conflictAdapter: TransactionConflictAdapter
+    private lateinit var conflictRecyclerView: RecyclerView
+    private lateinit var emptyConflictText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +64,8 @@ class ReviewActivity : AppCompatActivity() {
         emptyText = findViewById(R.id.textViewNoReviews)
         unrecognizedRecyclerView = findViewById(R.id.recyclerViewUnrecognized)
         emptyUnrecognizedText = findViewById(R.id.textViewNoUnrecognized)
+        conflictRecyclerView = findViewById(R.id.recyclerViewConflicts)
+        emptyConflictText = findViewById(R.id.textViewNoConflicts)
 
         adapter = ReviewAdapter(emptyList()) { evidence -> showEvidenceReview(evidence) }
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -71,6 +78,10 @@ class ReviewActivity : AppCompatActivity() {
         )
         unrecognizedRecyclerView.layoutManager = LinearLayoutManager(this)
         unrecognizedRecyclerView.adapter = unrecognizedAdapter
+
+        conflictAdapter = TransactionConflictAdapter(emptyList()) { conflict -> showConflictReview(conflict) }
+        conflictRecyclerView.layoutManager = LinearLayoutManager(this)
+        conflictRecyclerView.adapter = conflictAdapter
 
         findViewById<Button>(R.id.buttonRefreshReviews).setOnClickListener { loadReviews() }
     }
@@ -90,6 +101,42 @@ class ReviewActivity : AppCompatActivity() {
         unrecognizedAdapter.updateData(unrecognized)
         unrecognizedRecyclerView.visibility = if (unrecognized.isEmpty()) View.GONE else View.VISIBLE
         emptyUnrecognizedText.visibility = if (unrecognized.isEmpty()) View.VISIBLE else View.GONE
+
+        val conflicts = repository.getPotentialTransactionConflicts()
+        conflictAdapter.updateData(conflicts)
+        conflictRecyclerView.visibility = if (conflicts.isEmpty()) View.GONE else View.VISIBLE
+        emptyConflictText.visibility = if (conflicts.isEmpty()) View.VISIBLE else View.GONE
+    }
+
+    private fun showConflictReview(conflict: TransactionConflict) {
+        val first = conflict.first
+        val second = conflict.second
+        val firstLabel = transactionLabel(first)
+        val secondLabel = transactionLabel(second)
+
+        AlertDialog.Builder(this)
+            .setTitle("Transaction mismatch")
+            .setMessage(
+                "These two records look like the same payment but disagree on bank/account/reference.\n\n" +
+                    "Record 1:\n" + firstLabel + "\n\nRecord 2:\n" + secondLabel +
+                    "\n\nWhy flagged: " + conflict.reason +
+                    "\n\nKeep the record supported by the bank SMS/email and void the other."
+            )
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Keep Record 1") { _, _ -> voidConflictTransaction(second.id) }
+            .setPositiveButton("Keep Record 2") { _, _ -> voidConflictTransaction(first.id) }
+            .show()
+    }
+
+    private fun voidConflictTransaction(id: Long) {
+        val updated = repository.voidTransaction(id)
+        if (updated > 0) {
+            FinanceSyncBridge.enqueueVoidedTransaction(this, id)
+            Toast.makeText(this, "Wrong transaction voided and queued for Oracle sync", Toast.LENGTH_LONG).show()
+            loadReviews()
+        } else {
+            Toast.makeText(this, "Could not void transaction", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun dismissUnrecognizedSms(id: Long) {
