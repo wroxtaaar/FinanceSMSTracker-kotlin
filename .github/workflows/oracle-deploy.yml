@@ -109,9 +109,9 @@ jobs:
             set -e
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
             if grep -Eq '^GMAIL_ENABLED=true([[:space:]]*)$' .env; then
-              docker compose build --no-cache finance-api finance-worker
+              docker compose -f docker-compose.yml -f docker-compose.sheets.yml build --no-cache finance-api finance-worker finance-sheets
             else
-              docker compose build --no-cache finance-api
+              docker compose -f docker-compose.yml -f docker-compose.sheets.yml build --no-cache finance-api finance-sheets
             fi
 
       - name: 7. Start finance services
@@ -125,9 +125,9 @@ jobs:
             set -e
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
             if grep -Eq '^GMAIL_ENABLED=true([[:space:]]*)$' .env; then
-              docker compose --profile worker up -d finance-api finance-worker
+              docker compose -f docker-compose.yml -f docker-compose.sheets.yml --profile worker up -d finance-api finance-worker finance-sheets
             else
-              docker compose up -d finance-api
+              docker compose -f docker-compose.yml -f docker-compose.sheets.yml up -d finance-api finance-sheets
             fi
 
       - name: 8. Health check
@@ -142,4 +142,5 @@ jobs:
             cd ~/FinanceSMSTracker-kotlin/oracle-finance
             sleep 3
             curl --fail http://127.0.0.1:8090/health
-            docker compose ps
+            curl --fail http://127.0.0.1:8091/health
+            docker compose -f docker-compose.yml -f docker-compose.sheets.yml ps
