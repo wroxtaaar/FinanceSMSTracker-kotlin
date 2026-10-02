@@ -34,9 +34,21 @@ class SyncEvidence(BaseModel):
     bankProvider:Optional[str]=None; accountLast4:Optional[str]=None; reference:Optional[str]=None
     contentHash:Optional[str]=None; confidence:Optional[float]=None
 
+class SyncCardBill(BaseModel):
+    sourceType:str
+    sourceKey:str
+    timestamp:int
+    amountMinor:Optional[int]=None
+    currency:str="INR"
+    bank:Optional[str]=None
+    accountLast4:Optional[str]=None
+    accountLast2:Optional[str]=None
+    confidence:float=0.0
+
 class SyncRequest(BaseModel):
     version:int=Field(ge=1); transactions:list[SyncTransaction]=[]; evidence:list[SyncEvidence]=[]
     voidedTransactionIds:list[str]=[]
+    cardBills:list[SyncCardBill]=[]
 
 class BalanceRequest(BaseModel):
     id:str; name:str; currency:str="INR"; accountType:str; bank:Optional[str]=None; last4:Optional[str]=None
@@ -67,6 +79,20 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
     if payload.version!=1: raise HTTPException(400,"unsupported sync contract version")
     new_t=sum(sync_transaction(t) for t in payload.transactions)
     new_e=sum(sync_evidence(e) for e in payload.evidence)
+    bill_results=[]
+    for bill in payload.cardBills:
+        bill_results.append(sync_card_bill({
+            "sourceType": bill.sourceType,
+            "sourceKey": bill.sourceKey,
+            "timestamp": bill.timestamp,
+            "amountMinor": bill.amountMinor,
+            "currency": bill.currency,
+            "bank": bill.bank,
+            "accountLast4": bill.accountLast4,
+            "accountLast2": bill.accountLast2,
+            "confidence": bill.confidence,
+        }))
+
     voided=0
     for transaction_id in payload.voidedTransactionIds:
         result=void_transaction(transaction_id)
@@ -82,6 +108,7 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
             "duplicateTransactions":len(payload.transactions)-new_t,
             "duplicateEvidence":len(payload.evidence)-new_e,
             "voidedTransactions":voided,
+            "cardBillResults":bill_results,
             "serverTime":int(datetime.now(timezone.utc).timestamp()*1000)}
 
 @app.get("/api/v1/accounts")
