@@ -33,6 +33,11 @@ class FinanceSyncQueue(context: Context) {
     @Synchronized
     fun size(): Int = read().size
 
+    @Synchronized
+    fun clear() {
+        prefs.edit().putString(KEY_ITEMS, "[]").apply()
+    }
+
     private fun read(): List<String> {
         val raw = prefs.getString(KEY_ITEMS, "[]") ?: "[]"
         val array = JSONArray(raw)
