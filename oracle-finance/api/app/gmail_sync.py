@@ -1,7 +1,7 @@
 import base64, hashlib, html, os, re, time
 from email.utils import parseaddr
 from .db import connection
-from .ledger import sync_transaction,sync_evidence,add_review,apply_transaction_to_account,reconcile_duplicate_transaction
+from .ledger import sync_transaction,sync_evidence,add_review,apply_transaction_to_account,reconcile_duplicate_transaction,sync_card_bill
 from .main_models import SyncTransactionModel,SyncEvidenceModel
 from .statement_sync import process_statement_attachments
 
@@ -826,6 +826,70 @@ def _repair_legacy_gmail_merchant_values(service):
 
     return repaired
 
+def parse_card_bill_email(message):
+    """Extract a credit-card statement total from the full Gmail message.
+
+    This is deliberately separate from transaction parsing. A statement's
+    Total Amount Due is a bill snapshot, not a purchase/debit transaction.
+    """
+    payload=message.get("payload",{})
+    headers=_headers(payload)
+    subject=headers.get("subject","")
+    sender=_email_sender(headers)
+    text=_decode(payload)
+    combined=f"{subject}\n{text}"
+    lower=combined.lower()
+
+    if not re.search(r"(?i)\bstatement\b|\be[- ]?statement\b|\btotal\s+amount\s+due\b", combined):
+        return None
+
+    amount=None
+    amount_patterns=(
+        r"(?is)total\s+amount\s+due.{0,160}?(?:INR|Rs\.?|₹)\s*(?:\(?INR\)?\s*)?(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
+        r"(?is)total\s+amt\s*[:\-]?\s*(?:INR|Rs\.?|₹)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
+    )
+    for pattern in amount_patterns:
+        match=re.search(pattern, combined)
+        if match:
+            amount=int(round(float(match.group(1).replace(",",""))*100))
+            break
+    if amount is None or amount <= 0:
+        return None
+
+    bank=_recognized_bank(combined,sender)
+
+    # Statement subjects commonly expose only two visible digits (XX06/XX75).
+    # Prefer a full four-digit card number when it exists in the body.
+    card_match=re.search(
+        r"(?i)\b(?:credit\s+card|card)\s+(?:no\.?|number|ending(?:\s+in)?)\s*"
+        r"(?:X{1,8}|\*{1,8})?\s*[- ]?(\d{2,4})\b",
+        combined,
+    )
+    if not card_match:
+        card_match=re.search(
+            r"(?i)\bending\s+(?:X{1,8}|\*{1,8})?\s*(\d{2,4})\b",
+            subject,
+        )
+    if not card_match:
+        return None
+
+    visible=card_match.group(1)
+    last4=visible if len(visible)==4 else None
+    last2=visible[-2:]
+
+    return {
+        "sourceType":"GMAIL",
+        "sourceKey":"gmail-card-bill:"+message["id"],
+        "timestamp":int(message.get("internalDate","0")),
+        "amountMinor":amount,
+        "currency":"INR",
+        "bank":bank,
+        "accountLast4":last4,
+        "accountLast2":last2,
+        "confidence":0.99,
+    }
+
+
 def parse_bank_email(message):
     payload=message.get("payload",{})
     headers=_headers(payload)
@@ -1084,6 +1148,14 @@ def ingest_messages(service,query="newer_than:30d"):
             message=service.users().messages().get(
                 userId="me",id=msg_id,format="full"
             ).execute()
+
+            bill_from_email = parse_card_bill_email(message)
+            if bill_from_email:
+                bill_result = sync_card_bill(bill_from_email)
+                stats.setdefault("cardBillDetected", 0)
+                stats["cardBillDetected"] += 1
+                stats.setdefault("cardBillResults", [])
+                stats["cardBillResults"].append(bill_result)
 
             statement_stats = process_statement_attachments(service, message)
             stats["statementAttachmentsScanned"] += statement_stats["attachmentsScanned"]
