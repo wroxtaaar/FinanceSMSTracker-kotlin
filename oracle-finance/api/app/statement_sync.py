@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 
 from .db import connection
-from .ledger import apply_transaction_to_account, sync_evidence, sync_transaction
+from .ledger import apply_transaction_to_account, sync_evidence, sync_transaction, sync_card_bill
 from .main_models import SyncEvidenceModel, SyncTransactionModel
 
 
@@ -180,6 +180,19 @@ def _icici_payment_method(detail):
     if any(token in value for token in ("CASH", "ATM")):
         return "CASH"
     return "CARD"
+
+
+def _extract_statement_bill_amount(text):
+    normalized = re.sub(r"\s+", " ", text or "")
+    patterns = (
+        r"(?is)total\s+amount\s+due.{0,180}?(?:INR|Rs\.?|₹)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
+        r"(?is)total\s+amt\s*[:\-]?\s*(?:INR|Rs\.?|₹)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, normalized)
+        if match:
+            return _minor(match.group(1))
+    return None
 
 
 def parse_icici_statement(pdf_bytes, key):
@@ -1022,6 +1035,26 @@ def process_statement_attachments(service, message):
 
             if parse_error is not None:
                 raise parse_error
+
+            # A statement PDF is the strongest bill source when the email
+            # body omitted the total. The transaction parser and bill parser
+            # are intentionally separate: the printed Total Amount Due must
+            # never become a fake card purchase.
+            if metadata.get("account_type") == "CREDIT_CARD":
+                pdf_text = _pdf_text(pdf_bytes, key)
+                bill_amount = _extract_statement_bill_amount(pdf_text)
+                if bill_amount is not None:
+                    sync_card_bill({
+                        "sourceType": "GMAIL_STATEMENT_PDF",
+                        "sourceKey": attachment_id,
+                        "timestamp": int(message.get("internalDate", "0")),
+                        "amountMinor": bill_amount,
+                        "currency": metadata.get("currency", "INR"),
+                        "bank": metadata.get("bank"),
+                        "accountLast4": metadata.get("account_last4"),
+                        "accountLast2": metadata.get("account_last2"),
+                        "confidence": 1.0,
+                    })
 
             for index, row in enumerate(rows):
                 timestamp = int(row["date"].timestamp() * 1000)
