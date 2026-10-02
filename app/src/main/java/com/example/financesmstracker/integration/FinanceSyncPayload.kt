@@ -11,7 +11,8 @@ object FinanceSyncPayload {
     fun build(
         transactions: List<SyncTransaction>,
         evidence: List<SyncEvidence>,
-        voidedTransactionIds: List<Long> = emptyList()
+        voidedTransactionIds: List<Long> = emptyList(),
+        cardBills: List<SyncCardBill> = emptyList()
     ): String {
         val out = StringBuilder(256)
         out.append("{")
