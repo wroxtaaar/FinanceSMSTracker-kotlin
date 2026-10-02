@@ -3,8 +3,8 @@ package com.example.financesmstracker.gmail
 /**
  * Identifies Gmail notifications that are likely to be bank emails.
  *
- * The notification is only a trigger for an Oracle Gmail fetch; it is never
- * parsed into a transaction on the phone.
+ * The notification is the fast first-pass trigger and may be parsed into an
+ * immediate local transaction. Gmail/IMAP remains the clarification source.
  */
 object GmailNotificationClassifier {
     private val bankHints = listOf(
