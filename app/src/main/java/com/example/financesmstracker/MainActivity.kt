@@ -72,6 +72,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var buttonEditSplitwise: Button
     private lateinit var buttonEditBankAccounts: Button
     private lateinit var buttonEditCreditCards: Button
+    private lateinit var buttonClearLocalHistory: Button
 
     private val oracleExecutor = Executors.newSingleThreadExecutor()
 
@@ -152,6 +153,7 @@ class MainActivity : AppCompatActivity() {
         buttonEditSplitwise = findViewById(R.id.buttonEditSplitwise)
         buttonEditBankAccounts = findViewById(R.id.buttonEditBankAccounts)
         buttonEditCreditCards = findViewById(R.id.buttonEditCreditCards)
+        buttonClearLocalHistory = findViewById(R.id.buttonClearLocalHistory)
 
         buttonEditSplitwise.setOnClickListener {
             showManualSplitwiseDialog()
@@ -183,6 +185,10 @@ class MainActivity : AppCompatActivity() {
 
         buttonReviewReconcile.setOnClickListener {
             startActivity(Intent(this, ReviewActivity::class.java))
+        }
+
+        buttonClearLocalHistory.setOnClickListener {
+            showClearLocalHistoryDialog()
         }
 
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -223,6 +229,43 @@ class MainActivity : AppCompatActivity() {
         updateNotificationAccessStatus()
         loadOracleSummary()
         syncOracleGmailTransactions()
+    }
+
+    private fun showClearLocalHistoryDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Clear Local History?")
+            .setMessage(
+                "This removes transactions, local evidence, and unrecognized SMS records from this phone. " +
+                    "Pending local sync payloads will also be discarded. Oracle data, account settings, " +
+                    "Gmail processing history, and category memory are not changed."
+            )
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Clear") { _, _ ->
+                clearLocalHistory()
+            }
+            .show()
+    }
+
+    private fun clearLocalHistory() {
+        buttonClearLocalHistory.isEnabled = false
+        oracleExecutor.execute {
+            val cleared = repository.clearLocalHistory()
+            val queue = com.example.financesmstracker.integration.FinanceSyncQueue(this@MainActivity)
+            val pending = queue.size()
+            queue.clear()
+
+            runOnUiThread {
+                loadTransactions()
+                updateReviewCount()
+                buttonClearLocalHistory.isEnabled = true
+                Toast.makeText(
+                    this@MainActivity,
+                    "Cleared " + cleared.transactions +
+                        " transactions and " + pending + " pending sync payloads",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 
     private fun loadOracleAccounts() {
