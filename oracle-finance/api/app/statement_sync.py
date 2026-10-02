@@ -1095,6 +1095,48 @@ def process_statement_attachments(service, message):
                     with connection() as conn:
                         apply_transaction_to_account(conn, transaction, timestamp)
 
+                        # Verify the ledger adjustment exists. Statement imports
+                        # must never silently leave the account balance unchanged.
+                        adjustment = conn.execute(
+                            "SELECT 1 FROM balance_adjustments WHERE transaction_id=?",
+                            (transaction.id,),
+                        ).fetchone()
+                        if adjustment is None:
+                            account = conn.execute(
+                                """SELECT id FROM accounts
+                                   WHERE account_type=? AND currency=?
+                                     AND UPPER(TRIM(COALESCE(bank,'')))=?
+                                     AND TRIM(COALESCE(last4,''))=?
+                                   LIMIT 1""",
+                                (
+                                    transaction.accountType,
+                                    transaction.currency,
+                                    (transaction.bank or "").strip().upper(),
+                                    (transaction.accountLast4 or "").strip(),
+                                ),
+                            ).fetchone()
+                            if account:
+                                delta = (
+                                    -transaction.amountMinor
+                                    if transaction.accountType == "BANK_ACCOUNT"
+                                    and transaction.type == "DEBIT"
+                                    else transaction.amountMinor
+                                    if transaction.accountType == "BANK_ACCOUNT"
+                                    else transaction.amountMinor
+                                    if transaction.type == "DEBIT"
+                                    else -transaction.amountMinor
+                                )
+                                conn.execute(
+                                    """INSERT INTO balance_adjustments
+                                       (transaction_id,account_id,delta_minor,applied_at)
+                                       VALUES(?,?,?,?)""",
+                                    (transaction.id, account["id"], delta, timestamp),
+                                )
+                                conn.execute(
+                                    "UPDATE accounts SET balance_minor=balance_minor+?, updated_at=? WHERE id=?",
+                                    (delta, timestamp, account["id"]),
+                                )
+
                 sync_evidence(
                     SyncEvidenceModel(
                         id=evidence_id,
