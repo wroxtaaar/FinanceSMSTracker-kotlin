@@ -133,6 +133,26 @@ def init_db():
              WHERE opening_balance_minor IS NULL"""
         )
 
+        # Keep the configured credit-card roster available in the ledger even
+        # before the user enters the opening/outstanding balance. INSERT OR
+        # IGNORE makes this safe on every startup and preserves existing values.
+        configured_cards = [
+            ("icici-card-8001", "ICICI Credit Card ...8001", "INR", "CREDIT_CARD", "ICICI", "8001"),
+            ("hdfc-card-5304", "HDFC Credit Card ...5304", "INR", "CREDIT_CARD", "HDFC", "5304"),
+            ("sbi-card-7345", "SBI Credit Card ...7345", "INR", "CREDIT_CARD", "SBI", "7345"),
+        ]
+        now = __import__("time").time()
+        now_ms = int(now * 1000)
+        for account_id, name, currency, account_type, bank, last4 in configured_cards:
+            conn.execute(
+                """INSERT OR IGNORE INTO accounts(
+                    id,name,currency,account_type,bank,last4,opening_balance_minor,
+                    balance_minor,bill_balance_minor,updated_at
+                ) VALUES(?,?,?,?,?,?,0,0,0,?)""",
+                (account_id, name, currency, account_type, bank, last4, now_ms),
+            )
+
+
         evidence_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(evidence)").fetchall()
         }
