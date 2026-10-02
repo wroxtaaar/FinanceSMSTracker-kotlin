@@ -227,6 +227,9 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         loadTransactions()
         updateNotificationAccessStatus()
+        if (NotificationAccessHelper.isNotificationAccessGranted(this)) {
+            NotificationAccessHelper.requestRebind(this)
+        }
         loadOracleSummary()
         syncOracleGmailTransactions()
     }
@@ -804,7 +807,13 @@ class MainActivity : AppCompatActivity() {
         val granted = NotificationAccessHelper.isNotificationAccessGranted(this)
         val connected = NotificationAccessHelper.isListenerConnected(this)
         if (granted && connected) {
-            textViewNotificationStatus.text = "Gmail notification trigger: Enabled"
+            val lastTitle = NotificationAccessHelper.lastGmailNotificationTitle(this)
+            val detail = if (NotificationAccessHelper.lastGmailNotificationAt(this) > 0L) {
+                " • last Gmail: " + lastTitle.ifBlank { "received" }
+            } else {
+                " • no Gmail event yet"
+            }
+            textViewNotificationStatus.text = "Gmail notification trigger: Enabled" + detail
             textViewNotificationStatus.setTextColor(Color.parseColor("#2E7D32"))
             buttonOpenNotificationSettings.visibility = View.GONE
         } else if (granted) {
