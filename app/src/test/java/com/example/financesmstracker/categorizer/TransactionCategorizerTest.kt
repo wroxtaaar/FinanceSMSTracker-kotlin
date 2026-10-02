@@ -91,9 +91,9 @@ class TransactionCategorizerTest {
     }
 
     @Test
-    fun testDefaultNonUpiToOther() {
+    fun testDefaultNonUpiToGroceries() {
         val res = ParserResult(isTransaction = true, paymentMethod = PaymentMethod.CARD)
-        assertEquals("OTHER", TransactionCategorizer.categorize(res, "Unknown transaction"))
+        assertEquals("GROCERIES", TransactionCategorizer.categorize(res, "Unknown transaction"))
     }
 
     @Test
