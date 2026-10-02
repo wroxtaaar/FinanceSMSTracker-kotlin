@@ -46,7 +46,7 @@ def apply_transaction_to_account(conn, t, applied_at):
     last4=(t.accountLast4 or "").strip()
 
     query="""
-        SELECT id, balance_minor, bill_balance_minor
+        SELECT id, balance_minor, bill_balance_minor, balance_reconciled_at
         FROM accounts
         WHERE account_type=?
           AND currency=?
@@ -57,6 +57,14 @@ def apply_transaction_to_account(conn, t, applied_at):
     """
     account=conn.execute(query,(t.accountType,t.currency,bank,last4)).fetchone()
     if not account:
+        return
+
+    # A manual balance edit is a reconciliation point. Historical evidence
+    # discovered after that point must not retroactively change the reconciled
+    # current balance. Transactions dated after the reconciliation continue to
+    # move the balance normally.
+    reconciled_at = int(account["balance_reconciled_at"] or 0)
+    if reconciled_at and int(t.timestamp) <= reconciled_at:
         return
 
     if t.accountType=="BANK_ACCOUNT":
@@ -353,10 +361,15 @@ def set_balance(account_id,name,currency,account_type,bank,last4,balance_minor,b
         else:
             bill_value = 0
 
+        # Manual entry is an explicit reconciliation of the live balance.
+        # Preserve the transaction-derived opening snapshot, but establish a
+        # timestamp so transactions discovered later with older event times do
+        # not retroactively change this manually verified balance.
         opening_balance=balance_minor-adjustment_total
+        reconciled_at=now_ms()
         conn.execute("""INSERT INTO accounts(
-            id,name,currency,account_type,bank,last4,opening_balance_minor,balance_minor,bill_balance_minor,updated_at
-        ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            id,name,currency,account_type,bank,last4,opening_balance_minor,balance_minor,bill_balance_minor,balance_reconciled_at,updated_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
             name=excluded.name,
             currency=excluded.currency,
@@ -366,8 +379,9 @@ def set_balance(account_id,name,currency,account_type,bank,last4,balance_minor,b
             opening_balance_minor=excluded.opening_balance_minor,
             balance_minor=excluded.balance_minor,
             bill_balance_minor=excluded.bill_balance_minor,
+            balance_reconciled_at=excluded.balance_reconciled_at,
             updated_at=excluded.updated_at""",
-        (account_id,name,currency,account_type,bank,last4,opening_balance,balance_minor,bill_value,now_ms()))
+        (account_id,name,currency,account_type,bank,last4,opening_balance,balance_minor,bill_value,reconciled_at,reconciled_at))
 
 def add_receivable(item):
     with connection() as conn:
