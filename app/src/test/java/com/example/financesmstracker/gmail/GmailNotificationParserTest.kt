@@ -53,7 +53,7 @@ class GmailNotificationParserTest {
     fun parsesAxisCreditCardSpendNotificationAsDebit() {
         val result = GmailNotificationParser.parse(
             "Axis Bank Alerts",
-            "INR 100 spent on credit card no. XX9206 02-10-2026",
+            "INR 100 spent on credit card no. XX9206\n02-10-2026\nFurt shop\nAvl Limit: INR 129893.14",
             null,
             null
         )
