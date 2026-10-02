@@ -599,27 +599,88 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
             val localId = resolvedLocal.first
             val localMerchant = resolvedLocal.second
 
-            val remoteMerchant = transaction.merchantOrPayee?.trim()
-                ?.takeIf { it.isNotBlank() }
-                ?.takeIf { !it.equals("null", ignoreCase = true) }
-                ?.takeIf { !it.equals("none", ignoreCase = true) }
-
-            val merchantNeedsRepair =
-                localMerchant.isNullOrBlank() ||
-                    localMerchant.equals("null", ignoreCase = true) ||
-                    localMerchant.equals("none", ignoreCase = true)
+            val localDetails = db.query(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                arrayOf(
+                    FinanceDatabaseHelper.COLUMN_BANK,
+                    FinanceDatabaseHelper.COLUMN_PAYEE_ID,
+                    FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
+                    FinanceDatabaseHelper.COLUMN_REF_NUMBER,
+                    FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD,
+                    FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE,
+                    FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE
+                ),
+                FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                arrayOf(localId.toString()),
+                null,
+                null,
+                null,
+                "1"
+            ).use {
+                if (it.moveToFirst()) {
+                    arrayOf(
+                        it.getString(0),
+                        it.getString(1),
+                        it.getString(2),
+                        it.getString(3),
+                        it.getString(4),
+                        it.getString(5),
+                        it.getFloat(6)
+                    )
+                } else {
+                    null
+                }
+            }
 
             var changed = false
-            if (merchantNeedsRepair && remoteMerchant != null) {
-                val merchantValues = ContentValues().apply {
-                    put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, remoteMerchant)
+            if (localDetails != null) {
+                val values = ContentValues()
+                fun isBlankLike(value: String?): Boolean =
+                    value.isNullOrBlank() ||
+                        value.equals("null", ignoreCase = true) ||
+                        value.equals("none", ignoreCase = true)
+
+                val remoteMerchant = transaction.merchantOrPayee?.trim()
+                    ?.takeIf { !isBlankLike(it) }
+
+                if (isBlankLike(localMerchant) && remoteMerchant != null) {
+                    values.put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, remoteMerchant)
                 }
-                changed = db.update(
-                    FinanceDatabaseHelper.TABLE_TRANSACTIONS,
-                    merchantValues,
-                    FinanceDatabaseHelper.COLUMN_ID + " = ?",
-                    arrayOf(localId.toString())
-                ) > 0
+                if (isBlankLike(localDetails[0] as String?) && !transaction.bank.isNullOrBlank()) {
+                    values.put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
+                }
+                if (isBlankLike(localDetails[1] as String?) && !transaction.merchantOrPayee.isNullOrBlank()) {
+                    values.put(FinanceDatabaseHelper.COLUMN_PAYEE_ID, transaction.merchantOrPayee)
+                }
+                if (isBlankLike(localDetails[2] as String?) && !transaction.accountLast4.isNullOrBlank()) {
+                    values.put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLast4)
+                }
+                if (isBlankLike(localDetails[3] as String?) && !transaction.reference.isNullOrBlank()) {
+                    values.put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, transaction.reference)
+                }
+                if ((localDetails[4] as String?).isNullOrBlank() ||
+                    (localDetails[4] as String?).equals("UNKNOWN", ignoreCase = true)
+                ) {
+                    values.put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod)
+                }
+                if ((localDetails[5] as String?).isNullOrBlank() ||
+                    (localDetails[5] as String?).equals("UNKNOWN", ignoreCase = true)
+                ) {
+                    values.put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType)
+                }
+                val localConfidence = (localDetails[6] as Float?) ?: 0f
+                if (transaction.confidence > localConfidence) {
+                    values.put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, transaction.confidence)
+                }
+
+                if (values.size() > 0) {
+                    changed = db.update(
+                        FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                        values,
+                        FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                        arrayOf(localId.toString())
+                    ) > 0
+                }
             }
 
             if (existingRemoteId != null && existingRemoteId != localId) {
