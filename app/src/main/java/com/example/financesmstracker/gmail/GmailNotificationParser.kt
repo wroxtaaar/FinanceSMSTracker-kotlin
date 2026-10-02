@@ -60,9 +60,13 @@ object GmailNotificationParser {
 
         val lower = haystack.lowercase()
 
+        // Debit must win when a credit-card purchase says "spent on credit card".
+        // The word "credit" by itself is not proof of a credit transaction.
         val direction = when {
-            Regex("""\b(?:credited|credit|received|deposited)\b""").containsMatchIn(lower) -> TransactionType.CREDIT
-            Regex("""\b(?:debited|debit|paid|withdrawn|spent)\b""").containsMatchIn(lower) -> TransactionType.DEBIT
+            Regex("""\b(?:debited|debit|paid|withdrawn|spent|purchase|charged)\b""").containsMatchIn(lower) ->
+                TransactionType.DEBIT
+            Regex("""\b(?:credited|received|deposited)\b""").containsMatchIn(lower) ->
+                TransactionType.CREDIT
             else -> TransactionType.UNKNOWN
         }
 
