@@ -32,6 +32,7 @@ def apply_transaction_to_account(conn, t, applied_at):
           AND currency=?
           AND UPPER(TRIM(COALESCE(bank,'')))=?
           AND TRIM(COALESCE(last4,''))=?
+        ORDER BY updated_at DESC
         LIMIT 1
     """
     account=conn.execute(query,(t.accountType,t.currency,bank,last4)).fetchone()
