@@ -239,7 +239,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
         val sourceKey = "app-notification:card-bill:" + contentHash
 
         val dbHelper = FinanceDatabaseHelper(applicationContext)
-        val repository = TransactionRepository(dbHelper)
+        val repository = TransactionRepository(dbHelper, applicationContext)
 
         try {
             val evidence = SourceEvidence(
@@ -372,7 +372,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
         val sourceKey = "gmail-notification:" + contentHash
 
         val dbHelper = FinanceDatabaseHelper(applicationContext)
-        val repository = TransactionRepository(dbHelper)
+        val repository = TransactionRepository(dbHelper, applicationContext)
 
         try {
             val parserResult = ParserResult(
@@ -521,7 +521,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
                     FinanceSyncClient(applicationContext).fetchGmailTransactions()
                         .onSuccess { transactions ->
                             val dbHelper = FinanceDatabaseHelper(applicationContext)
-                            val repository = TransactionRepository(dbHelper)
+                            val repository = TransactionRepository(dbHelper, applicationContext)
                             try {
                                 transactions.forEach { remote ->
                                     val rowId = repository.upsertOracleGmailTransaction(remote)
