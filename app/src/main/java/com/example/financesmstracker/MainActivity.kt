@@ -1205,6 +1205,14 @@ class MainActivity : AppCompatActivity() {
                 selectedCategory
             )
 
+            // Category changes are ledger-affecting because Splitwise uses
+            // OTHER as the explicit opt-out. Push the updated existing row to
+            // Oracle so it can add/remove this transaction's Splitwise share
+            // without applying the bank/card balance a second time.
+            repository.getTransactionById(tx.id)?.let { updatedTransaction ->
+                FinanceSyncBridge.enqueueCategoryUpdate(this, updatedTransaction)
+            }
+
             if (
                 hasStableMemoryKey &&
                 checkboxRememberPayee.isChecked &&
