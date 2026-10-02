@@ -506,3 +506,55 @@ def test_voided_transactions_are_hidden_from_list():
     void_transaction("void-hidden")
 
     assert not any(row["id"] == "void-hidden" for row in list_transactions())
+
+def test_splitwise_increases_for_non_other_debits_only():
+    from app.ledger import sync_transaction, get_manual_splitwise_total
+
+    class T:
+        def __init__(self, id, typ, category, amount):
+            self.id = id
+            self.amountMinor = amount
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = "HDFC"
+            self.merchantOrPayee = "TEST"
+            self.accountLast4 = "1234"
+            self.reference = None
+            self.timestamp = 2200000000000
+            self.category = category
+            self.confidence = 0.95
+
+    sync_transaction(T("splitwise-food", "DEBIT", "FOOD", 2500))
+    sync_transaction(T("splitwise-other", "DEBIT", "OTHER", 9000))
+    sync_transaction(T("splitwise-credit", "CREDIT", "FOOD", 7000))
+
+    assert get_manual_splitwise_total("INR") == 2500
+
+
+def test_voiding_splitwise_debit_reverses_its_contribution():
+    from app.ledger import sync_transaction, void_transaction, get_manual_splitwise_total
+
+    class T:
+        id = "splitwise-void"
+        amountMinor = 3300
+        currency = "INR"
+        type = "DEBIT"
+        paymentMethod = "UPI"
+        accountType = "BANK_ACCOUNT"
+        bank = "HDFC"
+        merchantOrPayee = "SELF TRANSFER"
+        accountLast4 = "1234"
+        reference = None
+        timestamp = 2200000001000
+        category = "TRANSFER"
+        confidence = 0.95
+
+    sync_transaction(T())
+    assert get_manual_splitwise_total("INR") == 3300
+
+    result = void_transaction("splitwise-void")
+    assert result["status"] == "VOIDED"
+    assert get_manual_splitwise_total("INR") == 0
+
