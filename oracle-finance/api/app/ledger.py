@@ -212,9 +212,17 @@ def sync_card_bill(bill):
             if amount != previous["amount_minor"] and priority == previous_priority:
                 # Same-tier disagreement is a review condition. Do not silently
                 # choose one source.
-                add_review(
-                    "CARD_BILL_CONFLICT",
-                    f"Card bill disagreement for {bank} {account['id']}: {previous['amount_minor']} vs {amount}",
+                review_id = "CARD_BILL_CONFLICT:" + account["id"] + ":" + str(observed_at)
+                conn.execute(
+                    """INSERT OR IGNORE INTO review_queue
+                       (id,kind,transaction_id,evidence_id,reason,status,created_at)
+                       VALUES(?,?,NULL,NULL,?,'OPEN',?)""",
+                    (
+                        review_id,
+                        "CARD_BILL_CONFLICT",
+                        f"Card bill disagreement for {bank} {account['id']}: {previous['amount_minor']} vs {amount}",
+                        now_ms(),
+                    ),
                 )
                 return {
                     "status":"REVIEW",
