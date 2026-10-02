@@ -558,3 +558,37 @@ def test_voiding_splitwise_debit_reverses_its_contribution():
     assert result["status"] == "VOIDED"
     assert get_manual_splitwise_total("INR") == 0
 
+
+def test_category_edit_updates_splitwise_contribution():
+    from app.ledger import sync_transaction, get_manual_splitwise_total
+
+    class T:
+        id = "category-edit"
+        amountMinor = 4200
+        currency = "INR"
+        type = "DEBIT"
+        paymentMethod = "CARD"
+        accountType = "BANK_ACCOUNT"
+        bank = "HDFC"
+        merchantOrPayee = "TEST"
+        accountLast4 = "4321"
+        reference = None
+        timestamp = 2300000000000
+        category = "OTHER"
+        confidence = 0.95
+
+    set_balance("category-edit-account", "Category Edit", "INR", "BANK_ACCOUNT", "HDFC", "4321", 100000)
+
+    # Original transaction is explicitly excluded from Splitwise.
+    sync_transaction(T())
+    assert get_manual_splitwise_total("INR") is None
+
+    # Changing it to any non-OTHER debit category must add its full amount.
+    T.category = "GROCERIES"
+    assert sync_transaction(T()) is False
+    assert get_manual_splitwise_total("INR") == 4200
+
+    # Changing it back to OTHER must remove that contribution.
+    T.category = "OTHER"
+    assert sync_transaction(T()) is False
+    assert get_manual_splitwise_total("INR") == 0
