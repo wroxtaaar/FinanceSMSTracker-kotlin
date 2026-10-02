@@ -20,6 +20,67 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
     fun insertTransaction(transaction: Transaction): Long {
         val db = dbHelper.writableDatabase
 
+        // A Gmail notification can arrive before the bank SMS. When the SMS
+        // arrives later, reuse the notification transaction instead of creating
+        // a second canonical row.
+        if (!transaction.smsHash.startsWith("notification:")) {
+            val notificationCandidates = db.query(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                arrayOf(
+                    FinanceDatabaseHelper.COLUMN_ID,
+                    FinanceDatabaseHelper.COLUMN_BANK,
+                    FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
+                    FinanceDatabaseHelper.COLUMN_REF_NUMBER
+                ),
+                FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ? AND " +
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
+                    "ABS(" + FinanceDatabaseHelper.COLUMN_TIMESTAMP + " - ?) <= ?",
+                arrayOf(
+                    "notification:%",
+                    "ACTIVE",
+                    transaction.amountPaise.toString(),
+                    transaction.currency,
+                    transaction.transactionType.name,
+                    transaction.timestamp.toString(),
+                    (2L * 60L * 60L * 1000L).toString()
+                ),
+                null,
+                null,
+                FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
+                "20"
+            )
+
+            notificationCandidates.use {
+                while (it.moveToNext()) {
+                    val notificationBank = it.getString(1)
+                    val notificationLast4 = it.getString(2)
+                    val notificationReference = it.getString(3)
+
+                    val bankCompatible =
+                        notificationBank.isNullOrBlank() ||
+                            transaction.bank.isNullOrBlank() ||
+                            notificationBank.equals(transaction.bank, ignoreCase = true)
+
+                    val last4Compatible =
+                        notificationLast4.isNullOrBlank() ||
+                            transaction.accountLastFour.isNullOrBlank() ||
+                            notificationLast4 == transaction.accountLastFour
+
+                    val referenceCompatible =
+                        notificationReference.isNullOrBlank() ||
+                            transaction.refNumber.isNullOrBlank() ||
+                            notificationReference.equals(transaction.refNumber, ignoreCase = true)
+
+                    if (bankCompatible && last4Compatible && referenceCompatible) {
+                        return it.getLong(0)
+                    }
+                }
+            }
+        }
+
         val values = ContentValues().apply {
             put(FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE, transaction.amountPaise)
             put(FinanceDatabaseHelper.COLUMN_CURRENCY, transaction.currency)
