@@ -2,7 +2,6 @@ package com.example.financesmstracker.gmail
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import import org.junit.Assert.assertNull
 import org.junit.Test
 
 class CardBillNotificationParserTest {
