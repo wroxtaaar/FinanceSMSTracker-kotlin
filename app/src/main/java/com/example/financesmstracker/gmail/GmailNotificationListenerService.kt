@@ -257,6 +257,11 @@ class GmailNotificationListenerService : NotificationListenerService() {
     }
 
     private fun processNotificationSafely(sbn: StatusBarNotification) {
+        if (sbn.packageName == CRED_PACKAGE) {
+            processCardBillNotificationSafely(sbn)
+            return
+        }
+
         val extras = sbn.notification.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
         val titleBig = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
