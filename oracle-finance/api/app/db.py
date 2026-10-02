@@ -92,6 +92,13 @@ def connection():
     # snapshot service while leaving the normal API/worker behavior unchanged.
     read_only = os.getenv("DATABASE_READ_ONLY", "").strip().lower() in {"1", "true", "yes"}
     if read_only:
+        # Open SQLite in explicit read-only mode. A read-only bind mount can
+        # reject SQLite's normal READWRITE|CREATE open even when the file is
+        # readable. URI mode=ro avoids any attempt to create or modify files.
+        conn.close()
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA query_only=ON")
     else:
         conn.execute("PRAGMA journal_mode=WAL")
