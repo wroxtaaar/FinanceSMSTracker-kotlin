@@ -16,6 +16,26 @@ def sync_transaction(t, apply_balance=True):
         if before is None and apply_balance and not str(t.id).startswith("gmail:"):
             apply_transaction_to_account(conn, t, created_at)
 
+        # Splitwise is intentionally simple: every new debit increases the
+        # manual owed amount, except transactions explicitly categorized OTHER.
+        # Credits never change it. Gmail rows are deferred/duplicate candidates
+        # and therefore must not increment it here.
+        if (
+            before is None
+            and apply_balance
+            and not str(t.id).startswith("gmail:")
+            and t.type == "DEBIT"
+            and str(t.category or "").strip().upper() != "OTHER"
+        ):
+            conn.execute(
+                """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
+                   VALUES(?,?,?)
+                   ON CONFLICT(currency) DO UPDATE SET
+                       amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
+                       updated_at=excluded.updated_at""",
+                (t.currency, int(t.amountMinor), created_at),
+            )
+
         return before is None
 
 def apply_transaction_to_account(conn, t, applied_at):
@@ -276,6 +296,23 @@ def void_transaction(transaction_id):
             conn.execute(
                 "DELETE FROM balance_adjustments WHERE transaction_id=?",
                 (transaction_id,)
+            )
+
+        # If this transaction previously contributed to the
+        # automatic Splitwise amount, reverse that contribution when it is
+        # voided/deleted. This makes the self-transfer workflow safe: if the
+        # debit and credit are the same amount, the user can simply delete the
+        # unwanted debit and its Splitwise contribution disappears.
+        if (
+            tx["type"] == "DEBIT"
+            and str(tx["category"] or "").strip().upper() != "OTHER"
+            and not str(tx["id"]).startswith("gmail:")
+        ):
+            conn.execute(
+                """UPDATE manual_splitwise_total
+                   SET amount_minor=MAX(0, amount_minor-?), updated_at=?
+                   WHERE currency=?""",
+                (int(tx["amount_minor"]), now_ms(), tx["currency"]),
             )
 
         conn.execute(
