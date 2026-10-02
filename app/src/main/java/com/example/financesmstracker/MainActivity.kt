@@ -317,7 +317,7 @@ class MainActivity : AppCompatActivity() {
         val title = if (accountType == "BANK_ACCOUNT") {
             "Edit Bank Accounts"
         } else {
-            "Edit Credit Cards"
+            "Credit Cards"
         }
 
         if (accounts.isEmpty()) {
@@ -329,6 +329,210 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        if (accountType == "CREDIT_CARD") {
+            /*
+             * Credit cards have two separate buckets:
+             *   Bill         = statement bill still to be paid.
+             *   Active Spend = transactions after that statement.
+             *
+             * The Oracle ledger still keeps one live outstanding balance,
+             * which is Bill + Active Spend. Card debits increase Active Spend;
+             * card credits/payments reduce Bill first.
+             */
+            val rows = accounts.map { account ->
+                val billMinor = account.billBalanceMinor.coerceIn(0L, account.balanceMinor)
+                val activeMinor = (account.balanceMinor - billMinor).coerceAtLeast(0L)
+
+                val label = TextView(this).apply {
+                    text = buildString {
+                        append(account.name)
+                        account.last4?.let { append(" ••••").append(it) }
+                    }
+                    textSize = 14f
+                    setPadding(0, 10, 0, 4)
+                }
+
+                val billInput = EditText(this).apply {
+                    inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                    setSingleLine(true)
+                    hint = "Bill"
+                    setText(formatDecimalMinor(billMinor))
+                    selectAll()
+                }
+
+                val activeInput = EditText(this).apply {
+                    inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                    setSingleLine(true)
+                    hint = "Active spend"
+                    setText(formatDecimalMinor(activeMinor))
+                    selectAll()
+                }
+
+                val columns = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    val lp = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                    billInput.layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                    ).apply {
+                        marginEnd = 6
+                    }
+                    activeInput.layoutParams = LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                    ).apply {
+                        marginStart = 6
+                    }
+                    addView(billInput)
+                    addView(activeInput)
+                    layoutParams = lp
+                }
+
+                Triple(account, billInput, activeInput).also {
+                    it
+                }.let { row ->
+                    arrayOf(label, columns, row)
+                }
+            }
+
+            val content = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(48, 0, 48, 0)
+
+                val header = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+
+                    val billHeader = TextView(this@MainActivity).apply {
+                        text = "Bill"
+                        textSize = 12f
+                    }
+                    val activeHeader = TextView(this@MainActivity).apply {
+                        text = "Active Spend"
+                        textSize = 12f
+                    }
+
+                    addView(
+                        billHeader,
+                        LinearLayout.LayoutParams(
+                            0,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            1f
+                        )
+                    )
+                    addView(
+                        activeHeader,
+                        LinearLayout.LayoutParams(
+                            0,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            1f
+                        ).apply { marginStart = 12 }
+                    )
+                }
+                addView(header)
+
+                rows.forEach { row ->
+                    @Suppress("UNCHECKED_CAST")
+                    val label = row[0] as TextView
+                    val columns = row[1] as LinearLayout
+                    addView(label)
+                    addView(columns)
+                }
+            }
+
+            val scrollView = ScrollView(this).apply {
+                isFillViewport = true
+                addView(content)
+            }
+
+            val dialog = AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(
+                    "Bill is the current statement amount remaining. Active Spend is new spend after the bill. " +
+                        "Purchases increase Active Spend; card payments reduce Bill first."
+                )
+                .setView(scrollView)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", null)
+                .create()
+
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    val values = mutableListOf<Triple<OracleAccount, Long, Long>>()
+
+                    rows.forEach { row ->
+                        @Suppress("UNCHECKED_CAST")
+                        val account = row[2] as Triple<OracleAccount, EditText, EditText>
+                        val bill = account.second.text.toString().trim().replace(",", "").toDoubleOrNull()
+                        val active = account.third.text.toString().trim().replace(",", "").toDoubleOrNull()
+
+                        if (bill == null || bill < 0) {
+                            account.second.error = "Enter a valid bill amount"
+                            account.second.requestFocus()
+                            return@setOnClickListener
+                        }
+                        if (active == null || active < 0) {
+                            account.third.error = "Enter a valid active amount"
+                            account.third.requestFocus()
+                            return@setOnClickListener
+                        }
+
+                        val billMinor = kotlin.math.round(bill * 100.0).toLong()
+                        val activeMinor = kotlin.math.round(active * 100.0).toLong()
+                        values += Triple(account.first, billMinor, activeMinor)
+                    }
+
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+
+                    oracleExecutor.execute {
+                        var failure: Throwable? = null
+
+                        for ((account, billMinor, activeMinor) in values) {
+                            val saveResult = FinanceSyncClient(this@MainActivity)
+                                .updateAccountBalance(
+                                    account = account,
+                                    balanceMinor = billMinor + activeMinor,
+                                    billBalanceMinor = billMinor
+                                )
+
+                            if (saveResult.isFailure) {
+                                failure = saveResult.exceptionOrNull()
+                                break
+                            }
+                        }
+
+                        runOnUiThread {
+                            dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+
+                            if (failure == null) {
+                                dialog.dismiss()
+                                loadOracleSummary()
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "Credit card amounts updated",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "Could not update credit cards: " + (failure?.message ?: "Unavailable"),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                }
+            }
+
+            dialog.show()
+            return
+        }
+
+        // Bank accounts keep the original single current-balance editor.
         val accountInputs = accounts.map { account ->
             val label = TextView(this).apply {
                 text = buildString {
@@ -342,11 +546,7 @@ class MainActivity : AppCompatActivity() {
             val input = EditText(this).apply {
                 inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
                 setSingleLine(true)
-                hint = if (accountType == "BANK_ACCOUNT") {
-                    "Current balance"
-                } else {
-                    "Current outstanding"
-                }
+                hint = "Current balance"
                 setText(formatDecimalMinor(account.balanceMinor))
                 selectAll()
             }
@@ -371,13 +571,7 @@ class MainActivity : AppCompatActivity() {
 
         val dialog = AlertDialog.Builder(this)
             .setTitle(title)
-            .setMessage(
-                if (accountType == "BANK_ACCOUNT") {
-                    "Manually set the current balance for each bank account."
-                } else {
-                    "Manually set the current outstanding amount for each credit card."
-                }
-            )
+            .setMessage("Manually set the current balance for each bank account.")
             .setView(scrollView)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save", null)
