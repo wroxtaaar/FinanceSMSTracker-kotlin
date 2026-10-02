@@ -93,7 +93,6 @@ class SmsReceiver : BroadcastReceiver() {
                                 ", last2=" + cardBill.accountLastTwo
                         )
 
-                        dbHelper.close()
                         val updateIntent = Intent(ACTION_TRANSACTION_DATA_CHANGED).apply {
                             setPackage(context.packageName)
                         }
