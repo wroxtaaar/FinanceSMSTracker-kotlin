@@ -682,6 +682,7 @@ class MainActivity : AppCompatActivity() {
                     val settings = SyncSettings(this@MainActivity)
                     val savedGroup1 = settings.splitwiseGroup1Minor()
                     val savedGroup2 = settings.splitwiseGroup2Minor()
+                    val savedGroup3 = settings.splitwiseGroup3Minor()
                     val hasSavedGroups = settings.hasSplitwiseGroups()
 
                     val group1Input = EditText(this@MainActivity).apply {
@@ -700,16 +701,25 @@ class MainActivity : AppCompatActivity() {
                             if (hasSavedGroups) savedGroup2 / 100.0 else 0.0))
                     }
 
+                    val group3Input = EditText(this@MainActivity).apply {
+                        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                        setSingleLine(true)
+                        hint = "Splitwise Group 3"
+                        setText(String.format(Locale.getDefault(), "%.2f",
+                            if (hasSavedGroups) savedGroup3 / 100.0 else 0.0))
+                    }
+
                     val container = LinearLayout(this@MainActivity).apply {
                         orientation = LinearLayout.VERTICAL
                         setPadding(48, 0, 48, 0)
                         addView(group1Input)
                         addView(group2Input)
+                        addView(group3Input)
                     }
 
                     val dialog = AlertDialog.Builder(this@MainActivity)
                         .setTitle("Splitwise Owed")
-                        .setMessage("Enter what you are owed in each Splitwise group. The two amounts are added together.")
+                        .setMessage("Enter what you are owed in each Splitwise group. The three amounts are added together.")
                         .setView(container)
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Save", null)
@@ -719,6 +729,7 @@ class MainActivity : AppCompatActivity() {
                         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                             val group1 = group1Input.text.toString().trim().replace(",", "").toDoubleOrNull()
                             val group2 = group2Input.text.toString().trim().replace(",", "").toDoubleOrNull()
+                            val group3 = group3Input.text.toString().trim().replace(",", "").toDoubleOrNull()
 
                             if (group1 == null || group1 < 0) {
                                 group1Input.error = "Enter a valid amount"
@@ -728,12 +739,17 @@ class MainActivity : AppCompatActivity() {
                                 group2Input.error = "Enter a valid amount"
                                 return@setOnClickListener
                             }
+                            if (group3 == null || group3 < 0) {
+                                group3Input.error = "Enter a valid amount"
+                                return@setOnClickListener
+                            }
 
                             val group1Minor = kotlin.math.round(group1 * 100.0).toLong()
                             val group2Minor = kotlin.math.round(group2 * 100.0).toLong()
-                            val totalMinor = group1Minor + group2Minor
+                            val group3Minor = kotlin.math.round(group3 * 100.0).toLong()
+                            val totalMinor = group1Minor + group2Minor + group3Minor
 
-                            settings.saveSplitwiseGroups(group1Minor, group2Minor)
+                            settings.saveSplitwiseGroups(group1Minor, group2Minor, group3Minor)
                             buttonEditSplitwise.isEnabled = false
 
                             oracleExecutor.execute {
