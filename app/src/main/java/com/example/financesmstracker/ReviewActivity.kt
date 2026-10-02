@@ -57,7 +57,7 @@ class ReviewActivity : AppCompatActivity() {
         setContentView(R.layout.activity_review)
 
         dbHelper = FinanceDatabaseHelper(this)
-        repository = TransactionRepository(dbHelper)
+        repository = TransactionRepository(dbHelper, this)
         manualRepository = ManualTransactionRepository(dbHelper)
 
         recyclerView = findViewById(R.id.recyclerViewReviews)
