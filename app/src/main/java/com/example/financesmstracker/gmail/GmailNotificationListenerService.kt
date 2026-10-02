@@ -16,7 +16,6 @@ import com.example.financesmstracker.evidence.SourceEvidence
 import com.example.financesmstracker.evidence.SourceType
 import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.integration.FinanceSyncClient
-import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.integration.SyncCardBill
 import com.example.financesmstracker.parser.ParserResult
 import com.example.financesmstracker.parser.TransactionType
