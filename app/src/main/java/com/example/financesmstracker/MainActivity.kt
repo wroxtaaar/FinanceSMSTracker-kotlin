@@ -657,6 +657,16 @@ class MainActivity : AppCompatActivity() {
                         val rowId = repository.upsertOracleGmailTransaction(transaction)
                         if (rowId != 0L) {
                             changed++
+
+                            // Gmail is the clarification pass. If it repaired or
+                            // enriched a notification/SMS transaction, push the
+                            // clarified canonical row back to Oracle.
+                            repository.getTransactionById(rowId)?.let { local ->
+                                FinanceSyncBridge.enqueueCanonical(
+                                    this@MainActivity,
+                                    local
+                                )
+                            }
                         }
                     }
 
