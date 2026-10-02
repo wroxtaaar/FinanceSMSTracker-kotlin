@@ -275,7 +275,7 @@ def sync_card_bill(bill):
 def void_transaction(transaction_id):
     with connection() as conn:
         tx=conn.execute(
-            "SELECT id,status FROM transactions WHERE id=?",
+            "SELECT id,status,type,category,amount_minor,currency FROM transactions WHERE id=?",
             (transaction_id,)
         ).fetchone()
         if not tx:
