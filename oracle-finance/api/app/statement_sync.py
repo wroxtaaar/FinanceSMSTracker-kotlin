@@ -703,12 +703,86 @@ def _hdfc_metadata(text):
         raise ValueError("HDFC statement period not found")
     return {
         "bank": "HDFC",
+        "account_type": "BANK_ACCOUNT",
         "account_last4": account.group(1)[-4:],
         "currency": currency.group(1).upper() if currency else "INR",
         "statement_from": period.group(1),
         "statement_to": period.group(2),
         "opening_balance_minor": _minor(opening.group(1)) if opening else None,
     }
+
+
+def _hdfc_card_metadata(text):
+    card = re.search(r"(?mi)Credit Card No\.\s*\r?\n?\s*(\d{6,12})X+(\d{4})", text)
+    if not card:
+        card = re.search(r"(?mi)Credit Card No\.\s+(\d{6,12})X+(\d{4})", text)
+    if not card:
+        raise ValueError("HDFC credit card number not found")
+    period = re.search(
+        r"(?mi)Billing Period\s*\r?\n?\s*(\d{2}\s+[A-Za-z]{3},\s+\d{4})\s*-\s*(\d{2}\s+[A-Za-z]{3},\s+\d{4})",
+        text,
+    )
+    return {
+        "bank": "HDFC",
+        "account_type": "CREDIT_CARD",
+        "account_last4": card.group(2),
+        "currency": "INR",
+        "statement_from": period.group(1) if period else None,
+        "statement_to": period.group(2) if period else None,
+        "opening_balance_minor": None,
+    }
+
+
+def parse_hdfc_credit_card_statement(pdf_bytes, key):
+    text = _pdf_text(pdf_bytes, key)
+    metadata = _hdfc_card_metadata(text)
+
+    table_start = text.find("Domestic Transactions")
+    if table_start < 0:
+        raise ValueError("HDFC credit-card transaction table not found")
+    table = text[table_start:]
+
+    rows = []
+    row_re = re.compile(
+        r"(?m)^(?P<date>\d{2}/\d{2}/\d{4})\|\s*"
+        r"(?P<time>\d{2}:\d{2})\s+"
+        r"(?P<detail>.+?)\s+C\s+"
+        r"(?P<amount>[0-9][0-9,]*\.\d{2})\s+l\s*$"
+    )
+    for match in row_re.finditer(table):
+        amount = _minor(match.group("amount"))
+        detail = _compact(match.group("detail"))
+        if amount <= 0 or not detail:
+            continue
+        upper = detail.upper()
+        method = "CARD"
+        if "UPI" in upper:
+            method = "UPI"
+        elif "BBPS" in upper:
+            method = "BILL_PAYMENT"
+        elif "EMI" in upper:
+            method = "CARD"
+        rows.append({
+            "date": datetime.strptime(
+                f"{match.group('date')} {match.group('time')}",
+                "%d/%m/%Y %H:%M",
+            ).replace(tzinfo=timezone.utc),
+            "amount_minor": amount,
+            "type": "DEBIT",
+            "merchant": _compact(detail),
+            "reference": (
+                re.search(r"(?i)\bRef#\s*([A-Z0-9-]+)", detail).group(1)
+                if re.search(r"(?i)\bRef#\s*([A-Z0-9-]+)", detail)
+                else None
+            ),
+            "payment_method": method,
+            "category": "OTHER",
+            "narration": detail,
+        })
+
+    if not rows:
+        raise ValueError("no HDFC credit-card transactions were parsed")
+    return metadata, rows
 
 
 def _hdfc_merchant(narration):
@@ -748,6 +822,8 @@ def _method(narration):
 
 def parse_hdfc_statement(pdf_bytes, key):
     text = _pdf_text(pdf_bytes, key)
+    if re.search(r"(?mi)Millennia Credit Card Statement|Credit Card No\.", text):
+        return parse_hdfc_credit_card_statement(pdf_bytes, key)
     metadata = _hdfc_metadata(text)
     money = r"(?:[0-9][0-9,]*\.[0-9]{2}|-)"
     blocks = re.finditer(
