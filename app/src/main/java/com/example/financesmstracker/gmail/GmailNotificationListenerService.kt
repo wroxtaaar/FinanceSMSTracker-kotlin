@@ -66,6 +66,11 @@ class GmailNotificationListenerService : NotificationListenerService() {
         }
     }
 
+    override fun onDestroy() {
+        NotificationAccessHelper.setListenerConnected(applicationContext, false)
+        super.onDestroy()
+    }
+
     override fun onListenerDisconnected() {
         Log.w(TAG, "Notification listener disconnected; requesting rebind")
         NotificationAccessHelper.setListenerConnected(applicationContext, false)
@@ -90,17 +95,32 @@ class GmailNotificationListenerService : NotificationListenerService() {
 
         val extras = sbn.notification.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+        val titleBig = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
+        val summary = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.joinToString("\n") { it.toString() }
 
-        if (!GmailNotificationClassifier.isLikelyBankNotification(title, text, bigText, subText)) {
+        NotificationAccessHelper.recordGmailNotification(applicationContext, title, text ?: bigText ?: textLines)
+        Log.i(TAG, "Gmail notification received: title=" + title + " text=" + (text ?: bigText ?: textLines))
+
+        val payloadText = listOfNotNull(title, titleBig, text, bigText, subText, summary, textLines)
+            .joinToString("\n")
+
+        if (GmailNotificationParser.parse(title, payloadText, null, null) == null) {
+            NotificationAccessHelper.recordGmailNotificationParsed(
+                applicationContext,
+                parsed = false,
+                error = "No transaction amount/direction found"
+            )
             return
         }
 
         notificationExecutor.execute {
             try {
-                processNotification(sbn, title, text, bigText, subText)
+                processNotification(sbn, title, payloadText, null, null)
             } catch (error: Exception) {
                 Log.e(TAG, "Immediate Gmail notification processing failed", error)
             } finally {
@@ -114,17 +134,30 @@ class GmailNotificationListenerService : NotificationListenerService() {
     private fun processNotificationSafely(sbn: StatusBarNotification) {
         val extras = sbn.notification.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+        val titleBig = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
+        val summary = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.joinToString("\n") { it.toString() }
 
-        if (!GmailNotificationClassifier.isLikelyBankNotification(title, text, bigText, subText)) {
+        NotificationAccessHelper.recordGmailNotification(applicationContext, title, text ?: bigText ?: textLines)
+        val payloadText = listOfNotNull(title, titleBig, text, bigText, subText, summary, textLines)
+            .joinToString("\n")
+
+        if (GmailNotificationParser.parse(title, payloadText, null, null) == null) {
+            NotificationAccessHelper.recordGmailNotificationParsed(
+                applicationContext,
+                parsed = false,
+                error = "No transaction amount/direction found"
+            )
             return
         }
 
         notificationExecutor.execute {
             try {
-                processNotification(sbn, title, text, bigText, subText)
+                processNotification(sbn, title, payloadText, null, null)
             } catch (error: Exception) {
                 Log.e(TAG, "Active Gmail notification processing failed", error)
             }
@@ -140,9 +173,19 @@ class GmailNotificationListenerService : NotificationListenerService() {
     ) {
         val parsed = GmailNotificationParser.parse(title, text, bigText, subText)
         if (parsed == null) {
-            Log.d(TAG, "Bank Gmail notification detected but details were not parseable; IMAP sync will clarify it")
+            NotificationAccessHelper.recordGmailNotificationParsed(
+                applicationContext,
+                parsed = false,
+                error = "Parser returned null"
+            )
+            Log.d(TAG, "Gmail notification details were not parseable; IMAP sync will clarify it")
             return
         }
+
+        NotificationAccessHelper.recordGmailNotificationParsed(
+            applicationContext,
+            parsed = true
+        )
 
         val content = listOfNotNull(title, text, bigText, subText).joinToString("\n")
         val contentHash = HashUtil.sha256(content)
