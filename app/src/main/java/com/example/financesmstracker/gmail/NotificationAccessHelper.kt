@@ -8,6 +8,19 @@ import android.provider.Settings
 import android.text.TextUtils
 
 object NotificationAccessHelper {
+    private const val PREFS = "gmail_notification_listener"
+    private const val KEY_CONNECTED = "connected"
+
+    fun setListenerConnected(context: Context, connected: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_CONNECTED, connected)
+            .apply()
+    }
+
+    fun isListenerConnected(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_CONNECTED, false)
 
     fun isNotificationAccessGranted(context: Context): Boolean {
         val component = ComponentName(
