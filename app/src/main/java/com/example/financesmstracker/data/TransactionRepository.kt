@@ -615,6 +615,41 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
         )
     }
 
+    /**
+     * Clears transaction history kept only on the Android device.
+     * Category memory is intentionally preserved.
+     */
+    fun clearLocalHistory(): LocalHistoryClearResult {
+        val db = dbHelper.writableDatabase
+        db.beginTransaction()
+        try {
+            val evidenceDeleted = db.delete(
+                FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+                null,
+                null
+            )
+            val transactionsDeleted = db.delete(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                null,
+                null
+            )
+            val unrecognizedSmsDeleted = db.delete(
+                FinanceDatabaseHelper.TABLE_UNRECOGNIZED_SMS,
+                null,
+                null
+            )
+
+            db.setTransactionSuccessful()
+            return LocalHistoryClearResult(
+                transactions = transactionsDeleted,
+                evidence = evidenceDeleted,
+                unrecognizedSms = unrecognizedSmsDeleted
+            )
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun getAllTransactions(): List<Transaction> {
         val list = mutableListOf<Transaction>()
         val db = dbHelper.readableDatabase
