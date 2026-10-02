@@ -1157,6 +1157,14 @@ def ingest_messages(service,query="newer_than:30d"):
                 stats.setdefault("cardBillResults", [])
                 stats["cardBillResults"].append(bill_result)
 
+            bill_from_email = parse_card_bill_email(message)
+            if bill_from_email:
+                bill_result = sync_card_bill(bill_from_email)
+                stats.setdefault("cardBillDetected", 0)
+                stats["cardBillDetected"] += 1
+                stats.setdefault("cardBillResults", [])
+                stats["cardBillResults"].append(bill_result)
+
             statement_stats = process_statement_attachments(service, message)
             stats["statementAttachmentsScanned"] += statement_stats["attachmentsScanned"]
             stats["statementAttachmentsParsed"] += statement_stats["attachmentsParsed"]
