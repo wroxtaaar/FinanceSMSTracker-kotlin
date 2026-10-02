@@ -50,6 +50,24 @@ class GmailNotificationParserTest {
     }
 
     @Test
+    fun parsesAxisCreditCardSpendNotificationAsDebit() {
+        val result = GmailNotificationParser.parse(
+            "Axis Bank Alerts",
+            "INR 100 spent on credit card no. XX9206 02-10-2026",
+            null,
+            null
+        )
+
+        assertNotNull(result)
+        assertEquals(10000L, result!!.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(AccountType.CREDIT_CARD, result.accountType)
+        assertEquals(PaymentMethod.CARD, result.paymentMethod)
+        assertEquals("AXIS", result.bank)
+        assertEquals("9206", result.accountLastFour)
+    }
+
+    @Test
     fun rejectsNonTransactionNotification() {
         val result = GmailNotificationParser.parse(
             "Axis Bank Alerts",
