@@ -20,6 +20,12 @@ object FinanceSyncBridge {
         transaction: Transaction,
         evidence: SourceEvidence? = null
     ) {
+        // Oracle Gmail transactions are local mirrors of rows already owned by
+        // the Oracle ledger. They must never be sent back as new canonical
+        // transactions, otherwise clearing local history and rehydrating the
+        // mirror can apply the same bank/card balance more than once.
+        if (transaction.smsHash.startsWith("oracle:gmail:")) return
+
         enqueue(context, listOf(transaction), listOfNotNull(evidence))
     }
 
