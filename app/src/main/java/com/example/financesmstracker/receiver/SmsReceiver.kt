@@ -105,7 +105,7 @@ class SmsReceiver : BroadcastReceiver() {
                     val parserResult = parserManager.parse(sender, fullBody)
 
                     val dbHelper = FinanceDatabaseHelper(context)
-                    val repository = TransactionRepository(dbHelper)
+                    val repository = TransactionRepository(dbHelper, context)
 
                     val nonTransactionalMessage =
                         SenderTrustManager.isNonTransactionalFinancialMessage(fullBody)
@@ -237,7 +237,7 @@ class SmsReceiver : BroadcastReceiver() {
         parsed: com.example.financesmstracker.parser.CardBillPaymentSms
     ) {
         val dbHelper = FinanceDatabaseHelper(context)
-        val repository = TransactionRepository(dbHelper)
+        val repository = TransactionRepository(dbHelper, context)
         try {
             val evidence = SourceEvidence(
                 sourceType = SourceType.SMS,
