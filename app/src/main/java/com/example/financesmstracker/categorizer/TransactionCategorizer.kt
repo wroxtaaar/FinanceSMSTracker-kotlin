@@ -121,7 +121,9 @@ object TransactionCategorizer {
 
             parserResult.paymentMethod == PaymentMethod.UPI -> "GROCERIES"
 
-            else -> "OTHER"
+            // Unclassified debits default to GROCERIES. OTHER remains an explicit
+            // user choice for transactions that should not contribute to Splitwise.
+            else -> "GROCERIES"
         }
     }
 }
