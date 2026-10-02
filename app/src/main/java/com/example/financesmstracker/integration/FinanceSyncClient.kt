@@ -315,10 +315,13 @@ class SyncSettings(context: Context) {
 
     fun splitwiseGroup2Minor(): Long = prefs.getLong(KEY_SPLITWISE_GROUP_2, 0L)
 
-    fun saveSplitwiseGroups(group1Minor: Long, group2Minor: Long) {
+    fun splitwiseGroup3Minor(): Long = prefs.getLong(KEY_SPLITWISE_GROUP_3, 0L)
+
+    fun saveSplitwiseGroups(group1Minor: Long, group2Minor: Long, group3Minor: Long) {
         prefs.edit()
             .putLong(KEY_SPLITWISE_GROUP_1, group1Minor)
             .putLong(KEY_SPLITWISE_GROUP_2, group2Minor)
+            .putLong(KEY_SPLITWISE_GROUP_3, group3Minor)
             .apply()
     }
 
@@ -327,5 +330,6 @@ class SyncSettings(context: Context) {
         private const val KEY_TOKEN = "oracle_sync_token"
         private const val KEY_SPLITWISE_GROUP_1 = "splitwise_group_1_minor"
         private const val KEY_SPLITWISE_GROUP_2 = "splitwise_group_2_minor"
+        private const val KEY_SPLITWISE_GROUP_3 = "splitwise_group_3_minor"
     }
 }
