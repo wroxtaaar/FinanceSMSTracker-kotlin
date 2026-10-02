@@ -583,6 +583,10 @@ def test_repair_legacy_icici_credit_card_reparses_existing_row():
         "1012",
         100000,
     )
+    # This fixture is intentionally unreconciled: the test verifies that
+    # legacy Gmail repair can apply the historical transaction to the balance.
+    with connection() as conn:
+        conn.execute("UPDATE accounts SET balance_reconciled_at=0 WHERE id='icici-repair'")
 
     gmail_id = "11:99002"
     transaction_id = parsed_transaction.id
@@ -1088,6 +1092,10 @@ def test_statement_attachment_is_imported_once_and_updates_balance(monkeypatch):
         "9591",
         100000,
     )
+    # Statement import is testing transaction-derived balance movement,
+    # so keep this fixture unreconciled.
+    with connection() as conn:
+        conn.execute("UPDATE accounts SET balance_reconciled_at=0 WHERE id='statement-hdfc'")
 
     pdf_bytes = b"test-pdf-bytes"
     encoded = base64.urlsafe_b64encode(pdf_bytes).decode().rstrip("=")
