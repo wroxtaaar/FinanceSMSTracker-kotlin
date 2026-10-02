@@ -256,10 +256,42 @@ class MainActivity : AppCompatActivity() {
     private fun clearLocalHistory() {
         buttonClearLocalHistory.isEnabled = false
         oracleExecutor.execute {
-            val cleared = repository.clearLocalHistory()
+            // Capture the Oracle Gmail IDs that existed at the moment of the
+            // clear. Timestamp cutoffs are useful, but an imported email can
+            // carry a bad/future event timestamp. Exact tombstones make the
+            // clear operation durable across app restarts and re-syncs.
+            val remoteIds = runCatching {
+                FinanceSyncClient(this@MainActivity).fetchGmailTransactions()
+                    .getOrDefault(emptyList())
+                    .map { it.id.toString() }
+                    .toSet()
+            }.getOrDefault(emptySet())
+
+            val existingLocalHashes = repository.getAllTransactions()
+                .mapNotNull { it.smsHash.takeIf(String::isNotBlank) }
+                .toSet()
+
+            val previousRemoteIds =
+                localHistoryPrefs.getStringSet(KEY_LOCAL_HISTORY_CLEARED_ORACLE_IDS, emptySet())
+                    ?: emptySet()
+            val previousLocalHashes =
+                localHistoryPrefs.getStringSet(KEY_LOCAL_HISTORY_CLEARED_SMS_HASHES, emptySet())
+                    ?: emptySet()
+
+            val clearedAt = System.currentTimeMillis()
             localHistoryPrefs.edit()
-                .putLong(KEY_LOCAL_HISTORY_CLEARED_AT, System.currentTimeMillis())
+                .putLong(KEY_LOCAL_HISTORY_CLEARED_AT, clearedAt)
+                .putStringSet(
+                    KEY_LOCAL_HISTORY_CLEARED_ORACLE_IDS,
+                    previousRemoteIds + remoteIds
+                )
+                .putStringSet(
+                    KEY_LOCAL_HISTORY_CLEARED_SMS_HASHES,
+                    previousLocalHashes + existingLocalHashes
+                )
                 .apply()
+
+            val cleared = repository.clearLocalHistory()
 
             val queue = com.example.financesmstracker.integration.FinanceSyncQueue(this@MainActivity)
             val pending = queue.size()
@@ -859,13 +891,21 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 result.onSuccess { transactions ->
                     val clearedAt = localHistoryPrefs.getLong(KEY_LOCAL_HISTORY_CLEARED_AT, 0L)
+                    val clearedOracleIds =
+                        localHistoryPrefs.getStringSet(
+                            KEY_LOCAL_HISTORY_CLEARED_ORACLE_IDS,
+                            emptySet()
+                        ) ?: emptySet()
                     var changed = 0
 
                     transactions.forEach { transaction ->
                         // Clear Local History is intentionally local-only. Oracle
-                        // keeps Gmail processing history, but old Gmail ledger
-                        // rows must not repopulate the phone after a clear.
-                        if (clearedAt > 0L && transaction.timestamp <= clearedAt) {
+                        // keeps Gmail processing history, but rows that existed
+                        // before the clear must never repopulate the phone.
+                        if (
+                            transaction.id.toString() in clearedOracleIds ||
+                            (clearedAt > 0L && transaction.timestamp <= clearedAt)
+                        ) {
                             return@forEach
                         }
 
@@ -1283,6 +1323,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val KEY_LOCAL_HISTORY_CLEARED_AT = "cleared_at"
+        private const val KEY_LOCAL_HISTORY_CLEARED_ORACLE_IDS = "cleared_oracle_ids"
+        private const val KEY_LOCAL_HISTORY_CLEARED_SMS_HASHES = "cleared_sms_hashes"
     }
 
     private fun checkAndRequestSmsPermission() {
