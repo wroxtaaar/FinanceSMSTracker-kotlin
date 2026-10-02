@@ -649,9 +649,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
                 if (isBlankLike(localDetails[0] as String?) && !transaction.bank.isNullOrBlank()) {
                     values.put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
                 }
-                if (isBlankLike(localDetails[1] as String?) && !transaction.merchantOrPayee.isNullOrBlank()) {
-                    values.put(FinanceDatabaseHelper.COLUMN_PAYEE_ID, transaction.merchantOrPayee)
-                }
                 if (isBlankLike(localDetails[2] as String?) && !transaction.accountLast4.isNullOrBlank()) {
                     values.put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLast4)
                 }
