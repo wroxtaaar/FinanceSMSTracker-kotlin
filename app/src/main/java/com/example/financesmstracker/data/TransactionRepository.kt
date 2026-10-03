@@ -872,6 +872,19 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                 values.put(FinanceDatabaseHelper.COLUMN_SMS_HASH, remoteMarker)
             }
 
+            // If this Gmail row was already materialized locally, it may still
+            // own the unique oracle:gmail:<id> marker. Move that stale remote
+            // row out of the way before assigning the same marker to the
+            // canonical notification/SMS row. The previous ordering updated
+            // first and crashed on the UNIQUE(sms_hash) constraint.
+            if (existingRemoteId != null && existingRemoteId != localId) {
+                db.delete(
+                    FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                    FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                    arrayOf(existingRemoteId.toString())
+                )
+            }
+
             val updated = db.update(
                 FinanceDatabaseHelper.TABLE_TRANSACTIONS,
                 values,
