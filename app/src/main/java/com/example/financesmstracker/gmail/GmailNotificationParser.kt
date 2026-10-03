@@ -9,9 +9,10 @@ import java.math.RoundingMode
 /**
  * Parses the transaction details that are already present in a Gmail notification.
  *
- * This is intentionally a fast, conservative parser. Gmail remains the
- * authoritative clarification source; notification data is used immediately
- * so the transaction can appear without waiting for an IMAP scan.
+ * Gmail remains the authoritative clarification source. The notification parser
+ * is deliberately scoped to the transaction line containing the amount so that
+ * unrelated footer text such as "credit card", "card payment", or bill-payment
+ * instructions cannot change the transaction's direction/account type.
  */
 data class GmailNotificationTransaction(
     val amountPaise: Long,
@@ -42,9 +43,30 @@ object GmailNotificationParser {
     )
     private val parenthesizedNameRegex = Regex("""\(([^()]{2,80})\)""")
 
+    private val explicitDebitRegex = Regex(
+        """(?i)\b(?:was|has been|is|is being)?\s*debited\b|\b(?:spent|purchased|purchase|charged|paid|withdrawn)\b"""
+    )
+    private val explicitCreditRegex = Regex(
+        """(?i)\b(?:was|has been|is|is being)?\s*credited\b|\b(?:received|deposited)\b"""
+    )
+
+    /**
+     * Keep classification scoped to the line that contains the first amount.
+     * Gmail notifications frequently append unrelated card/bill information
+     * after the transaction line.
+     */
+    private fun transactionLine(haystack: String, amountMatch: MatchResult): String {
+        val lines = haystack.split("\n")
+        return lines.firstOrNull { amountRegex.containsMatchIn(it) }
+            ?: haystack.substring(
+                maxOf(0, amountMatch.range.first - 160),
+                minOf(haystack.length, amountMatch.range.last + 161)
+            )
+    }
+
     fun parse(title: String?, text: String?, bigText: String?, subText: String?): GmailNotificationTransaction? {
         val haystack = listOfNotNull(title, text, bigText, subText)
-            .joinToString(" ")
+            .joinToString("\n")
             .replace("\u00A0", " ")
             .trim()
 
@@ -58,51 +80,59 @@ object GmailNotificationParser {
                 .longValueExact()
         }.getOrNull() ?: return null
 
-        val lower = haystack.lowercase()
+        val line = transactionLine(haystack, amountMatch)
+        val lowerLine = line.lowercase()
+        val lowerAll = haystack.lowercase()
 
-        // Debit must win when a credit-card purchase says "spent on credit card".
-        // The word "credit" by itself is not proof of a credit transaction.
+        // Direction is determined from the transaction line, never from the
+        // entire notification. This prevents a bank-account credit from being
+        // changed into a debit merely because the Gmail footer says "credit card".
+        val hasDebit = explicitDebitRegex.containsMatchIn(lowerLine)
+        val hasCredit = explicitCreditRegex.containsMatchIn(lowerLine)
         val direction = when {
-            Regex("""\b(?:debited|debit|paid|withdrawn|spent|purchase|charged)\b""").containsMatchIn(lower) ->
-                TransactionType.DEBIT
-            Regex("""\b(?:credited|received|deposited)\b""").containsMatchIn(lower) ->
-                TransactionType.CREDIT
+            hasDebit && !hasCredit -> TransactionType.DEBIT
+            hasCredit && !hasDebit -> TransactionType.CREDIT
+            hasDebit && hasCredit -> {
+                when {
+                    Regex("""(?i)\bdebited\b""").containsMatchIn(lowerLine) -> TransactionType.DEBIT
+                    Regex("""(?i)\bcredited\b""").containsMatchIn(lowerLine) -> TransactionType.CREDIT
+                    else -> TransactionType.UNKNOWN
+                }
+            }
             else -> TransactionType.UNKNOWN
         }
 
         if (direction == TransactionType.UNKNOWN || amountPaise <= 0L) return null
 
-        // Identify the issuer from an explicit bank name, not arbitrary
-        // substrings. For example, HDFC UPI notifications can contain a VPA
-        // such as "cred.club@axisb"; that "axisb" is the counterparty handle,
-        // not the issuing bank.
+        // Identify the issuer from the complete notification. Counterparty VPAs
+        // can contain bank names (for example @axisb) and must not override the
+        // issuer inferred from the notification itself.
         val bank = when {
-            Regex("""\baxis(?:\s+bank)?\b""").containsMatchIn(lower) -> "AXIS"
-            Regex("""\bhdfc(?:\s+bank)?\b""").containsMatchIn(lower) -> "HDFC"
-            Regex("""\bicici(?:\s+bank)?\b""").containsMatchIn(lower) -> "ICICI"
-            Regex("""\bsbi(?:\s+card|\s+bank)?\b""").containsMatchIn(lower) -> "SBI"
-            Regex("""\bindusind(?:\s+bank)?\b""").containsMatchIn(lower) -> "INDUSIND"
-            Regex("""\bhsbc(?:\s+bank)?\b""").containsMatchIn(lower) -> "HSBC"
+            Regex("""\baxis(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "AXIS"
+            Regex("""\bhdfc(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "HDFC"
+            Regex("""\bicici(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "ICICI"
+            Regex("""\bsbi(?:\s+card|\s+bank)?\b""").containsMatchIn(lowerAll) -> "SBI"
+            Regex("""\bindusind(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "INDUSIND"
+            Regex("""\bhsbc(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "HSBC"
             else -> null
         }
 
-        val accountLastFour = lastFourRegex.find(haystack)?.groupValues?.getOrNull(1)
+        // Account/card identity must come from the transaction line too. A
+        // footer can mention another card and should not become this transaction's
+        // account number.
+        val accountLastFour = lastFourRegex.find(line)?.groupValues?.getOrNull(1)
+        val reference = referenceRegex.find(line)?.groupValues?.getOrNull(1)
+        val vpa = vpaRegex.find(line)?.groupValues?.getOrNull(1)
 
-        val reference = referenceRegex.find(haystack)?.groupValues?.getOrNull(1)
-
-        val vpa = vpaRegex.find(haystack)?.groupValues?.getOrNull(1)
-
-        val merchantName = when {
-            vpa != null -> {
-                parenthesizedNameRegex.find(haystack)?.groupValues?.getOrNull(1)?.trim()
-            }
-            else -> null
+        val merchantName = if (vpa != null) {
+            parenthesizedNameRegex.find(line)?.groupValues?.getOrNull(1)?.trim()
+        } else {
+            null
         }
 
-        val isCreditCard = lower.contains("credit card") ||
-            lower.contains("credit_cards") ||
-            lower.contains("sbi card") ||
-            lower.contains("card payment")
+        val isCreditCard = Regex(
+            """(?i)\bcredit\s+card\b|\bcard\s+(?:no\.?|number|ending)\b"""
+        ).containsMatchIn(lowerLine)
 
         val accountType = if (isCreditCard) {
             AccountType.CREDIT_CARD
@@ -111,11 +141,11 @@ object GmailNotificationParser {
         }
 
         val paymentMethod = when {
-            vpa != null || lower.contains("upi") -> PaymentMethod.UPI
-            isCreditCard || lower.contains("card") -> PaymentMethod.CARD
-            lower.contains("neft") -> PaymentMethod.NEFT
-            lower.contains("imps") -> PaymentMethod.IMPS
-            lower.contains("rtgs") -> PaymentMethod.RTGS
+            vpa != null || Regex("""(?i)\bUPI\b""").containsMatchIn(lowerLine) -> PaymentMethod.UPI
+            isCreditCard -> PaymentMethod.CARD
+            Regex("""(?i)\bNEFT\b""").containsMatchIn(lowerLine) -> PaymentMethod.NEFT
+            Regex("""(?i)\bIMPS\b""").containsMatchIn(lowerLine) -> PaymentMethod.IMPS
+            Regex("""(?i)\bRTGS\b""").containsMatchIn(lowerLine) -> PaymentMethod.RTGS
             else -> PaymentMethod.UNKNOWN
         }
 
