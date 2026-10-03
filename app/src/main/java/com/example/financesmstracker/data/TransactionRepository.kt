@@ -19,6 +19,16 @@ import com.example.financesmstracker.util.TransactionReferenceNormalizer
 
 class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private val context: Context) {
 
+    private fun normalizedBank(value: String?): String? =
+        value?.trim()
+            ?.takeIf { it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true) }
+            ?.uppercase()
+            ?.removeSuffix(" BANK")
+            ?.removeSuffix(" LTD")
+            ?.removeSuffix(" LIMITED")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
     private val localHistoryPrefs = context.getSharedPreferences("local_history_state", Context.MODE_PRIVATE)
 
     private fun wasClearedBefore(transaction: Transaction): Boolean {
@@ -85,7 +95,10 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     FinanceDatabaseHelper.COLUMN_BANK,
                     FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
                     FinanceDatabaseHelper.COLUMN_REF_NUMBER,
-                    FinanceDatabaseHelper.COLUMN_SMS_HASH
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH,
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE,
+                    FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD,
+                    FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE
                 ),
                 "(" +
                     FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ? OR " +
@@ -94,7 +107,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
-                    FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
                     "ABS(" + FinanceDatabaseHelper.COLUMN_TIMESTAMP + " - ?) <= ?",
                 arrayOf(
                     "notification:%",
@@ -102,7 +114,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     "ACTIVE",
                     transaction.amountPaise.toString(),
                     transaction.currency,
-                    transaction.transactionType.name,
                     transaction.timestamp.toString(),
                     (2L * 60L * 60L * 1000L).toString()
                 ),
@@ -117,11 +128,14 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     val notificationBank = it.getString(1)
                     val notificationLast4 = it.getString(2)
                     val notificationReference = it.getString(3)
+                    val notificationType = it.getString(5)
+                    val notificationPaymentMethod = it.getString(6)
+                    val notificationAccountType = it.getString(7)
 
                     val bankCompatible =
                         notificationBank.isNullOrBlank() ||
                             transaction.bank.isNullOrBlank() ||
-                            notificationBank.equals(transaction.bank, ignoreCase = true)
+                            normalizedBank(notificationBank) == normalizedBank(transaction.bank)
 
                     val last4Compatible =
                         notificationLast4.isNullOrBlank() ||
@@ -133,7 +147,16 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                             transaction.refNumber.isNullOrBlank() ||
                             notificationReference.equals(transaction.refNumber, ignoreCase = true)
 
-                    if (bankCompatible && last4Compatible && referenceCompatible) {
+                    val directionCompatible =
+                        notificationType.equals(transaction.transactionType.name, ignoreCase = true) ||
+                            (
+                                notificationBank.isNullOrBlank() &&
+                                    notificationReference.isNullOrBlank() &&
+                                    notificationPaymentMethod.equals(PaymentMethod.UNKNOWN.name, ignoreCase = true) &&
+                                    notificationAccountType.equals(transaction.accountType.name, ignoreCase = true)
+                            )
+
+                    if (bankCompatible && last4Compatible && referenceCompatible && directionCompatible) {
                         val notificationId = it.getLong(0)
 
                         // SMS is authoritative over a provisional Gmail/Oracle row.
@@ -731,10 +754,10 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             com.example.financesmstracker.util.TransactionReferenceNormalizer.normalize(value)?.lowercase()
 
         fun candidateScore(candidate: LocalCandidate, maxAgeMs: Long): Int? {
-            val remoteBank = normalized(transaction.bank)
+            val remoteBank = normalizedBank(transaction.bank)?.lowercase()
             val remoteLast4 = normalized(transaction.accountLast4)
             val remoteReference = normalizedReference(transaction.reference)
-            val localBank = normalized(candidate.bank)
+            val localBank = normalizedBank(candidate.bank)?.lowercase()
             val localLast4 = normalized(candidate.last4)
             val localReference = normalizedReference(candidate.reference)
 
@@ -748,12 +771,13 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             // leaving a bogus debit/credit stranded forever.
             val provisionalNotification =
                 candidate.isNotification &&
-                    localBank == null &&
                     localReference == null &&
-                    remoteLast4 != null &&
-                    localLast4 == remoteLast4 &&
                     candidate.accountType.equals(transaction.accountType, ignoreCase = true) &&
-                    candidate.paymentMethod.equals(PaymentMethod.UNKNOWN.name, ignoreCase = true)
+                    candidate.paymentMethod.equals(PaymentMethod.UNKNOWN.name, ignoreCase = true) &&
+                    (
+                        (remoteLast4 != null && localLast4 == remoteLast4) ||
+                            (remoteBank != null && localBank == null)
+                    )
 
             if (
                 !candidate.transactionType.equals(transaction.transactionType, ignoreCase = true) &&
@@ -1101,7 +1125,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             put(FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE, transaction.transactionType)
             put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod)
             put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType)
-            put(FinanceDatabaseHelper.COLUMN_BANK, notificationBank)
+            put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
             put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantOrPayee)
             putNull(FinanceDatabaseHelper.COLUMN_PAYEE_ID)
             put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLast4)
