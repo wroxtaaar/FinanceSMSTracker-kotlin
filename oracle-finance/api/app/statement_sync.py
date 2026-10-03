@@ -297,8 +297,7 @@ def _axis_card_metadata(text):
         raise ValueError("Axis credit card number not found")
     return {
         "bank": "AXIS",
-        "account_type": "CREDIT_CARD",
-        "account_last4": card.group(2),
+        "account_type": "CREDIT_CARD",        "account_last4": card.group(2),
         "currency": "INR",
         "opening_balance_minor": None,
     }
@@ -597,8 +596,7 @@ def _parse_axis_bank_pdf(pdf_bytes, key):
                     "category": (
                         "TRANSFER"
                         if detail.upper().startswith("UPI/P2A/")
-                        else "OTHER"
-                    ),
+                        else "OTHER"                    ),
                     "narration": detail,
                     "_balance_minor": balance,
                 })
@@ -765,7 +763,7 @@ def parse_hdfc_credit_card_statement(pdf_bytes, key):
     row_re = re.compile(
         r"(?m)^(?P<date>\d{2}/\d{2}/\d{4})\|\s*"
         r"(?P<time>\d{2}:\d{2})\s+"
-        r"(?P<detail>.+?)\s+C\s+"
+        r"(?P<detail>.+?)\s+(?P<credit>\+)?\s*C\s+"
         r"(?P<amount>[0-9][0-9,]*\.\d{2})\s+l\s*$"
     )
     for match in row_re.finditer(table):
@@ -777,17 +775,18 @@ def parse_hdfc_credit_card_statement(pdf_bytes, key):
         method = "CARD"
         if "UPI" in upper:
             method = "UPI"
-        elif "BBPS" in upper:
+        elif "BBPS" in upper or "BPPY" in upper:
             method = "BILL_PAYMENT"
         elif "EMI" in upper:
             method = "CARD"
+        transaction_type = "CREDIT" if match.group("credit") else "DEBIT"
         rows.append({
             "date": datetime.strptime(
                 f"{match.group('date')} {match.group('time')}",
                 "%d/%m/%Y %H:%M",
             ).replace(tzinfo=timezone.utc),
             "amount_minor": amount,
-            "type": "DEBIT",
+            "type": transaction_type,
             "merchant": _compact(detail),
             "reference": (
                 re.search(r"(?i)\bRef#\s*([A-Z0-9-]+)", detail).group(1)
@@ -795,7 +794,7 @@ def parse_hdfc_credit_card_statement(pdf_bytes, key):
                 else None
             ),
             "payment_method": method,
-            "category": "OTHER",
+            "category": "PAYMENT" if transaction_type == "CREDIT" else "OTHER",
             "narration": detail,
         })
 
@@ -897,8 +896,7 @@ def _parse_hdfc_rows(text, metadata):
             "merchant": _hdfc_merchant(narration),
             "reference": _hdfc_reference(narration),
             "payment_method": payment_method,
-            "category": "TRANSFER" if payment_method == "BANK_TRANSFER" else "OTHER",
-            "narration": _compact(narration),
+            "category": "TRANSFER" if payment_method == "BANK_TRANSFER" else "OTHER",            "narration": _compact(narration),
         })
     
     if not rows:
@@ -1040,7 +1038,8 @@ def process_statement_attachments(service, message):
             # body omitted the total. The transaction parser and bill parser
             # are intentionally separate: the printed Total Amount Due must
             # never become a fake card purchase.
-            if metadata.get("account_type") == "CREDIT_CARD":
+            is_credit_card_statement = metadata.get("account_type") == "CREDIT_CARD"
+            if is_credit_card_statement:
                 pdf_text = _pdf_text(pdf_bytes, key)
                 bill_amount = _extract_statement_bill_amount(pdf_text)
                 if bill_amount is not None:
@@ -1055,6 +1054,13 @@ def process_statement_attachments(service, message):
                         "accountLast2": metadata.get("account_last2"),
                         "confidence": 1.0,
                     })
+
+                # A credit-card statement is a historical snapshot. Its rows
+                # are already reflected in the billed amount and must never be
+                # imported as new active spend. Only the statement-level bill
+                # snapshot is authoritative here. New post-statement card
+                # transactions arrive through the normal transaction lanes.
+                rows = []
 
             for index, row in enumerate(rows):
                 timestamp = int(row["date"].timestamp() * 1000)
@@ -1197,8 +1203,7 @@ def process_statement_attachments(service, message):
                        (id,message_id,filename,mime_type,content_hash,bank,status,
                         transaction_count,error,created_at)
                        VALUES(?,?,?,?,?,?, 'PARSED',?,?,?)""",
-                    (
-                        attachment_id, message["id"], filename,
+                    (                        attachment_id, message["id"], filename,
                         part.get("mimeType") or "application/pdf",
                         content_hash, metadata["bank"], len(rows), None,
                         int(datetime.now(timezone.utc).timestamp() * 1000),
