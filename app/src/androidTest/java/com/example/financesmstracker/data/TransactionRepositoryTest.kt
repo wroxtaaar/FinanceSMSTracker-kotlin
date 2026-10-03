@@ -352,6 +352,57 @@ class TransactionRepositoryTest {
     }
 
     @Test
+    fun smsMergesBanklessWrongDirectionNotificationAndHdfcBankAlias() {
+        val timestamp = 1_800_000_000_000L
+
+        val provisional = repository.insertTransaction(
+            Transaction(
+                amountPaise = 500L,
+                transactionType = TransactionType.DEBIT,
+                paymentMethod = PaymentMethod.UNKNOWN,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = null,
+                merchantName = null,
+                payeeId = null,
+                accountLastFour = null,
+                refNumber = null,
+                timestamp = timestamp,
+                smsHash = "notification:bankless-wrong-direction-5",
+                category = "GROCERIES",
+                parserConfidence = 0.70f
+            )
+        )
+        assertTrue(provisional > 0)
+
+        val sms = Transaction(
+            amountPaise = 500L,
+            transactionType = TransactionType.CREDIT,
+            paymentMethod = PaymentMethod.UPI,
+            accountType = AccountType.BANK_ACCOUNT,
+            bank = "HDFC Bank",
+            merchantName = "HDFC Bank",
+            payeeId = null,
+            accountLastFour = "9591",
+            refNumber = "502395202128",
+            timestamp = timestamp + 30_000L,
+            smsHash = HashUtil.sha256("hdfc-sms-5-bank-alias"),
+            category = "TRANSFER",
+            parserConfidence = 0.99f
+        )
+
+        val returnedId = repository.insertTransaction(sms)
+
+        assertEquals(provisional, returnedId)
+        val active = repository.getAllTransactions().filter { it.amountPaise == 500L }
+        assertEquals(1, active.size)
+        assertEquals(TransactionType.CREDIT, active.single().transactionType)
+        assertEquals("HDFC Bank", active.single().bank)
+        assertEquals("9591", active.single().accountLastFour)
+        assertEquals("502395202128", active.single().refNumber)
+        assertEquals(HashUtil.sha256("hdfc-sms-5-bank-alias"), active.single().smsHash)
+    }
+
+    @Test
     fun oracleGmailReferenceCorrectsAxisNotificationAndVoidsWrongAxisDebit() {
         val rrn = "739593577194"
         val timestamp = 1_800_000_000_000L
