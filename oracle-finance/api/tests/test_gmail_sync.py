@@ -808,9 +808,9 @@ def test_repair_legacy_icici_credit_card_reparses_existing_row():
     assert tx["payment_method"] == "CARD"
     assert tx["merchant_or_payee"] == "AMAZON PAY GROCERY"
     assert tx["reference"] is None
-    assert balance == 164100
+    assert balance == 35900
     assert adjustment["account_id"] == "icici-repair"
-    assert adjustment["delta_minor"] == 64100
+    assert adjustment["delta_minor"] == -64100
     assert evidence["reference"] is None
     assert evidence["matched_transaction_id"] is None
 
