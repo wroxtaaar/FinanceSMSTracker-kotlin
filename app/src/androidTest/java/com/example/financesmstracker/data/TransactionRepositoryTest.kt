@@ -348,4 +348,77 @@ class TransactionRepositoryTest {
         assertTrue(allActive.none { it.id == wrongAxisDebit })
     }
 
+
+    @Test
+    fun oracleGmailUpsertReplacesExistingRemoteMarkerWithoutUniqueCrash() {
+        val rrn = "998877665544"
+        val timestamp = 1_800_000_000_000L
+        val remoteMarker = "oracle:gmail:gmail:existing-$rrn"
+
+        val notificationId = repository.insertTransaction(
+            Transaction(
+                amountPaise = 400L,
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = PaymentMethod.UNKNOWN,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "AXIS",
+                merchantName = null,
+                payeeId = null,
+                accountLastFour = null,
+                refNumber = null,
+                timestamp = timestamp,
+                smsHash = "notification:axis-$rrn",
+                category = "OTHER",
+                parserConfidence = 0.90f
+            )
+        )
+
+        // Simulate a previous Gmail sync that already materialized the same
+        // remote transaction under the unique oracle:gmail:<id> marker.
+        val existingRemoteId = repository.insertTransaction(
+            Transaction(
+                amountPaise = 400L,
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "AXIS",
+                merchantName = "ABDUL WAS",
+                payeeId = null,
+                accountLastFour = "3370",
+                refNumber = rrn,
+                timestamp = timestamp + 10L * 60L * 60L * 1000L,
+                smsHash = remoteMarker,
+                category = "OTHER",
+                parserConfidence = 1.0f
+            )
+        )
+
+        val remote = OracleTransaction(
+            id = "gmail:existing-$rrn",
+            amountMinor = 400L,
+            currency = "INR",
+            transactionType = "CREDIT",
+            paymentMethod = "UPI",
+            accountType = "BANK_ACCOUNT",
+            bank = "AXIS",
+            merchantOrPayee = "ABDUL WAS",
+            accountLast4 = "3370",
+            reference = rrn,
+            timestamp = timestamp + 60_000L,
+            category = "OTHER",
+            confidence = 1.0f
+        )
+
+        repository.upsertOracleGmailTransaction(remote)
+
+        val merged = repository.getTransactionById(notificationId)
+        assertNotNull(merged)
+        assertEquals(remoteMarker, merged?.smsHash)
+        assertEquals(rrn, merged?.refNumber)
+        assertEquals("3370", merged?.accountLastFour)
+        assertEquals("ABDUL WAS", merged?.merchantName)
+        assertNull(repository.getTransactionById(existingRemoteId))
+        assertEquals(1, repository.getAllTransactions().count { it.smsHash == remoteMarker })
+    }
+
 }
