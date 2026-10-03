@@ -1620,3 +1620,49 @@ def test_credit_card_statement_attachment_updates_bill_without_active_spend(monk
     assert statement_rows == 0
     assert attachment["status"] == "PARSED"
     assert attachment["transaction_count"] == 0
+
+
+
+def test_axis_credit_direction_ignores_footer_debit_words():
+    message = _message(
+        "axis-credit-footer-direction",
+        "Dear Customer, Here's the summary of your transaction. "
+        "Amount Credited: INR 6.00 Account Number: XX3370 "
+        "Date & Time: 03-10-26, 15:23:16 IST "
+        "Transaction Info: UPI/P2A/930624306800/ABDUL WAS/HDFC/Paym "
+        "Payment successful. You may be charged for card services. "
+        "Do not share your credit card or debit details.",
+        subject="INR 6.00 was credited to your A/c.",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "INR 6.00 was credited to your A/c."},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, evidence = parsed
+    assert transaction.amountMinor == 600
+    assert transaction.type == "CREDIT"
+    assert transaction.paymentMethod == "UPI"
+    assert transaction.accountType == "BANK_ACCOUNT"
+    assert transaction.bank == "AXIS"
+    assert transaction.accountLast4 == "3370"
+    assert transaction.reference == "930624306800"
+    assert evidence.direction == "CREDIT"
+
+
+def test_axis_identity_free_upi_bank_email_is_rejected():
+    message = _message(
+        "axis-no-identity",
+        "Amount Credited: INR 3510.00 Account Number: XX3370. "
+        "Payment successful. Available balance is INR 50000.00.",
+        subject="Axis Bank Transaction Alert",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Axis Bank Transaction Alert"},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    assert parse_bank_email(message) is None
