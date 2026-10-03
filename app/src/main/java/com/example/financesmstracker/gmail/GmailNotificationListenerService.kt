@@ -56,6 +56,24 @@ class GmailNotificationListenerService : NotificationListenerService() {
         ): String = HashUtil.sha256("$packageName|$notificationKey|$postTime")
     }
 
+
+    /**
+     * Financial Gmail/CRED notifications are consumed by the finance app, so
+     * dismiss the specific notification after its evidence has been durably
+     * recorded. The notification key is the same key Android uses to dismiss
+     * one outstanding notification.
+     */
+    private fun dismissProcessedNotification(sbn: StatusBarNotification) {
+        runCatching {
+            cancelNotification(sbn.key)
+            Log.d(TAG, "Dismissed processed notification: ${sbn.packageName}/${sbn.key}")
+        }.onFailure { error ->
+            // Dismissal is only UI cleanup. Never fail financial ingestion
+            // because the notification host rejected the dismissal.
+            Log.w(TAG, "Could not dismiss processed notification: ${error.message}")
+        }
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         NotificationAccessHelper.setListenerConnected(applicationContext, true)
@@ -276,6 +294,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
             val evidenceId = repository.insertSourceEvidence(evidence)
             if (evidenceId == -1L) {
                 Log.d(TAG, "Duplicate CRED card bill evidence skipped")
+                dismissProcessedNotification(sbn)
                 return
             }
 
@@ -317,6 +336,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 TAG,
                 "Card bill payment applied: card=${parsed.cardBank}-${parsed.cardLastFour}, amount=${parsed.amountPaise}"
             )
+            dismissProcessedNotification(sbn)
         } finally {
             dbHelper.close()
         }
@@ -433,6 +453,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
             val evidenceId = repository.insertSourceEvidence(evidence)
             if (evidenceId == -1L) {
                 Log.d(TAG, "Duplicate Gmail notification evidence skipped")
+                dismissProcessedNotification(sbn)
                 return
             }
 
@@ -455,6 +476,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
             var persistedEvidence = repository.getSourceEvidenceById(evidenceId)
             if (persistedEvidence?.status == EvidenceStatus.MATCHED) {
                 Log.d(TAG, "Gmail notification matched existing transaction " + persistedEvidence.transactionId)
+                dismissProcessedNotification(sbn)
                 return
             }
 
@@ -484,6 +506,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
             val rowId = repository.insertTransaction(transaction)
             if (rowId == -1L) {
                 Log.d(TAG, "Notification transaction already exists for content hash")
+                dismissProcessedNotification(sbn)
                 return
             }
 
@@ -508,6 +531,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
                     " bank=" + parsed.bank +
                     " ref=" + parsed.refNumber
             )
+            dismissProcessedNotification(sbn)
         } finally {
             dbHelper.close()
         }
