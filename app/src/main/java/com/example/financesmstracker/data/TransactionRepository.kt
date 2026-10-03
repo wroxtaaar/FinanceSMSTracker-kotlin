@@ -36,6 +36,44 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
 
         val db = dbHelper.writableDatabase
 
+        // Some Gmail notifications expose only the account last-four and omit
+        // the issuer name. If that last-four uniquely belongs to one active
+        // bank account in the local ledger, enrich the provisional notification
+        // before it is synced to Oracle so the bank balance can be applied.
+        val notificationBank = if (
+            transaction.smsHash.startsWith("notification:") &&
+            transaction.accountType == com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT &&
+            transaction.bank.isNullOrBlank() &&
+            !transaction.accountLastFour.isNullOrBlank()
+        ) {
+            db.query(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                arrayOf("DISTINCT " + FinanceDatabaseHelper.COLUMN_BANK),
+                FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_BANK + " IS NOT NULL AND TRIM(" +
+                    FinanceDatabaseHelper.COLUMN_BANK + ") <> ''",
+                arrayOf(
+                    "ACTIVE",
+                    com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT.name,
+                    transaction.accountLastFour
+                ),
+                null,
+                null,
+                null
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val firstBank = cursor.getString(0)
+                    if (cursor.moveToNext()) null else firstBank
+                } else {
+                    null
+                }
+            }
+        } else {
+            transaction.bank
+        }
+
         // A Gmail notification can arrive before the bank SMS. When the SMS
         // arrives later, reuse the notification transaction instead of creating
         // a second canonical row.
@@ -1059,7 +1097,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             put(FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE, transaction.transactionType)
             put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod)
             put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType)
-            put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
+            put(FinanceDatabaseHelper.COLUMN_BANK, notificationBank)
             put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantOrPayee)
             putNull(FinanceDatabaseHelper.COLUMN_PAYEE_ID)
             put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLast4)
