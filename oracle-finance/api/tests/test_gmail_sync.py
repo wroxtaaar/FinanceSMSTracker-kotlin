@@ -15,6 +15,7 @@ from app.db import init_db, connection
 from app.gmail_sync import (
     ingest_messages,
     parse_bank_email,
+    _gmail_default_category,
     _repair_legacy_gmail_account_classifications,
     _repair_legacy_axis_credit_direction_conflicts,
     _repair_legacy_unidentified_hdfc_gmail_transactions,
@@ -1651,3 +1652,30 @@ def test_axis_credit_direction_ignores_footer_debit_words():
     assert transaction.accountLast4 == "3370"
     assert transaction.reference == "930624306800"
     assert evidence.direction == "CREDIT"
+
+def test_gmail_axis_credit_gets_transfer_category():
+    message = _message(
+        "axis-credit-category",
+        "Amount Credited: INR 4.00\\n"
+        "Account Number: XX3370\\n"
+        "Date & Time: 03-10-26, 14:05:03 IST\\n"
+        "Transaction Info: UPI/P2A/739593577194/ABDUL WAS/HDFC/Paym...",
+        subject="INR 4.00 was credited to your A/c.",
+    )
+    message["payload"]["headers"][1]["value"] = "Axis Bank Alerts <alerts@axis.bank.in>"
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, _ = parsed
+    assert transaction.type == "CREDIT"
+    assert transaction.bank == "AXIS"
+    assert transaction.accountLast4 == "3370"
+    assert transaction.reference == "739593577194"
+    assert transaction.category == "TRANSFER"
+
+
+def test_gmail_credit_category_specific_cases():
+    assert _gmail_default_category("CREDIT", "refund for UPI transaction") == "REFUND"
+    assert _gmail_default_category("CREDIT", "monthly salary credited") == "SALARY"
+    assert _gmail_default_category("CREDIT", "amount credited via UPI") == "TRANSFER"
