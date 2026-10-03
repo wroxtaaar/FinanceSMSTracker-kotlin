@@ -297,7 +297,8 @@ def test_gmail_parser_extracts_numeric_reference_only():
     message = _message(
         "ref-1",
         "HDFC Bank A/c XX9591 debited INR 5.00. Ref UPI-12345.",
-    )    parsed = parse_bank_email(message)
+    )
+    parsed = parse_bank_email(message)
 
     assert parsed is not None
     transaction, _ = parsed
@@ -596,7 +597,9 @@ def test_repair_legacy_icici_credit_card_reparses_existing_row():
             INSERT INTO transactions
             (id,amount_minor,currency,type,payment_method,account_type,bank,
              merchant_or_payee,account_last4,reference,timestamp,category,
-             confidence,duplicate_of,status,created_at)            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)            """,
+             confidence,duplicate_of,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
             (
                 transaction_id,
                 64100,
