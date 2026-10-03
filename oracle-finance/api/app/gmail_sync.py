@@ -151,11 +151,20 @@ def _reference(combined):
     # Axis alerts often expose the transaction reference as "Transaction
     # Info" rather than "Ref"/"UTR".
     if not token:
+        # Axis account alerts put the RRN inside Transaction Info:
+        # UPI/P2A/<RRN>/<counterparty>/...
         match = re.search(
-            r"(?i)\bTransaction\s+Info\s*:\s*([^\s<]{6,120})",
+            r"(?i)Transaction\s+Info\s*:\s*UPI/P2A/([0-9]{6,})",
             normalized,
         )
-        token = match.group(1) if match else None
+        if match:
+            token = match.group(1)
+        else:
+            match = re.search(
+                r"(?i)\bTransaction\s+Info\s*:\s*([^\s<]{6,120})",
+                normalized,
+            )
+            token = match.group(1) if match else None
 
     token = token.rstrip(".,;:)") if token else None
     if not token:
@@ -1045,6 +1054,22 @@ def parse_card_bill_email(message):
     }
 
 
+def _gmail_default_category(transaction_type, combined):
+    """Return a valid automatic category for Gmail-derived transactions.
+
+    Credit notifications/emails must never fall back to OTHER because OTHER is
+    an explicit user choice meaning "exclude from Splitwise". Generic credits
+    are transfers; refunds/reversals and salary/payroll retain their specific
+    categories.
+    """
+    if str(transaction_type or "").upper() == "CREDIT":
+        if re.search(r"(?i)\b(?:refund|reversal|reversed)\b", combined):
+            return "REFUND"
+        if re.search(r"(?i)\b(?:salary|payroll|stipend)\b", combined):
+            return "SALARY"
+        return "TRANSFER"
+    return "OTHER"
+
 def parse_bank_email(message):
     payload=message.get("payload",{})
     headers=_headers(payload)
@@ -1122,7 +1147,7 @@ def parse_bank_email(message):
     t=SyncTransactionModel(id=tx_id,amountMinor=amount,currency="INR",type=direction,
        paymentMethod="CARD" if account_type=="CREDIT_CARD" else "UPI",accountType=account_type,
        bank=bank,merchantOrPayee=merchant_or_payee,accountLast4=last4,reference=reference,
-       timestamp=int(message.get("internalDate","0")),category="OTHER",confidence=min(score, 1.0))
+       timestamp=int(message.get("internalDate","0")),category=_gmail_default_category(direction, combined),confidence=min(score, 1.0))
     e=SyncEvidenceModel(id=ev_id,sourceType="GMAIL",sourceId=message["id"],status="UNMATCHED",
        observedAt=int(message.get("internalDate","0")),transactionId=tx_id,amountMinor=amount,currency="INR",
        direction=direction,bankProvider=bank,accountLast4=last4,reference=reference,

@@ -60,7 +60,7 @@ def test_internal_transfer_match():
 
 
 def test_new_transactions_update_seeded_account_balances():
-    from app.ledger import sync_transaction
+    from app.ledger import get_manual_splitwise_total, sync_transaction
 
     class T:
         def __init__(self, id, typ, account_type, bank, last4, amount):
@@ -96,6 +96,64 @@ def test_new_transactions_update_seeded_account_balances():
 
     assert bank_balance == 98500
     assert card_balance == 44200
+
+
+def test_provisional_bankless_debit_is_corrected_to_axis_credit():
+    from app.ledger import get_manual_splitwise_total, sync_transaction
+
+    class T:
+        def __init__(self, typ, bank, category):
+            self.id = "axis-provisional"
+            self.amountMinor = 200
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UNKNOWN" if bank is None else "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = None
+            self.accountLast4 = "3370"
+            self.reference = None if bank is None else "898523485227"
+            self.timestamp = 1_800_000_000_000
+            self.category = category
+            self.confidence = 0.70 if bank is None else 1.0
+
+    set_balance(
+        "axis-provisional-account",
+        "Axis Bank",
+        "INR",
+        "BANK_ACCOUNT",
+        "AXIS BANK",
+        "3370",
+        100000,
+    )
+
+    # Fast notification: missing bank, wrong/ambiguous direction. It must not
+    # change the Axis balance or become a Splitwise debit contribution.
+    sync_transaction(T("DEBIT", None, "GROCERIES"))
+
+    with connection() as conn:
+        before = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='axis-provisional-account'"
+        ).fetchone()["balance_minor"]
+    assert before == 100000
+    assert get_manual_splitwise_total("INR") is None
+
+    # Gmail is authoritative and clarifies this as an Axis credit.
+    sync_transaction(T("CREDIT", "AXIS", "GROCERIES"))
+
+    with connection() as conn:
+        after = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='axis-provisional-account'"
+        ).fetchone()["balance_minor"]
+        tx = conn.execute(
+            "SELECT type,bank,reference FROM transactions WHERE id='axis-provisional'"
+        ).fetchone()
+
+    assert after == 100200
+    assert get_manual_splitwise_total("INR") == -200
+    assert tx["type"] == "CREDIT"
+    assert tx["bank"] == "AXIS"
+    assert tx["reference"] == "898523485227"
 
 
 def test_existing_transaction_is_not_applied_twice():
@@ -845,3 +903,47 @@ def test_manual_card_reconciliation_retains_bill_split_for_historical_statement(
 
     assert row["balance_minor"] == 50000
     assert row["bill_balance_minor"] == 30000
+
+
+def test_axis_bank_alias_and_late_transaction_update_balance():
+    from app.ledger import sync_transaction
+
+    class T:
+        def __init__(self, id, typ, timestamp):
+            self.id = id
+            self.amountMinor = 300
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = "AXIS"
+            self.merchantOrPayee = "ABDUL WAS"
+            self.accountLast4 = "3370"
+            self.reference = "898523485227"
+            self.timestamp = timestamp
+            self.category = "TRANSFER"
+            self.confidence = 0.98
+
+    # The configured account may contain the display name "AXIS BANK" while
+    # transaction parsers normalize the provider to "AXIS".
+    set_balance(
+        "axis-bank",
+        "Axis Bank",
+        "INR",
+        "BANK_ACCOUNT",
+        "AXIS BANK",
+        "3370",
+        100000,
+    )
+
+    # Simulate a late notification: the bank event timestamp is before the
+    # manual reconciliation point, but the transaction itself is discovered
+    # after that reconciliation.
+    sync_transaction(T("axis-late-credit", "CREDIT", 1700000000000))
+
+    with connection() as conn:
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='axis-bank'"
+        ).fetchone()["balance_minor"]
+
+    assert balance == 100300

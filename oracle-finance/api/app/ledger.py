@@ -39,29 +39,148 @@ def splitwise_delta(account_type, transaction_type, amount_minor, category):
 def splitwise_delta_for_transaction(t):
     return splitwise_delta(t.accountType, t.type, t.amountMinor, t.category)
 
+
+def is_provisional_unresolved_transaction(t):
+    """Return True for a fast notification row that is not authoritative yet.
+
+    These rows can have a useful account last-4 but no bank/reference and an
+    UNKNOWN payment method. They are intentionally stored for later Gmail
+    enrichment, but must not affect the account balance or Splitwise until the
+    authoritative bank evidence arrives.
+    """
+    bank = str(getattr(t, "bank", None) or "").strip()
+    reference = str(getattr(t, "reference", None) or "").strip()
+    payment_method = str(getattr(t, "paymentMethod", None) or "").strip().upper()
+    account_type = str(getattr(t, "accountType", None) or "").strip().upper()
+    last4 = str(
+        getattr(t, "accountLast4", None)
+        or getattr(t, "accountLastFour", None)
+        or ""
+    ).strip()
+    return (
+        not bank
+        and not reference
+        and payment_method == "UNKNOWN"
+        and account_type in ("BANK_ACCOUNT", "CREDIT_CARD")
+        and bool(last4)
+    )
+
+
+def is_provisional_row(row):
+    """Same unresolved-notification check for an existing SQLite row."""
+    bank = str(row["bank"] or "").strip()
+    reference = str(row["reference"] or "").strip()
+    payment_method = str(row["payment_method"] or "").strip().upper()
+    account_type = str(row["account_type"] or "").strip().upper()
+    last4 = str(row["account_last4"] or "").strip()
+    return (
+        not bank
+        and not reference
+        and payment_method == "UNKNOWN"
+        and account_type in ("BANK_ACCOUNT", "CREDIT_CARD")
+        and bool(last4)
+    )
+
+
 def sync_transaction(t, apply_balance=True):
     with connection() as conn:
         before=conn.execute(
-            """SELECT id,amount_minor,currency,type,account_type,category,status
-               FROM transactions WHERE id=?""",
+            """SELECT * FROM transactions WHERE id=?""",
             (t.id,)
         ).fetchone()
         created_at=now_ms()
+        provisional = is_provisional_unresolved_transaction(t)
         conn.execute("""INSERT OR IGNORE INTO transactions
         (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,normalize_reference(t.reference),
          t.timestamp,t.category,t.confidence,None,"ACTIVE",created_at))
 
-        if before is None and apply_balance and not str(t.id).startswith("gmail:"):
-            apply_transaction_to_account(conn, t, created_at)
+        if (
+            before is None
+            and apply_balance
+            and not str(t.id).startswith("gmail:")
+            and not provisional
+        ):
+            apply_transaction_to_account(conn, t, created_at, transaction_created_at=created_at)
+
+        if before is not None and before["status"] == "ACTIVE":
+            # An Android notification can be synced before Gmail/IMAP clarifies
+            # it. When the same canonical ID is later enriched, update the
+            # existing ledger row and repair any balance/Splitwise contribution
+            # that was based on the provisional direction/account identity.
+            old_delta = 0 if is_provisional_row(before) else splitwise_delta(
+                before["account_type"], before["type"], before["amount_minor"], before["category"]
+            )
+            new_delta = splitwise_delta_for_transaction(t)
+
+            balance_adjustment = conn.execute(
+                "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
+                (t.id,),
+            ).fetchone()
+
+            materially_changed = (
+                int(before["amount_minor"]) != int(t.amountMinor)
+                or str(before["currency"]) != str(t.currency)
+                or str(before["type"]) != str(t.type)
+                or str(before["account_type"]) != str(t.accountType)
+                or str(before["bank"] or "").strip().upper() != str(t.bank or "").strip().upper()
+                or str(before["account_last4"] or "").strip() != str(t.accountLast4 or "").strip()
+            )
+
+            if materially_changed:
+                if balance_adjustment is not None:
+                    conn.execute(
+                        "UPDATE accounts SET balance_minor=balance_minor-?, updated_at=? WHERE id=?",
+                        (int(balance_adjustment["delta_minor"]), created_at, balance_adjustment["account_id"]),
+                    )
+                    conn.execute(
+                        "DELETE FROM balance_adjustments WHERE transaction_id=?",
+                        (t.id,),
+                    )
+
+                conn.execute(
+                    """UPDATE transactions SET
+                       amount_minor=?, currency=?, type=?, payment_method=?,
+                       account_type=?, bank=?, merchant_or_payee=?,
+                       account_last4=?, reference=?, timestamp=?, confidence=?,
+                       status='ACTIVE'
+                       WHERE id=?""",
+                    (
+                        t.amountMinor, t.currency, t.type, t.paymentMethod,
+                        t.accountType, t.bank, t.merchantOrPayee,
+                        t.accountLast4, normalize_reference(t.reference),
+                        t.timestamp, t.confidence, t.id,
+                    ),
+                )
+
+                if apply_balance and not str(t.id).startswith("gmail:"):
+                    apply_transaction_to_account(
+                        conn, t, created_at, transaction_created_at=created_at
+                    )
+
+                if old_delta != new_delta and not str(t.id).startswith("gmail:"):
+                    splitwise_change = new_delta - old_delta
+                    conn.execute(
+                        """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
+                           VALUES(?,?,?)
+                           ON CONFLICT(currency) DO UPDATE SET
+                               amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
+                               updated_at=excluded.updated_at""",
+                        (t.currency, splitwise_change, created_at),
+                    )
 
         # Splitwise is a signed ledger component. Bank debits increase the
         # amount owed to the user, bank credits decrease it, card debits
         # decrease it, and card credits increase it. Gmail rows are never
         # allowed to create a Splitwise contribution until reconciliation makes
         # the canonical non-Gmail transaction authoritative.
-        if before is None and apply_balance and not str(t.id).startswith("gmail:"):
+        if (
+            before is None
+            and apply_balance
+            and not str(t.id).startswith("gmail:")
+            and not provisional
+        ):
             delta = splitwise_delta_for_transaction(t)
             if delta:
                 conn.execute(
@@ -84,7 +203,7 @@ def sync_transaction(t, apply_balance=True):
             and str(before["category"] or "").strip().upper()
                 != str(t.category or "").strip().upper()
         ):
-            old_delta = splitwise_delta(
+            old_delta = 0 if is_provisional_row(before) else splitwise_delta(
                 before["account_type"], before["type"], before["amount_minor"], before["category"]
             )
             new_delta = splitwise_delta_for_transaction(t)
@@ -106,34 +225,71 @@ def sync_transaction(t, apply_balance=True):
 
         return before is None
 
-def apply_transaction_to_account(conn, t, applied_at):
+def _normalize_account_bank(value):
+    raw=(value or "").strip().upper()
+    if not raw:
+        return ""
+    for suffix in (" BANK", " LTD", " LIMITED"):
+        if raw.endswith(suffix):
+            raw=raw[:-len(suffix)].strip()
+    return raw
+
+def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=None):
     if t.accountType not in ("BANK_ACCOUNT", "CREDIT_CARD"):
         return
 
-    bank=(t.bank or "").strip().upper()
-    last4=(t.accountLast4 or "").strip()
+    bank=_normalize_account_bank(t.bank)
+    last4=(getattr(t, "accountLast4", None) or getattr(t, "accountLastFour", None) or "").strip()
 
+    # Bank names arrive from different sources as "AXIS", "AXIS BANK", etc.
+    # Match by normalized identity instead of requiring byte-for-byte equality.
     query="""
-        SELECT id, balance_minor, bill_balance_minor, balance_reconciled_at
+        SELECT id, balance_minor, bill_balance_minor, balance_reconciled_at, bank, last4
         FROM accounts
         WHERE account_type=?
           AND currency=?
-          AND UPPER(TRIM(COALESCE(bank,'')))=?
           AND TRIM(COALESCE(last4,''))=?
         ORDER BY updated_at DESC
-        LIMIT 1
     """
-    account=conn.execute(query,(t.accountType,t.currency,bank,last4)).fetchone()
+    candidates=conn.execute(query,(t.accountType,t.currency,last4)).fetchall()
+
+    account=None
+    for candidate in candidates:
+        candidate_bank=_normalize_account_bank(candidate["bank"])
+        if candidate_bank == bank:
+            account=candidate
+            break
+
+    # If the transaction has no bank name, only use an unambiguous account
+    # with the same type/currency/last4.
+    if account is None and not bank and len(candidates) == 1:
+        account=candidates[0]
+
     if not account:
         return
 
-    # A manual balance edit is a reconciliation point. Historical evidence
-    # discovered after that point must not retroactively change the reconciled
-    # current balance. Transactions dated after the reconciliation continue to
-    # move the balance normally.
+    # A manual balance edit is a reconciliation point. Transactions that
+    # already existed before that reconciliation are assumed to be included in
+    # the manually verified balance. A genuinely new transaction discovered
+    # after reconciliation must still affect the balance even when its bank
+    # event timestamp is older because the notification/email arrived late.
     reconciled_at = int(account["balance_reconciled_at"] or 0)
-    if reconciled_at and int(t.timestamp) <= reconciled_at:
-        return
+    created_at = int(transaction_created_at or applied_at)
+    event_at = int(t.timestamp)
+    # A manual reconciliation must ignore genuinely historical rows discovered
+    # later. We still allow a recent bank event whose notification/email arrived
+    # after reconciliation; this covers the real late-Gmail case without
+    # replaying arbitrarily old transactions into a verified balance.
+    # A real bank event timestamp is epoch milliseconds. Keep the
+    # "discovered after reconciliation" exception for plausible transaction
+    # timestamps, while rejecting obviously synthetic/invalid ancient values.
+    # This also preserves late-email/SMS ingestion of legitimate older events.
+    min_plausible_event_ms = 946684800000  # 2000-01-01
+    if reconciled_at and event_at <= reconciled_at:
+        if created_at <= reconciled_at:
+            return
+        if event_at < min_plausible_event_ms:
+            return
 
     # Both bank accounts and credit cards use the transaction's natural sign:
     # DEBIT decreases the tracked balance; CREDIT increases it.
@@ -589,67 +745,83 @@ def reconcile_duplicate_transaction(transaction_id):
             # Reference-first reconciliation searches the full ledger. The same
             # UPI RRN can exist on both sides of an internal transfer, so bank,
             # account and direction remain mandatory side-of-ledger constraints.
+            # Reference-first reconciliation must still see a provisional
+            # notification/SMS row on the destination side when that row has
+            # not received the RRN yet. Both sides of an internal UPI transfer
+            # can share the same RRN, so direction + bank + account remain
+            # mandatory side-of-ledger constraints.
             candidates=conn.execute(
                 """SELECT * FROM transactions
                    WHERE id<>?
                      AND duplicate_of IS NULL
                      AND id NOT LIKE 'gmail:%'
                      AND status='ACTIVE'
-                     AND reference IS NOT NULL
                    ORDER BY ABS(timestamp-?)""",
                 (tx["id"],tx["timestamp"])
             ).fetchall()
 
             strong=[]
             for c in candidates:
-                if normalize_reference(c["reference"]) != tx_ref:
+                candidate_ref = normalize_reference(c["reference"])
+                if candidate_ref and candidate_ref != tx_ref:
                     continue
                 if tx["amount_minor"] != c["amount_minor"] or tx["currency"] != c["currency"]:
                     continue
                 if tx["type"] != c["type"]:
                     continue
-                if tx["bank"] and c["bank"] and str(tx["bank"]).strip().upper() != str(c["bank"]).strip().upper():
+                if tx["bank"] and c["bank"] and _normalize_account_bank(tx["bank"]) != _normalize_account_bank(c["bank"]):
                     continue
                 if tx["account_last4"] and c["account_last4"] and str(tx["account_last4"]).strip() != str(c["account_last4"]).strip():
                     continue
-                score=100
+
+                # An exact RRN is stronger than a provisional row without one.
+                # A missing RRN is acceptable only when all side identity
+                # constraints match, allowing Gmail to enrich that row.
+                score = 1000 if candidate_ref == tx_ref else 100
                 if tx["bank"] and c["bank"]: score += 25
                 if tx["account_last4"] and c["account_last4"]: score += 30
                 strong.append((score,c))
 
-            if len(strong)==1:
-                canonical=strong[0][1]
-                conn.execute("UPDATE transactions SET duplicate_of=? WHERE id=?",(canonical["id"],tx["id"]))
+            if strong:
+                best_score = max(score for score, _ in strong)
+                best = [(score, c) for score, c in strong if score == best_score]
+                if len(best) == 1:
+                    score, canonical = best[0]
+                    conn.execute("UPDATE transactions SET duplicate_of=? WHERE id=?",(canonical["id"],tx["id"]))
 
-                # Gmail can arrive after a notification/SMS has already created
-                # the canonical ledger row. Preserve the stronger Gmail
-                # transaction identity on that canonical row instead of leaving
-                # the RRN stranded on the duplicate Gmail row.
-                enrichment = {}
-                if not canonical["reference"] and tx["reference"]:
-                    enrichment["reference"] = normalize_reference(tx["reference"])
-                if (
-                    (not canonical["merchant_or_payee"] or str(canonical["merchant_or_payee"]).strip() == "-")
-                    and tx["merchant_or_payee"]
-                    and str(tx["merchant_or_payee"]).strip() != "-"
-                ):
-                    enrichment["merchant_or_payee"] = tx["merchant_or_payee"]
+                    # Gmail can arrive after a notification/SMS has already
+                    # created the canonical ledger row. Preserve the stronger
+                    # Gmail transaction identity on that canonical row instead
+                    # of leaving the RRN stranded on the duplicate Gmail row.
+                    enrichment = {}
+                    if not canonical["reference"] and tx["reference"]:
+                        enrichment["reference"] = normalize_reference(tx["reference"])
+                    if (
+                        (not canonical["merchant_or_payee"] or str(canonical["merchant_or_payee"]).strip() == "-")
+                        and tx["merchant_or_payee"]
+                        and str(tx["merchant_or_payee"]).strip() != "-"
+                    ):
+                        enrichment["merchant_or_payee"] = tx["merchant_or_payee"]
 
-                if enrichment:
-                    assignments = ", ".join(f"{column}=?" for column in enrichment)
-                    values = list(enrichment.values()) + [canonical["id"]]
+                    if enrichment:
+                        assignments = ", ".join(f"{column}=?"
+                                                for column in enrichment)
+                        values = list(enrichment.values()) + [canonical["id"]]
+                        conn.execute(
+                            f"UPDATE transactions SET {assignments} WHERE id=?",
+                            values,
+                        )
+
                     conn.execute(
-                        f"UPDATE transactions SET {assignments} WHERE id=?",
-                        values,
+                        "UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",
+                        (canonical["id"],tx["id"])
                     )
-
-                conn.execute("UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",(canonical["id"],tx["id"]))
-                return {
-                    "duplicate":tx["id"],
-                    "canonical":canonical["id"],
-                    "score":strong[0][0],
-                    "enriched":bool(enrichment),
-                }
+                    return {
+                        "duplicate":tx["id"],
+                        "canonical":canonical["id"],
+                        "score":score,
+                        "enriched":bool(enrichment),
+                    }
 
             # A notification often has no RRN. It can still be the provisional
             # destination-side row for the Gmail transaction, so retain the
