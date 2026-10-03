@@ -58,17 +58,22 @@ class _Messages:
 
     def list(self, **kwargs):
         self._mode = "list"
-        return self
+    
+    return self
 
     def get(self, **kwargs):
         self._mode = "get"
         self.last_get_id = kwargs.get("id")
-        return self
+    
+    return self
 
     def execute(self):
-        if self._mode == "get":
-            return self._messages[0]
-        return {"messages": [{"id": m["id"]} for m in self._messages]}
+    
+    if self._mode == "get":
+        
+    return self._messages[0]
+    
+    return {"messages": [{"id": m["id"]} for m in self._messages]}
 
 
 class _Users:
@@ -76,7 +81,8 @@ class _Users:
         self._messages = _Messages(messages)
 
     def messages(self):
-        return self._messages
+    
+    return self._messages
 
 
 class FakeService:
@@ -84,7 +90,8 @@ class FakeService:
         self._users = _Users(messages)
 
     def users(self):
-        return self._users
+    
+    return self._users
 
 def test_pending_statement_is_retried_outside_incremental_date_window(monkeypatch):
     import app.gmail_sync as gmail_sync
@@ -119,7 +126,8 @@ def test_pending_statement_is_retried_outside_incremental_date_window(monkeypatc
 
     def fake_statement_processor(service, fetched_message):
         calls.append(fetched_message["id"])
-        return {
+    
+    return {
             "attachmentsScanned": 1,
             "attachmentsParsed": 1,
             "transactionsAdded": 1,
@@ -1197,7 +1205,8 @@ Statement period : August 29, 2026 to September 28, 2026
     metadata, rows = parse_icici_statement(b"fixture", "fixture-secret")
     assert len(rows) == 3
     assert rows[0]["type"] == "CREDIT"
-    assert rows[0]["amount_minor"] == 163100    assert rows[0]["reference"] == "14082331109"
+    assert rows[0]["amount_minor"] == 163100
+    assert rows[0]["reference"] == "14082331109"
     assert rows[0]["merchant"] == "BBPS Payment received"
 
     assert rows[1]["type"] == "DEBIT"
