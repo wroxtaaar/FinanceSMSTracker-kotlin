@@ -8,5 +8,5 @@ services:
     ports:
       - "127.0.0.1:8091:8091"
     volumes:
-      - ./data:/app/data:ro
+      - ./data:/app/data
     restart: unless-stopped
