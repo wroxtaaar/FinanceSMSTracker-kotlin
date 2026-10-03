@@ -151,11 +151,20 @@ def _reference(combined):
     # Axis alerts often expose the transaction reference as "Transaction
     # Info" rather than "Ref"/"UTR".
     if not token:
+        # Axis account alerts put the RRN inside Transaction Info:
+        # UPI/P2A/<RRN>/<counterparty>/...
         match = re.search(
-            r"(?i)\bTransaction\s+Info\s*:\s*([^\s<]{6,120})",
+            r"(?i)\bTransaction\s+Info\s*:\s*UPI/[^/\\s]+/([A-Z0-9]+)",
             normalized,
         )
-        token = match.group(1) if match else None
+        if match:
+            token = match.group(1)
+        else:
+            match = re.search(
+                r"(?i)\bTransaction\s+Info\s*:\s*([^\s<]{6,120})",
+                normalized,
+            )
+            token = match.group(1) if match else None
 
     token = token.rstrip(".,;:)") if token else None
     if not token:
