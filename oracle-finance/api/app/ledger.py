@@ -54,7 +54,7 @@ def sync_transaction(t, apply_balance=True):
          t.timestamp,t.category,t.confidence,None,"ACTIVE",created_at))
 
         if before is None and apply_balance and not str(t.id).startswith("gmail:"):
-            apply_transaction_to_account(conn, t, created_at)
+            apply_transaction_to_account(conn, t, created_at, transaction_created_at=created_at)
 
         # Splitwise is a signed ledger component. Bank debits increase the
         # amount owed to the user, bank credits decrease it, card debits
@@ -106,33 +106,57 @@ def sync_transaction(t, apply_balance=True):
 
         return before is None
 
-def apply_transaction_to_account(conn, t, applied_at):
+def _normalize_account_bank(value):
+    raw=(value or "").strip().upper()
+    if not raw:
+        return ""
+    for suffix in (" BANK", " LTD", " LIMITED"):
+        if raw.endswith(suffix):
+            raw=raw[:-len(suffix)].strip()
+    return raw
+
+def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=None):
     if t.accountType not in ("BANK_ACCOUNT", "CREDIT_CARD"):
         return
 
-    bank=(t.bank or "").strip().upper()
-    last4=(t.accountLast4 or "").strip()
+    bank=_normalize_account_bank(t.bank)
+    last4=(t.accountLastFour or "").strip()
 
+    # Bank names arrive from different sources as "AXIS", "AXIS BANK", etc.
+    # Match by normalized identity instead of requiring byte-for-byte equality.
     query="""
-        SELECT id, balance_minor, bill_balance_minor, balance_reconciled_at
+        SELECT id, balance_minor, bill_balance_minor, balance_reconciled_at, bank, last4
         FROM accounts
         WHERE account_type=?
           AND currency=?
-          AND UPPER(TRIM(COALESCE(bank,'')))=?
           AND TRIM(COALESCE(last4,''))=?
         ORDER BY updated_at DESC
-        LIMIT 1
     """
-    account=conn.execute(query,(t.accountType,t.currency,bank,last4)).fetchone()
+    candidates=conn.execute(query,(t.accountType,t.currency,last4)).fetchall()
+
+    account=None
+    for candidate in candidates:
+        candidate_bank=_normalize_account_bank(candidate["bank"])
+        if candidate_bank == bank:
+            account=candidate
+            break
+
+    # If the transaction has no bank name, only use an unambiguous account
+    # with the same type/currency/last4.
+    if account is None and not bank and len(candidates) == 1:
+        account=candidates[0]
+
     if not account:
         return
 
-    # A manual balance edit is a reconciliation point. Historical evidence
-    # discovered after that point must not retroactively change the reconciled
-    # current balance. Transactions dated after the reconciliation continue to
-    # move the balance normally.
+    # A manual balance edit is a reconciliation point. Transactions that
+    # already existed before that reconciliation are assumed to be included in
+    # the manually verified balance. A genuinely new transaction discovered
+    # after reconciliation must still affect the balance even when its bank
+    # event timestamp is older because the notification/email arrived late.
     reconciled_at = int(account["balance_reconciled_at"] or 0)
-    if reconciled_at and int(t.timestamp) <= reconciled_at:
+    created_at = int(transaction_created_at or applied_at)
+    if reconciled_at and int(t.timestamp) <= reconciled_at and created_at <= reconciled_at:
         return
 
     # Both bank accounts and credit cards use the transaction's natural sign:
