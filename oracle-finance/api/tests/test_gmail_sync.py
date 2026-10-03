@@ -16,6 +16,7 @@ from app.gmail_sync import (
     ingest_messages,
     parse_bank_email,
     _repair_legacy_gmail_account_classifications,
+    _repair_legacy_axis_credit_direction_conflicts,
     _repair_legacy_icici_credit_card_classifications,
     _repair_legacy_gmail_merchants,
     _repair_legacy_gmail_merchant_values,
@@ -393,7 +394,7 @@ def test_axis_real_bank_in_sender_and_html_style_credit_alert():
     assert transaction.type == "CREDIT"
     assert transaction.bank == "AXIS"
     assert transaction.accountLast4 == "3370"
-    assert transaction.reference == "UPI/P2A/18335801167/ABDUL"
+    assert transaction.reference == "18335801167"
     assert transaction.accountType == "BANK_ACCOUNT"
 
 
@@ -896,6 +897,152 @@ def test_axis_self_transfer_merchant_can_use_matching_hdfc_entry():
     assert row["merchant_or_payee"] == "ABDUL WASIQ"
 
 
+def test_axis_transaction_info_reference_is_normalized_to_rrn():
+    message = _message(
+        "axis-reference-normalized",
+        "Dear Customer, Here's the summary of your transaction. "
+        "Amount Credited: INR 4.00 Account Number: XX3370 "
+        "Transaction Info: UPI/P2A/739593577194/ABDUL WAS/HDFC/Paym",
+        subject="INR 4.00 was credited to your A/c.",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "INR 4.00 was credited to your A/c."},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    parsed = parse_bank_email(message)
+    assert parsed is not None
+    transaction, evidence = parsed
+    assert transaction.reference == "739593577194"
+    assert evidence.reference == "739593577194"
+
+
+def test_legacy_axis_false_debit_is_voided_and_reparsed_as_credit():
+    message = _message(
+        "axis-legacy-false-debit",
+        "Dear Customer, Here's the summary of your transaction. "
+        "Amount Credited: INR 4.00 Account Number: XX3370 "
+        "Transaction Info: UPI/P2A/739593577194/ABDUL WAS/HDFC/Paym",
+        subject="INR 4.00 was credited to your A/c.",
+        internal_date="1791029103000",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "INR 4.00 was credited to your A/c."},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                message["id"],
+                "axis-legacy-thread",
+                1791029103000,
+                "alerts@axis.bank.in",
+                message["payload"]["headers"][0]["value"],
+                "axis-legacy-fingerprint",
+                "PARSED",
+                1791029103000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO transactions
+            (id,amount_minor,currency,type,payment_method,account_type,bank,
+             merchant_or_payee,account_last4,reference,timestamp,category,
+             confidence,duplicate_of,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "gmail:axis-legacy-false-debit",
+                400,
+                "INR",
+                "DEBIT",
+                "UPI",
+                "BANK_ACCOUNT",
+                "AXIS",
+                "ABDUL WAS",
+                "3370",
+                "739593577194",
+                1791029103000,
+                "OTHER",
+                1.0,
+                None,
+                "ACTIVE",
+                1791029103000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO evidence
+            (id,source_type,source_id,status,observed_at,transaction_id,
+             matched_transaction_id,amount_minor,currency,direction,
+             bank_provider,account_last4,reference,content_hash,confidence,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "gmail-evidence:" + message["id"],
+                "GMAIL",
+                message["id"],
+                "UNMATCHED",
+                1791029103000,
+                "gmail:axis-legacy-false-debit",
+                None,
+                400,
+                "INR",
+                "DEBIT",
+                "AXIS",
+                "3370",
+                "739593577194",
+                "axis-legacy-false-debit-hash",
+                1.0,
+                1791029103000,
+            ),
+        )
+
+    repaired = _repair_legacy_axis_credit_direction_conflicts()
+    assert repaired == 1
+
+    with connection() as conn:
+        old = conn.execute(
+            "SELECT status FROM transactions WHERE id='gmail:axis-legacy-false-debit'"
+        ).fetchone()
+        gmail_status = conn.execute(
+            "SELECT status FROM gmail_messages WHERE id=?",
+            (message["id"],),
+        ).fetchone()["status"]
+
+    assert old["status"] == "VOIDED"
+    assert gmail_status == "PENDING"
+
+    stats = ingest_messages(FakeService([message]), query="newer_than:30d")
+    assert stats["parsedTransactions"] == 1
+
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id,type,amount_minor,bank,account_type,account_last4,reference,status
+            FROM transactions
+            WHERE id LIKE 'gmail:%' AND amount_minor=400
+            ORDER BY id
+            """
+        ).fetchall()
+
+    assert any(
+        row["type"] == "CREDIT"
+        and row["bank"] == "AXIS"
+        and row["account_type"] == "BANK_ACCOUNT"
+        and row["account_last4"] == "3370"
+        and row["reference"] == "739593577194"
+        and row["status"] == "ACTIVE"
+        for row in rows
+    )
+
+
 def test_axis_transaction_info_is_not_merchant():
     message = _message(
         "axis-no-merchant",
@@ -917,7 +1064,7 @@ def test_axis_transaction_info_is_not_merchant():
     transaction, _ = parsed
     assert transaction.bank == "AXIS"
     assert transaction.accountType == "BANK_ACCOUNT"
-    assert transaction.reference == "UPI/P2A/361639089310/ABDUL"
+    assert transaction.reference == "361639089310"
     assert transaction.merchantOrPayee == "ABDUL WASIQ"
 
 
@@ -959,7 +1106,7 @@ def test_repair_legacy_gmail_merchant_values_replaces_axis_disclaimer():
                 "AXIS",
                 "UPI/P2A/361639089310/ABDUL WASIQ If this transaction was not initiated by you",
                 "3370",
-                "UPI/P2A/361639089310/ABDUL",
+                "361639089310",
                 1790805256000,
                 "OTHER",
                 1.0,
