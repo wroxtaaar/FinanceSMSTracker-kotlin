@@ -120,7 +120,7 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
         return
 
     bank=_normalize_account_bank(t.bank)
-    last4=(t.accountLastFour or "").strip()
+    last4=(getattr(t, "accountLast4", None) or getattr(t, "accountLastFour", None) or "").strip()
 
     # Bank names arrive from different sources as "AXIS", "AXIS BANK", etc.
     # Match by normalized identity instead of requiring byte-for-byte equality.
