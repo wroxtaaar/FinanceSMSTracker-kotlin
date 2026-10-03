@@ -635,23 +635,10 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             if (it.moveToFirst()) it.getLong(0) else null
         }
 
-        /*
-         * Gmail is the durable/clarifying source. A notification is only a
-         * provisional copy. Do not require every weak notification field to
-         * agree with the durable Gmail row: the notification parser can be
-         * incomplete or can have been posted much later than the actual email.
-         *
-         * Matching still requires amount + direction + time, and then at least
-         * one reliable identity:
-         *   - exact reference, or
-         *   - exact VPA/payee, or
-         *   - compatible bank/account identity.
-         *
-         * This prevents two unrelated same-value transactions from being
-         * merged just because they happened on the same day.
-         */
         data class LocalCandidate(
             val id: Long,
+            val amountPaise: Long,
+            val transactionType: String,
             val merchant: String?,
             val bank: String?,
             val last4: String?,
@@ -661,69 +648,63 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             val accountType: String?,
             val confidence: Float,
             val timestamp: Long,
+            val smsHash: String?,
             val isNotification: Boolean
         )
 
         fun normalized(value: String?): String? =
-            value?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true) }
+            value?.trim()
+                ?.takeIf { it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true) }
                 ?.lowercase()
+
+        fun normalizedReference(value: String?): String? =
+            com.example.financesmstracker.util.TransactionReferenceNormalizer.normalize(value)?.lowercase()
 
         fun candidateScore(candidate: LocalCandidate, maxAgeMs: Long): Int? {
             val remoteBank = normalized(transaction.bank)
             val remoteLast4 = normalized(transaction.accountLast4)
-            val remoteReference = normalized(transaction.reference)
-            val remoteMerchant = normalized(transaction.merchantOrPayee)
+            val remoteReference = normalizedReference(transaction.reference)
             val localBank = normalized(candidate.bank)
             val localLast4 = normalized(candidate.last4)
-            val localReference = normalized(candidate.reference)
-            val localMerchant = normalized(candidate.merchant)
+            val localReference = normalizedReference(candidate.reference)
 
+            if (candidate.amountPaise != transaction.amountMinor) return null
+            if (!candidate.transactionType.equals(transaction.transactionType, ignoreCase = true)) return null
+
+            val sameReference = remoteReference != null &&
+                localReference != null &&
+                remoteReference == localReference
+
+            // An exact reference is allowed to resolve a transaction regardless
+            // of age. Without a reference, retain the bounded fallback window.
             val age = kotlin.math.abs(candidate.timestamp - transaction.timestamp)
-            if (age > maxAgeMs) return null
+            if (!sameReference && age > maxAgeMs) return null
+
+            if (remoteReference != null && localReference != null && !sameReference) return null
+
+            // The same UPI RRN can legitimately appear on both ledger sides of
+            // an internal transfer. Reference identity therefore never overrides
+            // a contradictory bank/account identity.
+            if (remoteBank != null && localBank != null && remoteBank != localBank) return null
+            if (remoteLast4 != null && localLast4 != null && remoteLast4 != localLast4) return null
 
             var score = 0
-            var strongIdentity = false
+            if (sameReference) score += 1000
+            if (remoteBank != null && localBank != null && remoteBank == localBank) score += 25
+            if (remoteLast4 != null && localLast4 != null && remoteLast4 == localLast4) score += 30
 
-            if (remoteReference != null && localReference != null) {
-                if (remoteReference != localReference) return null
-                score += 100
-                strongIdentity = true
-            }
-
-            if (remoteBank != null && localBank != null) {
-                if (remoteBank == localBank) {
-                    score += 25
-                } else if (!strongIdentity) {
-                    return null
-                }
-            }
-
-            if (remoteLast4 != null && localLast4 != null) {
-                if (remoteLast4 == localLast4) {
-                    score += 30
-                } else if (!strongIdentity) {
-                    return null
-                }
-            }
-
-            if (remoteMerchant != null && localMerchant != null) {
-                if (remoteMerchant == localMerchant ||
+            val remoteMerchant = normalized(transaction.merchantOrPayee)
+            val localMerchant = normalized(candidate.merchant)
+            if (remoteMerchant != null && localMerchant != null &&
+                (remoteMerchant == localMerchant ||
                     remoteMerchant.contains(localMerchant) ||
-                    localMerchant.contains(remoteMerchant)
-                ) {
-                    score += 25
-                }
+                    localMerchant.contains(remoteMerchant))
+            ) {
+                score += 25
             }
 
-            if (transaction.accountType.equals(candidate.accountType, ignoreCase = true)) {
-                score += 8
-            }
-            if (transaction.paymentMethod.equals(candidate.paymentMethod, ignoreCase = true)) {
-                score += 5
-            }
-
-            // Prefer the closest source when multiple candidates have the same
-            // identity strength. This also makes delayed Gmail notifications safe.
+            if (transaction.accountType.equals(candidate.accountType, ignoreCase = true)) score += 8
+            if (transaction.paymentMethod.equals(candidate.paymentMethod, ignoreCase = true)) score += 5
             score += (20 - (age / (15L * 60L * 1000L)).toInt()).coerceAtLeast(0)
 
             val bankCompatible = remoteBank == null || localBank == null || remoteBank == localBank
@@ -732,36 +713,37 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             val hasAccountIdentity = remoteLast4 != null && localLast4 != null
 
             val compatibleIdentity =
-                strongIdentity ||
+                sameReference ||
                     (bankCompatible && last4Compatible && (hasBankIdentity || hasAccountIdentity))
 
             if (!compatibleIdentity) return null
-
-            // When a bank/account identity is explicitly contradictory, only a
-            // reference/payee can override it.
-            if (!strongIdentity && (!bankCompatible || !last4Compatible)) return null
-
             return score
         }
 
         fun findBestCandidate(isNotification: Boolean, maxAgeMs: Long): LocalCandidate? {
-            val selection = if (isNotification) {
-                FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+            val remoteReference = normalizedReference(transaction.reference)
+
+            val selection: String
+            val args: Array<String>
+
+            if (!isNotification && remoteReference != null) {
+                // Reference-first lookup: deliberately no amount/type/time
+                // restriction in SQL. candidateScore performs the side-aware
+                // validation after normalization.
+                selection =
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_REF_NUMBER + " IS NOT NULL AND " +
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ?"
+                args = arrayOf("ACTIVE", "oracle:gmail:%", "notification:%")
+            } else if (isNotification) {
+                selection =
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ?"
-            } else {
-                FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
-                    FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
-                    FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
-                    FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
-                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
-                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ?"
-            }
-
-            val args = if (isNotification) {
-                arrayOf(
+                args = arrayOf(
                     "ACTIVE",
                     transaction.amountMinor.toString(),
                     transaction.currency,
@@ -769,7 +751,14 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     "notification:%"
                 )
             } else {
-                arrayOf(
+                selection =
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ?"
+                args = arrayOf(
                     "ACTIVE",
                     transaction.amountMinor.toString(),
                     transaction.currency,
@@ -786,6 +775,8 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                 FinanceDatabaseHelper.TABLE_TRANSACTIONS,
                 arrayOf(
                     FinanceDatabaseHelper.COLUMN_ID,
+                    FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE,
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE,
                     FinanceDatabaseHelper.COLUMN_MERCHANT_NAME,
                     FinanceDatabaseHelper.COLUMN_BANK,
                     FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
@@ -802,21 +793,24 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                 null,
                 null,
                 FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
-                "50"
+                if (!isNotification && remoteReference != null) null else "50"
             ).use {
                 while (it.moveToNext()) {
                     val candidate = LocalCandidate(
                         id = it.getLong(0),
-                        merchant = it.getString(1),
-                        bank = it.getString(2),
-                        last4 = it.getString(3),
-                        reference = it.getString(4),
-                        payeeId = it.getString(5),
-                        paymentMethod = it.getString(6),
-                        accountType = it.getString(7),
-                        confidence = it.getFloat(8),
-                        timestamp = it.getLong(9),
-                        isNotification = it.getString(10)?.startsWith("notification:") == true
+                        amountPaise = it.getLong(1),
+                        transactionType = it.getString(2),
+                        merchant = it.getString(3),
+                        bank = it.getString(4),
+                        last4 = it.getString(5),
+                        reference = it.getString(6),
+                        payeeId = it.getString(7),
+                        paymentMethod = it.getString(8),
+                        accountType = it.getString(9),
+                        confidence = it.getFloat(10),
+                        timestamp = it.getLong(11),
+                        smsHash = it.getString(12),
+                        isNotification = it.getString(12)?.startsWith("notification:") == true
                     )
 
                     val score = candidateScore(candidate, maxAgeMs) ?: continue
@@ -839,9 +833,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             maxAgeMs = 6L * 60L * 60L * 1000L
         )
 
-        // Prefer the real SMS/local transaction. If there is no safe SMS match,
-        // clarify the provisional Gmail notification. If neither exists, keep
-        // the durable Gmail row as a new local transaction.
         val resolvedLocal = matchingLocal ?: notificationLocal
 
         if (resolvedLocal != null) {
@@ -849,8 +840,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             val localMerchant = resolvedLocal.merchant
 
             val values = ContentValues().apply {
-                // Durable Gmail is the strongest available clarification source,
-                // so it is allowed to correct weak notification fields and timestamp.
                 put(FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE, transaction.amountMinor)
                 put(FinanceDatabaseHelper.COLUMN_CURRENCY, transaction.currency)
                 put(FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE, transaction.transactionType)
@@ -866,11 +855,12 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLast4)
                 }
                 if (!transaction.reference.isNullOrBlank()) {
-                    put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, transaction.reference)
+                    put(
+                        FinanceDatabaseHelper.COLUMN_REF_NUMBER,
+                        com.example.financesmstracker.util.TransactionReferenceNormalizer.normalize(transaction.reference)
+                    )
                 }
-                if (!transaction.merchantOrPayee.isNullOrBlank() &&
-                    localMerchant.isNullOrBlank()
-                ) {
+                if (!transaction.merchantOrPayee.isNullOrBlank() && localMerchant.isNullOrBlank()) {
                     put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantOrPayee)
                 }
                 if (transaction.confidence >= resolvedLocal.confidence) {
@@ -878,9 +868,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                 }
             }
 
-            // Convert only a provisional notification row into the durable
-            // Gmail identity. A real SMS/local transaction keeps its original
-            // source hash; subsequent Gmail pulls will find it again by identity.
             if (resolvedLocal.isNotification) {
                 values.put(FinanceDatabaseHelper.COLUMN_SMS_HASH, remoteMarker)
             }
@@ -893,11 +880,92 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             )
 
             if (updated > 0) {
-                // If the durable Gmail row confirms an SMS transaction that
-                // already has a provisional notification twin, retire the twin
-                // locally and reverse its Oracle balance contribution. Without
-                // this cleanup, the old notification row would remain visible
-                // even though Gmail has already clarified the real transaction.
+                // A reference can arrive after a bad provisional row was
+                // created. Void any active same-bank/same-account row carrying
+                // the same reference but the wrong amount or ledger direction.
+                val remoteReference = normalizedReference(transaction.reference)
+                if (remoteReference != null) {
+                    val conflicts = mutableListOf<LocalCandidate>()
+                    db.query(
+                        FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                        arrayOf(
+                            FinanceDatabaseHelper.COLUMN_ID,
+                            FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE,
+                            FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE,
+                            FinanceDatabaseHelper.COLUMN_MERCHANT_NAME,
+                            FinanceDatabaseHelper.COLUMN_BANK,
+                            FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
+                            FinanceDatabaseHelper.COLUMN_REF_NUMBER,
+                            FinanceDatabaseHelper.COLUMN_PAYEE_ID,
+                            FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD,
+                            FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE,
+                            FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE,
+                            FinanceDatabaseHelper.COLUMN_TIMESTAMP,
+                            FinanceDatabaseHelper.COLUMN_SMS_HASH
+                        ),
+                        FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                            FinanceDatabaseHelper.COLUMN_REF_NUMBER + " IS NOT NULL",
+                        arrayOf("ACTIVE"),
+                        null,
+                        null,
+                        FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
+                        null
+                    ).use {
+                        while (it.moveToNext()) {
+                            val candidate = LocalCandidate(
+                                id = it.getLong(0),
+                                amountPaise = it.getLong(1),
+                                transactionType = it.getString(2),
+                                merchant = it.getString(3),
+                                bank = it.getString(4),
+                                last4 = it.getString(5),
+                                reference = it.getString(6),
+                                payeeId = it.getString(7),
+                                paymentMethod = it.getString(8),
+                                accountType = it.getString(9),
+                                confidence = it.getFloat(10),
+                                timestamp = it.getLong(11),
+                                smsHash = it.getString(12),
+                                isNotification = it.getString(12)?.startsWith("notification:") == true
+                            )
+                            val sameReference = normalizedReference(candidate.reference) == remoteReference
+                            val sameBank = !transaction.bank.isNullOrBlank() &&
+                                !candidate.bank.isNullOrBlank() &&
+                                normalized(transaction.bank) == normalized(candidate.bank)
+                            val sameAccount = transaction.accountLast4.isNullOrBlank() ||
+                                candidate.last4.isNullOrBlank() ||
+                                normalized(transaction.accountLast4) == normalized(candidate.last4)
+                            val wrongSide = !candidate.transactionType.equals(transaction.transactionType, ignoreCase = true)
+                            val wrongAmount = candidate.amountPaise != transaction.amountMinor
+
+                            if (
+                                candidate.id != localId &&
+                                sameReference &&
+                                sameBank &&
+                                sameAccount &&
+                                (wrongSide || wrongAmount)
+                            ) {
+                                conflicts += candidate
+                            }
+                        }
+                    }
+
+                    for (conflict in conflicts) {
+                        val voided = db.update(
+                            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                            ContentValues().apply {
+                                put(FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS, "VOIDED")
+                            },
+                            FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                            arrayOf(conflict.id.toString())
+                        )
+                        if (voided > 0) {
+                            com.example.financesmstracker.integration.FinanceSyncBridge
+                                .enqueueVoidedTransaction(context, conflict.id)
+                        }
+                    }
+                }
+
                 if (matchingLocal != null && notificationLocal != null && notificationLocal.id != localId) {
                     val notificationAge = kotlin.math.abs(
                         notificationLocal.timestamp - matchingLocal.timestamp
@@ -942,7 +1010,10 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantOrPayee)
             putNull(FinanceDatabaseHelper.COLUMN_PAYEE_ID)
             put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLast4)
-            put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, transaction.reference)
+            put(
+                FinanceDatabaseHelper.COLUMN_REF_NUMBER,
+                com.example.financesmstracker.util.TransactionReferenceNormalizer.normalize(transaction.reference)
+            )
             put(FinanceDatabaseHelper.COLUMN_TIMESTAMP, transaction.timestamp)
             put(FinanceDatabaseHelper.COLUMN_SMS_HASH, remoteMarker)
             put(FinanceDatabaseHelper.COLUMN_CATEGORY, transaction.category ?: "OTHER")
