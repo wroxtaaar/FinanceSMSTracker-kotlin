@@ -518,4 +518,46 @@ class TransactionRepositoryTest {
         assertTrue(allActive.none { it.id == provisional })
     }
 
+
+    @Test
+    fun banklessNotificationInfersUniqueBankFromAccountLastFour() {
+        repository.insertTransaction(
+            Transaction(
+                amountPaise = 100L,
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "AXIS",
+                merchantName = "Existing Axis",
+                payeeId = null,
+                accountLastFour = "3370",
+                refNumber = "existing-axis",
+                timestamp = 1_800_000_000_000L,
+                smsHash = HashUtil.sha256("existing-axis"),
+                category = "TRANSFER",
+                parserConfidence = 0.99f
+            )
+        )
+
+        val notificationId = repository.insertTransaction(
+            Transaction(
+                amountPaise = 500L,
+                transactionType = TransactionType.DEBIT,
+                paymentMethod = PaymentMethod.UNKNOWN,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = null,
+                merchantName = null,
+                payeeId = null,
+                accountLastFour = "3370",
+                refNumber = null,
+                timestamp = 1_800_000_060_000L,
+                smsHash = "notification:axis-5",
+                category = "GROCERIES",
+                parserConfidence = 0.70f
+            )
+        )
+
+        assertEquals("AXIS", repository.getTransactionById(notificationId)?.bank)
+    }
+
 }
