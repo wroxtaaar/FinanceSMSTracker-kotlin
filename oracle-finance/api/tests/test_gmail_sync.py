@@ -1343,7 +1343,10 @@ def test_credit_card_statement_attachment_updates_bill_without_active_spend(monk
             "SELECT balance_minor,bill_balance_minor FROM accounts WHERE id='statement-hdfc-card'"
         ).fetchone()
         statement_rows = conn.execute(
-            "SELECT COUNT(*) value FROM transactions WHERE id LIKE 'statement:%'"
+            """SELECT COUNT(*) value FROM transactions
+               WHERE id LIKE 'statement:%'
+                 AND account_type='CREDIT_CARD'
+                 AND account_last4='5304'"""
         ).fetchone()["value"]
         attachment = conn.execute(
             "SELECT status,transaction_count FROM gmail_attachments WHERE message_id='statement-hdfc-card-1'"
