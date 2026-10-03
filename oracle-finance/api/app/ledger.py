@@ -613,36 +613,50 @@ def reconcile_duplicate_transaction(transaction_id):
             # Reference-first reconciliation searches the full ledger. The same
             # UPI RRN can exist on both sides of an internal transfer, so bank,
             # account and direction remain mandatory side-of-ledger constraints.
+            # Reference-first reconciliation must still see a provisional
+            # notification/SMS row on the destination side when that row has
+            # not received the RRN yet. Both sides of an internal UPI transfer
+            # can share the same RRN, so direction + bank + account remain
+            # mandatory side-of-ledger constraints.
             candidates=conn.execute(
                 """SELECT * FROM transactions
                    WHERE id<>?
                      AND duplicate_of IS NULL
                      AND id NOT LIKE 'gmail:%'
                      AND status='ACTIVE'
-                     AND reference IS NOT NULL
                    ORDER BY ABS(timestamp-?)""",
                 (tx["id"],tx["timestamp"])
             ).fetchall()
 
             strong=[]
             for c in candidates:
-                if normalize_reference(c["reference"]) != tx_ref:
+                candidate_ref = normalize_reference(c["reference"])
+                if candidate_ref and candidate_ref != tx_ref:
                     continue
                 if tx["amount_minor"] != c["amount_minor"] or tx["currency"] != c["currency"]:
                     continue
                 if tx["type"] != c["type"]:
                     continue
-                if tx["bank"] and c["bank"] and str(tx["bank"]).strip().upper() != str(c["bank"]).strip().upper():
+                if tx["bank"] and c["bank"] and _normalize_account_bank(tx["bank"]) != _normalize_account_bank(c["bank"]):
                     continue
                 if tx["account_last4"] and c["account_last4"] and str(tx["account_last4"]).strip() != str(c["account_last4"]).strip():
                     continue
-                score=100
+
+                # An exact RRN is stronger than a provisional row without one.
+                # A missing RRN is acceptable only when all side identity
+                # constraints match, allowing Gmail to enrich that row.
+                score = 1000 if candidate_ref == tx_ref else 100
                 if tx["bank"] and c["bank"]: score += 25
                 if tx["account_last4"] and c["account_last4"]: score += 30
                 strong.append((score,c))
 
-            if len(strong)==1:
-                canonical=strong[0][1]
+            if strong:
+                best_score = max(score for score, _ in strong)
+                best = [(score, c) for score, c in strong if score == best_score]
+                if len(best) != 1:
+                    strong = []
+                else:
+                    canonical = best[0][1]
                 conn.execute("UPDATE transactions SET duplicate_of=? WHERE id=?",(canonical["id"],tx["id"]))
 
                 # Gmail can arrive after a notification/SMS has already created
