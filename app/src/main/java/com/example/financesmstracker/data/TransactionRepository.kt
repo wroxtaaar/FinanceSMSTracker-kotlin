@@ -15,6 +15,7 @@ import com.example.financesmstracker.parser.AccountType
 import com.example.financesmstracker.parser.PaymentMethod
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.integration.OracleTransaction
+import com.example.financesmstracker.util.TransactionReferenceNormalizer
 
 class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private val context: Context) {
 
@@ -405,6 +406,67 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             upper.contains("PAYTM") -> "PAYTM"
             else -> upper.replace(" BANK", "").trim()
         }
+    }
+
+    /**
+     * Returns active transaction history candidates for a normalized reference.
+     * Reference-based reconciliation intentionally does not impose an amount or
+     * time window; the caller still applies direction/bank/account compatibility.
+     */
+    fun getTransactionsByReference(reference: String): List<Transaction> {
+        val normalizedReference = TransactionReferenceNormalizer.normalize(reference) ?: return emptyList()
+        val list = mutableListOf<Transaction>()
+        val db = dbHelper.readableDatabase
+        val cursor = db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS} = ? AND " +
+                "${FinanceDatabaseHelper.COLUMN_REF_NUMBER} IS NOT NULL AND " +
+                "${FinanceDatabaseHelper.COLUMN_REF_NUMBER} != ?",
+            arrayOf("ACTIVE", ""),
+            null,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_TIMESTAMP} DESC"
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                val transaction = cursorToTransaction(it)
+                if (TransactionReferenceNormalizer.normalize(transaction.refNumber) == normalizedReference) {
+                    list.add(transaction)
+                }
+            }
+        }
+        return list
+    }
+
+    /**
+     * Returns unresolved evidence whose normalized reference matches, regardless
+     * of amount or event age. This lets a later Gmail reference resolve older
+     * evidence instead of being trapped in a short time window.
+     */
+    fun getUnmatchedOrAmbiguousEvidenceByReference(reference: String): List<SourceEvidence> {
+        val normalizedReference = TransactionReferenceNormalizer.normalize(reference) ?: return emptyList()
+        val list = mutableListOf<SourceEvidence>()
+        val db = dbHelper.readableDatabase
+        val cursor = db.query(
+            FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_STATUS} != ? AND " +
+                "${FinanceDatabaseHelper.COLUMN_EVIDENCE_REFERENCE} IS NOT NULL",
+            arrayOf(EvidenceStatus.MATCHED.name),
+            null,
+            null,
+            "${FinanceDatabaseHelper.COLUMN_EVIDENCE_RECEIVED_AT} DESC"
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                val evidence = cursorToEvidence(it)
+                if (TransactionReferenceNormalizer.normalize(evidence.reference) == normalizedReference) {
+                    list.add(evidence)
+                }
+            }
+        }
+        return list
     }
 
     fun getTransactionsByAmount(amountPaise: Long): List<Transaction> {
