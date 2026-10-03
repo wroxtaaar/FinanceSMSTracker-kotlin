@@ -305,6 +305,53 @@ class TransactionRepositoryTest {
     }
 
     @Test
+    fun smsEnrichesExistingGmailNotificationInsteadOfCreatingDuplicate() {
+        val notificationId = repository.insertTransaction(
+            Transaction(
+                amountPaise = 600L,
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "HDFC",
+                merchantName = "HDFC",
+                payeeId = null,
+                accountLastFour = "9591",
+                refNumber = null,
+                timestamp = 1_800_000_000_000L,
+                smsHash = "notification:hdfc-6",
+                category = "TRANSFER",
+                parserConfidence = 0.90f
+            )
+        )
+
+        val sms = Transaction(
+            amountPaise = 600L,
+            transactionType = TransactionType.CREDIT,
+            paymentMethod = PaymentMethod.UPI,
+            accountType = AccountType.BANK_ACCOUNT,
+            bank = "HDFC",
+            merchantName = "HDFC Bank",
+            payeeId = null,
+            accountLastFour = "9591",
+            refNumber = "240201254528",
+            timestamp = 1_800_000_060_000L,
+            smsHash = HashUtil.sha256("hdfc-sms-6"),
+            category = "TRANSFER",
+            parserConfidence = 0.99f
+        )
+
+        val returnedId = repository.insertTransaction(sms)
+
+        assertEquals(notificationId, returnedId)
+        val active = repository.getAllTransactions().filter {
+            it.amountPaise == 600L && it.bank == "HDFC"
+        }
+        assertEquals(1, active.size)
+        assertEquals("240201254528", active.single().refNumber)
+        assertEquals(HashUtil.sha256("hdfc-sms-6"), active.single().smsHash)
+    }
+
+    @Test
     fun oracleGmailReferenceCorrectsAxisNotificationAndVoidsWrongAxisDebit() {
         val rrn = "739593577194"
         val timestamp = 1_800_000_000_000L
