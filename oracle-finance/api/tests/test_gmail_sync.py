@@ -297,8 +297,7 @@ def test_gmail_parser_extracts_numeric_reference_only():
     message = _message(
         "ref-1",
         "HDFC Bank A/c XX9591 debited INR 5.00. Ref UPI-12345.",
-    )
-    parsed = parse_bank_email(message)
+    )    parsed = parse_bank_email(message)
 
     assert parsed is not None
     transaction, _ = parsed
@@ -597,8 +596,7 @@ def test_repair_legacy_icici_credit_card_reparses_existing_row():
             INSERT INTO transactions
             (id,amount_minor,currency,type,payment_method,account_type,bank,
              merchant_or_payee,account_last4,reference,timestamp,category,
-             confidence,duplicate_of,status,created_at)            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
+             confidence,duplicate_of,status,created_at)            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)            """,
             (
                 transaction_id,
                 64100,
@@ -897,8 +895,7 @@ def test_axis_self_transfer_merchant_can_use_matching_hdfc_entry():
 def test_axis_transaction_info_is_not_merchant():
     message = _message(
         "axis-no-merchant",        "Dear Customer, Here's the summary of your transaction: "
-        "Amount Debited: INR 6.00 Account Number: XX3370 "
-        "Date & Time: 30-09-26, 23:54:16 IST "
+        "Amount Debited: INR 6.00 Account Number: XX3370 "        "Date & Time: 30-09-26, 23:54:16 IST "
         "Transaction Info: UPI/P2A/361639089310/ABDUL WASIQ "
         "If this transaction was not initiated by you: To block UPI: SMS BLOCKUPI.",
         subject="INR 6.00 was debited from your A/c.",
@@ -1197,8 +1194,7 @@ Statement period : August 29, 2026 to September 28, 2026
     metadata, rows = parse_icici_statement(b"fixture", "fixture-secret")
     assert len(rows) == 3
     assert rows[0]["type"] == "CREDIT"
-    assert rows[0]["amount_minor"] == 163100
-    assert rows[0]["reference"] == "14082331109"
+    assert rows[0]["amount_minor"] == 163100    assert rows[0]["reference"] == "14082331109"
     assert rows[0]["merchant"] == "BBPS Payment received"
 
     assert rows[1]["type"] == "DEBIT"
@@ -1313,6 +1309,10 @@ def test_credit_card_statement_attachment_updates_bill_without_active_spend(monk
     monkeypatch.setattr(
         "app.statement_sync.parse_hdfc_statement",
         lambda pdf, key: (fake_metadata, fake_rows),
+    )
+    monkeypatch.setattr(
+        "app.statement_sync._pdf_text",
+        lambda pdf, key: "TOTAL AMOUNT DUE C5,238.00",
     )
     bill_calls = []
     monkeypatch.setattr(
