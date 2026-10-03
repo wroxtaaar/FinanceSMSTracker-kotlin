@@ -247,6 +247,59 @@ def _looks_like_transaction(combined, amount, direction):
     return bool(_TRANSACTION_SIGNAL.search(combined))
 
 
+def _repair_legacy_unidentified_hdfc_gmail_transactions():
+    """Void old HDFC Gmail rows that have no transaction identity.
+
+    These rows were accepted by older parsers using only amount, bank and
+    account-last4. A real HDFC UPI transaction email should expose either a
+    reference or a counterparty/payee. Notification rows are excluded because
+    they are a different source and may legitimately arrive before enrichment.
+    """
+    repaired = 0
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT
+                t.id AS transaction_id,
+                gm.id AS gmail_id
+            FROM transactions t
+            JOIN evidence e
+              ON e.transaction_id = t.id
+             AND e.source_type = 'GMAIL'
+            JOIN gmail_messages gm
+              ON (
+                   gm.id = e.source_id
+                   OR e.source_id LIKE 'imap:%:' || gm.id
+                 )
+            WHERE t.id LIKE 'gmail:%'
+              AND t.status = 'ACTIVE'
+              AND UPPER(TRIM(COALESCE(t.bank,''))) = 'HDFC'
+              AND UPPER(TRIM(COALESCE(t.account_type,''))) = 'BANK_ACCOUNT'
+              AND UPPER(TRIM(COALESCE(t.type,''))) = 'DEBIT'
+              AND UPPER(TRIM(COALESCE(t.payment_method,''))) = 'UPI'
+              AND (t.reference IS NULL OR TRIM(t.reference) = '')
+              AND (
+                   t.merchant_or_payee IS NULL
+                   OR TRIM(t.merchant_or_payee) = ''
+                   OR TRIM(t.merchant_or_payee) = '-'
+              )
+            """
+        ).fetchall()
+
+    for row in rows:
+        result = void_transaction(row["transaction_id"])
+        if result.get("status") not in ("VOIDED", "ALREADY_VOIDED"):
+            continue
+        with connection() as conn:
+            conn.execute(
+                "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
+                (row["gmail_id"],),
+            )
+        repaired += 1
+
+    return repaired
+
+
 def _repair_legacy_axis_credit_direction_conflicts():
     """Retire old Axis Gmail rows that were parsed as debits from credit alerts.
 
@@ -983,6 +1036,14 @@ def parse_bank_email(message):
 
     reference=_reference(combined)
     merchant_or_payee=_merchant_or_payee(combined)
+
+    # Gmail bank-account transactions must carry a transaction identity
+    # beyond amount + account. Otherwise an unrelated amount in a bank email
+    # can become a fake ledger entry. Notification ingestion is separate and
+    # is intentionally not affected by this rule.
+    if not reference and not merchant_or_payee:
+        return None
+
     score=0.75
     if _sender_domain_is_known_bank(bank, sender):
         score += 0.10
@@ -1113,6 +1174,7 @@ def _run_legacy_repairs_once(service):
     repaired = (
         _repair_legacy_gmail_account_classifications()
         + _repair_legacy_axis_credit_direction_conflicts()
+        + _repair_legacy_unidentified_hdfc_gmail_transactions()
         + _repair_legacy_icici_credit_card_classifications(service)
         + _repair_legacy_gmail_merchants(service)
         + _repair_legacy_gmail_merchant_values(service)
