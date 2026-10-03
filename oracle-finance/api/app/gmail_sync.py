@@ -154,7 +154,7 @@ def _reference(combined):
         # Axis account alerts put the RRN inside Transaction Info:
         # UPI/P2A/<RRN>/<counterparty>/...
         match = re.search(
-            r"(?i)\bTransaction\s+Info\s*:\s*UPI/[^/\\s]+/([A-Z0-9]+)",
+            r"(?i)\bTransaction\s+Info\s*:\s*UPI/P2A/([0-9]{6,})",
             normalized,
         )
         if match:
