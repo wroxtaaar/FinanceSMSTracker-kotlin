@@ -845,3 +845,47 @@ def test_manual_card_reconciliation_retains_bill_split_for_historical_statement(
 
     assert row["balance_minor"] == 50000
     assert row["bill_balance_minor"] == 30000
+
+
+def test_axis_bank_alias_and_late_transaction_update_balance():
+    from app.ledger import sync_transaction
+
+    class T:
+        def __init__(self, id, typ, timestamp):
+            self.id = id
+            self.amountMinor = 300
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = "AXIS"
+            self.merchantOrPayee = "ABDUL WAS"
+            self.accountLast4 = "3370"
+            self.reference = "898523485227"
+            self.timestamp = timestamp
+            self.category = "TRANSFER"
+            self.confidence = 0.98
+
+    # The configured account may contain the display name "AXIS BANK" while
+    # transaction parsers normalize the provider to "AXIS".
+    set_balance(
+        "axis-bank",
+        "Axis Bank",
+        "INR",
+        "BANK_ACCOUNT",
+        "AXIS BANK",
+        "3370",
+        100000,
+    )
+
+    # Simulate a late notification: the bank event timestamp is before the
+    # manual reconciliation point, but the transaction itself is discovered
+    # after that reconciliation.
+    sync_transaction(T("axis-late-credit", "CREDIT", 1700000000000))
+
+    with connection() as conn:
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='axis-bank'"
+        ).fetchone()["balance_minor"]
+
+    assert balance == 100300
