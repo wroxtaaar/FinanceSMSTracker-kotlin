@@ -1,7 +1,21 @@
 import time
+import re
 from .db import connection
 
 def now_ms(): return int(time.time()*1000)
+
+def normalize_reference(value):
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw or raw.lower() in ("null", "none"):
+        return None
+    raw = re.sub(r"(?i)^\\s*Transaction\\s+Info\\s*:\\s*", "", raw).strip()
+    match = re.match(r"(?i)^UPI/[^/\\s]+/([^/\\s]+)", raw)
+    if match:
+        raw = match.group(1)
+    raw = raw.strip(".,;:)]").strip()
+    return raw.upper() or None
 
 def sync_transaction(t, apply_balance=True):
     with connection() as conn:
@@ -14,7 +28,7 @@ def sync_transaction(t, apply_balance=True):
         conn.execute("""INSERT OR IGNORE INTO transactions
         (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,t.reference,
+        (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,normalize_reference(t.reference),
          t.timestamp,t.category,t.confidence,None,"ACTIVE",created_at))
 
         if before is None and apply_balance and not str(t.id).startswith("gmail:"):
