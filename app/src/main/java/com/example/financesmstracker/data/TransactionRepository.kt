@@ -669,7 +669,26 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             val localReference = normalizedReference(candidate.reference)
 
             if (candidate.amountPaise != transaction.amountMinor) return null
-            if (!candidate.transactionType.equals(transaction.transactionType, ignoreCase = true)) return null
+
+            // A Gmail notification is only a provisional hint. Some bank
+            // notifications expose the account last-4 but omit the bank and
+            // can even be directionally ambiguous. Allow the authoritative
+            // Gmail/IMAP row to replace the direction when it matches that
+            // provisional notification by amount + account, rather than
+            // leaving a bogus debit/credit stranded forever.
+            val provisionalNotification =
+                candidate.isNotification &&
+                    localBank == null &&
+                    localReference == null &&
+                    remoteLast4 != null &&
+                    localLast4 == remoteLast4 &&
+                    candidate.accountType.equals(transaction.accountType, ignoreCase = true) &&
+                    candidate.paymentMethod.equals(PaymentMethod.UNKNOWN.name, ignoreCase = true)
+
+            if (
+                !candidate.transactionType.equals(transaction.transactionType, ignoreCase = true) &&
+                !provisionalNotification
+            ) return null
 
             val sameReference = remoteReference != null &&
                 localReference != null &&
