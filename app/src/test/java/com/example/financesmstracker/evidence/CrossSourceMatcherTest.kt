@@ -199,4 +199,34 @@ class CrossSourceMatcherTest {
         val result = CrossSourceMatcher.match(evidence, listOf(tx))
         assertEquals(MatchOutcome.UNMATCHED, result.outcome)
     }
+    @Test
+    fun sameAxisRrnMatchesHdfcStyleReference() {
+        val tx = createDummyTx(
+            id = 12L,
+            amountPaise = 400L,
+            type = TransactionType.CREDIT,
+            bank = "AXIS",
+            ref = "739593577194",
+            timestamp = 1_000_000L,
+            lastFour = "3370"
+        )
+        val evidence = SourceEvidence(
+            sourceType = SourceType.GMAIL_NOTIFICATION,
+            sourceKey = "gmail-rrn",
+            receivedAt = 10_000_000L,
+            amountPaise = 400L,
+            direction = "CREDIT",
+            bankProvider = "AXIS",
+            accountLastFour = "3370",
+            reference = "UPI/P2A/739593577194/ABDUL WAS/HDFC/Paym",
+            contentHash = "hash-rrn"
+        )
+
+        val result = CrossSourceMatcher.match(evidence, listOf(tx))
+
+        assertEquals(MatchOutcome.MATCHED, result.outcome)
+        assertEquals(12L, result.matchedTransactionId)
+        assertTrue(result.reasons.contains("same reference"))
+    }
+
 }

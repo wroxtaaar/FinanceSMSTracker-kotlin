@@ -12,7 +12,7 @@ package com.example.financesmstracker.util
  */
 object TransactionReferenceNormalizer {
     private val axisTransactionInfoRegex = Regex(
-        """(?i)^\\s*UPI/[^/\\s]+/([^/\\s]+)"""
+        """(?i)^\s*UPI/[^/\s]+/([^/\s]+)"""
     )
 
     fun normalize(value: String?): String? {
@@ -22,7 +22,7 @@ object TransactionReferenceNormalizer {
             ?: return null
 
         val withoutLabel = raw
-            .replace(Regex("""(?i)^\\s*Transaction\\s+Info\\s*:\\s*"""), "")
+            .replace(Regex("""(?i)^\s*Transaction\s+Info\s*:\s*"""), "")
             .trim()
 
         val core = axisTransactionInfoRegex.find(withoutLabel)?.groupValues?.getOrNull(1)

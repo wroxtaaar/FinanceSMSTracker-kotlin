@@ -1,6 +1,7 @@
 package com.example.financesmstracker.evidence
 
 import com.example.financesmstracker.data.Transaction
+import com.example.financesmstracker.util.TransactionReferenceNormalizer
 import kotlin.math.abs
 
 enum class MatchOutcome {
@@ -82,9 +83,13 @@ object CrossSourceMatcher {
                 reasons.add("direction unknown (neutral)")
             }
 
-            // 3. Reference check (Strongest identifier if available)
-            if (!evidence.reference.isNullOrBlank() && !tx.refNumber.isNullOrBlank()) {
-                if (evidence.reference.equals(tx.refNumber, ignoreCase = true)) {
+            // 3. Reference check (strongest identifier if available).
+            // Normalize transport-specific wrappers such as
+            // UPI/P2A/<RRN>/... before comparing.
+            val evidenceReference = TransactionReferenceNormalizer.normalize(evidence.reference)
+            val transactionReference = TransactionReferenceNormalizer.normalize(tx.refNumber)
+            if (!evidenceReference.isNullOrBlank() && !transactionReference.isNullOrBlank()) {
+                if (evidenceReference == transactionReference) {
                     reasons.add("same reference")
                 }
             }

@@ -15,7 +15,11 @@ class CrossSourceMatchCoordinator(
             return
         }
 
-        val candidateTransactions = repository.getTransactionsByAmount(evidence.amountPaise)
+        val candidateTransactions = if (!evidence.reference.isNullOrBlank()) {
+            repository.getTransactionsByReference(evidence.reference)
+        } else {
+            repository.getTransactionsByAmount(evidence.amountPaise)
+        }
         val result = CrossSourceMatcher.match(evidence, candidateTransactions)
 
         repository.applyMatchResult(evidence.id, result)
@@ -24,7 +28,11 @@ class CrossSourceMatchCoordinator(
 
     fun onCanonicalTransactionCreated(transactionId: Long) {
         val transaction = repository.getTransactionById(transactionId) ?: return
-        val unmatchedEvidence = repository.getUnmatchedOrAmbiguousEvidenceByAmount(transaction.amountPaise)
+        val unmatchedEvidence = if (!transaction.refNumber.isNullOrBlank()) {
+            repository.getUnmatchedOrAmbiguousEvidenceByReference(transaction.refNumber)
+        } else {
+            repository.getUnmatchedOrAmbiguousEvidenceByAmount(transaction.amountPaise)
+        }
 
         for (evidence in unmatchedEvidence) {
             if (evidence.status == EvidenceStatus.MATCHED && evidence.transactionId != null) {
@@ -32,7 +40,11 @@ class CrossSourceMatchCoordinator(
                 continue
             }
 
-            val candidateTransactions = repository.getTransactionsByAmount(evidence.amountPaise)
+            val candidateTransactions = if (!evidence.reference.isNullOrBlank()) {
+                repository.getTransactionsByReference(evidence.reference)
+            } else {
+                repository.getTransactionsByAmount(evidence.amountPaise)
+            }
             val result = CrossSourceMatcher.match(evidence, candidateTransactions)
 
             repository.applyMatchResult(evidence.id, result)
