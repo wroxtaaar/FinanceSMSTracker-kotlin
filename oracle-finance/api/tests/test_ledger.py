@@ -156,6 +156,46 @@ def test_provisional_bankless_debit_is_corrected_to_axis_credit():
     assert tx["reference"] == "898523485227"
 
 
+def test_self_transfer_has_zero_splitwise_net_change():
+    from app.ledger import get_manual_splitwise_total, sync_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, last4):
+            self.id = id
+            self.amountMinor = 600
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "SELF"
+            self.accountLast4 = last4
+            self.reference = None
+            self.timestamp = 1_800_000_000_000
+            self.category = "TRANSFER"
+            self.confidence = 1.0
+
+    set_balance("self-axis", "Axis Bank", "INR", "BANK_ACCOUNT", "AXIS BANK", "3370", 100000)
+    set_balance("self-hdfc", "HDFC Bank", "INR", "BANK_ACCOUNT", "HDFC", "9591", 50000)
+
+    sync_transaction(T("axis-debit-6", "DEBIT", "AXIS", "3370"))
+    assert get_manual_splitwise_total("INR") == 600
+
+    sync_transaction(T("hdfc-credit-6", "CREDIT", "HDFC", "9591"))
+    assert get_manual_splitwise_total("INR") == 0
+
+    with connection() as conn:
+        axis = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='self-axis'"
+        ).fetchone()["balance_minor"]
+        hdfc = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='self-hdfc'"
+        ).fetchone()["balance_minor"]
+
+    assert axis == 99400
+    assert hdfc == 50600
+
+
 def test_existing_transaction_is_not_applied_twice():
     from app.ledger import sync_transaction
 
