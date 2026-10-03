@@ -600,8 +600,36 @@ def reconcile_duplicate_transaction(transaction_id):
             if len(strong)==1:
                 canonical=strong[0][1]
                 conn.execute("UPDATE transactions SET duplicate_of=? WHERE id=?",(canonical["id"],tx["id"]))
+
+                # Gmail can arrive after a notification/SMS has already created
+                # the canonical ledger row. Preserve the stronger Gmail
+                # transaction identity on that canonical row instead of leaving
+                # the RRN stranded on the duplicate Gmail row.
+                enrichment = {}
+                if not canonical["reference"] and tx["reference"]:
+                    enrichment["reference"] = normalize_reference(tx["reference"])
+                if (
+                    (not canonical["merchant_or_payee"] or str(canonical["merchant_or_payee"]).strip() == "-")
+                    and tx["merchant_or_payee"]
+                    and str(tx["merchant_or_payee"]).strip() != "-"
+                ):
+                    enrichment["merchant_or_payee"] = tx["merchant_or_payee"]
+
+                if enrichment:
+                    assignments = ", ".join(f"{column}=?" for column in enrichment)
+                    values = list(enrichment.values()) + [canonical["id"]]
+                    conn.execute(
+                        f"UPDATE transactions SET {assignments} WHERE id=?",
+                        values,
+                    )
+
                 conn.execute("UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",(canonical["id"],tx["id"]))
-                return {"duplicate":tx["id"],"canonical":canonical["id"],"score":strong[0][0]}
+                return {
+                    "duplicate":tx["id"],
+                    "canonical":canonical["id"],
+                    "score":strong[0][0],
+                    "enriched":bool(enrichment),
+                }
 
             # A notification often has no RRN. It can still be the provisional
             # destination-side row for the Gmail transaction, so retain the
@@ -636,7 +664,35 @@ def reconcile_duplicate_transaction(transaction_id):
         if len(strong)==1:
             canonical=strong[0][1]
             conn.execute("UPDATE transactions SET duplicate_of=? WHERE id=?",(canonical["id"],tx["id"]))
+
+            # Gmail can arrive after a notification/SMS has already created
+            # the canonical ledger row. Preserve the stronger Gmail
+            # transaction identity on that canonical row instead of leaving
+            # the RRN stranded on the duplicate Gmail row.
+            enrichment = {}
+            if not canonical["reference"] and tx["reference"]:
+                enrichment["reference"] = normalize_reference(tx["reference"])
+            if (
+                (not canonical["merchant_or_payee"] or str(canonical["merchant_or_payee"]).strip() == "-")
+                and tx["merchant_or_payee"]
+                and str(tx["merchant_or_payee"]).strip() != "-"
+            ):
+                enrichment["merchant_or_payee"] = tx["merchant_or_payee"]
+
+            if enrichment:
+                assignments = ", ".join(f"{column}=?" for column in enrichment)
+                values = list(enrichment.values()) + [canonical["id"]]
+                conn.execute(
+                    f"UPDATE transactions SET {assignments} WHERE id=?",
+                    values,
+                )
+
             conn.execute("UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",(canonical["id"],tx["id"]))
-            return {"duplicate":tx["id"],"canonical":canonical["id"],"score":strong[0][0]}
+            return {
+                "duplicate":tx["id"],
+                "canonical":canonical["id"],
+                "score":strong[0][0],
+                "enriched":bool(enrichment),
+            }
     return None
 

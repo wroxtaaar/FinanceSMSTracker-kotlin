@@ -486,7 +486,7 @@ def test_gmail_rrn_reconciles_to_correct_ledger_side_not_cross_account_side():
 
     assert hdfc["duplicate_of"] is None
     assert axis["duplicate_of"] is None
-    assert axis["reference"] is None
+    assert axis["reference"] == "739593577194"
 
 
 def test_void_transaction_reverses_account_adjustment_once():
@@ -657,3 +657,91 @@ def test_category_edit_updates_splitwise_contribution():
     T.category = "OTHER"
     assert sync_transaction(T()) is False
     assert get_manual_splitwise_total("INR") == 0
+
+
+def test_manual_reconciliation_blocks_late_historical_transactions_but_allows_newer_ones():
+    from app.ledger import sync_transaction
+
+    class T:
+        def __init__(self, id, timestamp, amount):
+            self.id = id
+            self.amountMinor = amount
+            self.currency = "INR"
+            self.type = "DEBIT"
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = "HDFC"
+            self.merchantOrPayee = "RECON TEST"
+            self.accountLast4 = "1212"
+            self.reference = None
+            self.timestamp = timestamp
+            self.category = "OTHER"
+            self.confidence = 0.99
+
+    set_balance(
+        "reconciliation-bank",
+        "Reconciliation Bank",
+        "INR",
+        "BANK_ACCOUNT",
+        "HDFC",
+        "1212",
+        100000,
+    )
+
+    # A historical Gmail/SMS row discovered after reconciliation must not
+    # retroactively alter the manually verified current balance.
+    sync_transaction(T("historical", 1_000, 2500))
+
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT balance_minor, balance_reconciled_at FROM accounts WHERE id='reconciliation-bank'"
+        ).fetchone()
+
+    assert row["balance_minor"] == 100000
+    assert row["balance_reconciled_at"] > 0
+
+    # A genuinely newer transaction still moves the balance normally.
+    sync_transaction(T("newer", 4_102_444_800_000, 1500))
+
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='reconciliation-bank'"
+        ).fetchone()
+
+    assert row["balance_minor"] == 98500
+
+
+def test_manual_card_reconciliation_retains_bill_split_for_historical_statement():
+    from app.ledger import sync_card_bill
+
+    set_balance(
+        "reconciliation-card",
+        "Reconciliation Card",
+        "INR",
+        "CREDIT_CARD",
+        "AXIS",
+        "3434",
+        50000,
+        30000,
+    )
+
+    result = sync_card_bill({
+        "sourceType": "GMAIL_STATEMENT_PDF",
+        "sourceKey": "historical-statement",
+        "timestamp": 1_000,
+        "amountMinor": 42000,
+        "currency": "INR",
+        "bank": "AXIS",
+        "accountLast4": "3434",
+        "confidence": 0.99,
+    })
+
+    assert result["status"] == "RETAINED_MANUAL_RECONCILIATION"
+
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT balance_minor, bill_balance_minor FROM accounts WHERE id='reconciliation-card'"
+        ).fetchone()
+
+    assert row["balance_minor"] == 50000
+    assert row["bill_balance_minor"] == 30000
