@@ -1,7 +1,7 @@
 import base64, hashlib, html, os, re, time
 from email.utils import parseaddr
 from .db import connection
-from .ledger import sync_transaction,sync_evidence,add_review,apply_transaction_to_account,reconcile_duplicate_transaction,sync_card_bill
+from .ledger import sync_transaction,sync_evidence,add_review,apply_transaction_to_account,reconcile_duplicate_transaction,sync_card_bill,void_transaction
 from .main_models import SyncTransactionModel,SyncEvidenceModel
 from .statement_sync import process_statement_attachments
 
@@ -158,7 +158,17 @@ def _reference(combined):
         token = match.group(1) if match else None
 
     token = token.rstrip(".,;:)") if token else None
-    return token or None
+    if not token:
+        return None
+
+    # Axis account alerts wrap the RRN inside Transaction Info:
+    # UPI/P2A/<RRN>/<counterparty>/... . Store only the stable RRN so it
+    # compares directly with HDFC/SMS representations of the same transfer.
+    axis_match = re.match(r"(?i)^UPI/[^/\\s]+/([^/\\s]+)", token)
+    if axis_match:
+        token = axis_match.group(1)
+
+    return token.strip().upper() or None
 
 
 def _merchant_or_payee(combined):
@@ -235,6 +245,54 @@ def _looks_like_transaction(combined, amount, direction):
     if amount is None or direction is None:
         return False
     return bool(_TRANSACTION_SIGNAL.search(combined))
+
+
+def _repair_legacy_axis_credit_direction_conflicts():
+    """Retire old Axis Gmail rows that were parsed as debits from credit alerts.
+
+    Older parser versions could let unrelated footer text flip an Axis bank
+    account credit into DEBIT. The subject "was credited to your A/c." is a
+    strong source-level direction signal. Void the stale row and mark its Gmail
+    message PENDING so the current parser recreates the correct CREDIT row
+    during the same sync pass.
+    """
+    repaired = 0
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT
+                t.id AS transaction_id,
+                gm.id AS gmail_id
+            FROM transactions t
+            JOIN evidence e
+              ON e.transaction_id = t.id
+             AND e.source_type = 'GMAIL'
+            JOIN gmail_messages gm
+              ON (
+                   gm.id = e.source_id
+                   OR e.source_id LIKE 'imap:%:' || gm.id
+                 )
+            WHERE t.id LIKE 'gmail:%'
+              AND t.status = 'ACTIVE'
+              AND UPPER(TRIM(COALESCE(t.bank,''))) = 'AXIS'
+              AND UPPER(TRIM(COALESCE(t.account_type,''))) = 'BANK_ACCOUNT'
+              AND UPPER(TRIM(COALESCE(t.type,''))) = 'DEBIT'
+              AND LOWER(COALESCE(gm.subject,'')) LIKE '%was credited to your a/c%'
+            """
+        ).fetchall()
+
+    for row in rows:
+        result = void_transaction(row["transaction_id"])
+        if result.get("status") not in ("VOIDED", "ALREADY_VOIDED"):
+            continue
+        with connection() as conn:
+            conn.execute(
+                "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
+                (row["gmail_id"],),
+            )
+        repaired += 1
+
+    return repaired
 
 
 def _repair_legacy_gmail_account_classifications():
@@ -1054,6 +1112,7 @@ def _run_legacy_repairs_once(service):
 
     repaired = (
         _repair_legacy_gmail_account_classifications()
+        + _repair_legacy_axis_credit_direction_conflicts()
         + _repair_legacy_icici_credit_card_classifications(service)
         + _repair_legacy_gmail_merchants(service)
         + _repair_legacy_gmail_merchant_values(service)
