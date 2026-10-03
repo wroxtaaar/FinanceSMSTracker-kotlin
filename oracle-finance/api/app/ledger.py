@@ -561,18 +561,76 @@ def reconcile_duplicate_transaction(transaction_id):
     with connection() as conn:
         tx=conn.execute("SELECT * FROM transactions WHERE id=?",(transaction_id,)).fetchone()
         if not tx or tx["duplicate_of"]: return None
-        if tx["id"].startswith("gmail:") is False: return None
-        candidates=conn.execute(
-            """SELECT * FROM transactions WHERE id<>? AND duplicate_of IS NULL
-               AND id NOT LIKE 'gmail:%' AND status='ACTIVE' AND amount_minor=? AND currency=?
-               AND ABS(timestamp-?)<=86400000 ORDER BY ABS(timestamp-?) LIMIT 5""",
-            (tx["id"],tx["amount_minor"],tx["currency"],tx["timestamp"],tx["timestamp"])).fetchall()
+        if not tx["id"].startswith("gmail:"): return None
+
+        tx_ref = normalize_reference(tx["reference"])
+
+        if tx_ref:
+            # Reference-first reconciliation searches the full ledger. The same
+            # UPI RRN can exist on both sides of an internal transfer, so bank,
+            # account and direction remain mandatory side-of-ledger constraints.
+            candidates=conn.execute(
+                """SELECT * FROM transactions
+                   WHERE id<>?
+                     AND duplicate_of IS NULL
+                     AND id NOT LIKE 'gmail:%'
+                     AND status='ACTIVE'
+                     AND reference IS NOT NULL
+                   ORDER BY ABS(timestamp-?)""",
+                (tx["id"],tx["timestamp"])
+            ).fetchall()
+
+            strong=[]
+            for c in candidates:
+                if normalize_reference(c["reference"]) != tx_ref:
+                    continue
+                if tx["amount_minor"] != c["amount_minor"] or tx["currency"] != c["currency"]:
+                    continue
+                if tx["type"] != c["type"]:
+                    continue
+                if tx["bank"] and c["bank"] and str(tx["bank"]).strip().upper() != str(c["bank"]).strip().upper():
+                    continue
+                if tx["account_last4"] and c["account_last4"] and str(tx["account_last4"]).strip() != str(c["account_last4"]).strip():
+                    continue
+                score=100
+                if tx["bank"] and c["bank"]: score += 25
+                if tx["account_last4"] and c["account_last4"]: score += 30
+                strong.append((score,c))
+
+            if len(strong)==1:
+                canonical=strong[0][1]
+                conn.execute("UPDATE transactions SET duplicate_of=? WHERE id=?",(canonical["id"],tx["id"]))
+                conn.execute("UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",(canonical["id"],tx["id"]))
+                return {"duplicate":tx["id"],"canonical":canonical["id"],"score":strong[0][0]}
+
+            # A notification often has no RRN. It can still be the provisional
+            # destination-side row for the Gmail transaction, so retain the
+            # bounded amount/time fallback only when no exact-reference ledger
+            # side matched.
+            candidates=conn.execute(
+                """SELECT * FROM transactions
+                   WHERE id<>? AND duplicate_of IS NULL
+                     AND id NOT LIKE 'gmail:%' AND status='ACTIVE'
+                     AND amount_minor=? AND currency=? AND type=?
+                     AND ABS(timestamp-?)<=86400000
+                   ORDER BY ABS(timestamp-?) LIMIT 5""",
+                (tx["id"],tx["amount_minor"],tx["currency"],tx["type"],tx["timestamp"],tx["timestamp"])
+            ).fetchall()
+        else:
+            candidates=conn.execute(
+                """SELECT * FROM transactions WHERE id<>? AND duplicate_of IS NULL
+                   AND id NOT LIKE 'gmail:%' AND status='ACTIVE'
+                   AND amount_minor=? AND currency=? AND type=?
+                   AND ABS(timestamp-?)<=86400000
+                   ORDER BY ABS(timestamp-?) LIMIT 5""",
+                (tx["id"],tx["amount_minor"],tx["currency"],tx["type"],tx["timestamp"],tx["timestamp"])
+            ).fetchall()
+
         strong=[]
         for c in candidates:
             score=0
             if tx["bank"] and c["bank"] and tx["bank"]==c["bank"]: score+=2
             if tx["account_last4"] and c["account_last4"] and tx["account_last4"]==c["account_last4"]: score+=2
-            if tx["reference"] and c["reference"] and tx["reference"]==c["reference"]: score+=4
             if tx["type"]==c["type"]: score+=1
             if score>=3: strong.append((score,c))
         if len(strong)==1:
@@ -581,3 +639,4 @@ def reconcile_duplicate_transaction(transaction_id):
             conn.execute("UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",(canonical["id"],tx["id"]))
             return {"duplicate":tx["id"],"canonical":canonical["id"],"score":strong[0][0]}
     return None
+
