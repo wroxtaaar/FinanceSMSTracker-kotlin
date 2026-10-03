@@ -58,22 +58,17 @@ class _Messages:
 
     def list(self, **kwargs):
         self._mode = "list"
-    
-    return self
+        return self
 
     def get(self, **kwargs):
         self._mode = "get"
         self.last_get_id = kwargs.get("id")
-    
-    return self
+        return self
 
     def execute(self):
-    
-    if self._mode == "get":
-        
-    return self._messages[0]
-    
-    return {"messages": [{"id": m["id"]} for m in self._messages]}
+        if self._mode == "get":
+            return self._messages[0]
+        return {"messages": [{"id": m["id"]} for m in self._messages]}
 
 
 class _Users:
@@ -81,8 +76,7 @@ class _Users:
         self._messages = _Messages(messages)
 
     def messages(self):
-    
-    return self._messages
+        return self._messages
 
 
 class FakeService:
@@ -90,8 +84,7 @@ class FakeService:
         self._users = _Users(messages)
 
     def users(self):
-    
-    return self._users
+        return self._users
 
 def test_pending_statement_is_retried_outside_incremental_date_window(monkeypatch):
     import app.gmail_sync as gmail_sync
@@ -126,8 +119,7 @@ def test_pending_statement_is_retried_outside_incremental_date_window(monkeypatc
 
     def fake_statement_processor(service, fetched_message):
         calls.append(fetched_message["id"])
-    
-    return {
+        return {
             "attachmentsScanned": 1,
             "attachmentsParsed": 1,
             "transactionsAdded": 1,
@@ -306,6 +298,7 @@ def test_gmail_parser_extracts_numeric_reference_only():
         "ref-1",
         "HDFC Bank A/c XX9591 debited INR 5.00. Ref UPI-12345.",
     )
+
     parsed = parse_bank_email(message)
 
     assert parsed is not None
@@ -905,8 +898,10 @@ def test_axis_self_transfer_merchant_can_use_matching_hdfc_entry():
 
 def test_axis_transaction_info_is_not_merchant():
     message = _message(
-        "axis-no-merchant",        "Dear Customer, Here's the summary of your transaction: "
-        "Amount Debited: INR 6.00 Account Number: XX3370 "        "Date & Time: 30-09-26, 23:54:16 IST "
+        "axis-no-merchant",
+        "Dear Customer, Here's the summary of your transaction: "
+        "Amount Debited: INR 6.00 Account Number: XX3370 "
+        "Date & Time: 30-09-26, 23:54:16 IST "
         "Transaction Info: UPI/P2A/361639089310/ABDUL WASIQ "
         "If this transaction was not initiated by you: To block UPI: SMS BLOCKUPI.",
         subject="INR 6.00 was debited from your A/c.",
@@ -1203,6 +1198,7 @@ Statement period : August 29, 2026 to September 28, 2026
         lambda pdf_bytes, key: text,
     )
     metadata, rows = parse_icici_statement(b"fixture", "fixture-secret")
+
     assert len(rows) == 3
     assert rows[0]["type"] == "CREDIT"
     assert rows[0]["amount_minor"] == 163100
@@ -1290,20 +1286,21 @@ def test_credit_card_statement_attachment_updates_bill_without_active_spend(monk
         },
     }
 
+    from datetime import datetime, timezone
     fake_rows = [
-        {"date": __import__("datetime").datetime(2026, 9, 2, 0, tzinfo=__import__("datetime").timezone.utc),
+        {"date": datetime(2026, 9, 2, 0, tzinfo=timezone.utc),
          "amount_minor": 16650, "type": "DEBIT", "merchant": "IGST",
          "reference": "09999999980902000707495", "payment_method": "CARD",
          "category": "OTHER", "narration": "IGST"},
-        {"date": __import__("datetime").datetime(2026, 9, 4, 16, 51, tzinfo=__import__("datetime").timezone.utc),
+        {"date": datetime(2026, 9, 4, 16, 51, tzinfo=timezone.utc),
          "amount_minor": 954800, "type": "CREDIT", "merchant": "BPPY CC PAYMENT",
          "reference": "ST262480083000010111274", "payment_method": "BILL_PAYMENT",
          "category": "PAYMENT", "narration": "BPPY CC PAYMENT"},
-        {"date": __import__("datetime").datetime(2026, 10, 2, 0, tzinfo=__import__("datetime").timezone.utc),
+        {"date": datetime(2026, 10, 2, 0, tzinfo=timezone.utc),
          "amount_minor": 453100, "type": "DEBIT", "merchant": "OFFUS EMI,PRIN",
          "reference": "09999999981002000704649", "payment_method": "CARD",
          "category": "OTHER", "narration": "OFFUS EMI,PRIN"},
-        {"date": __import__("datetime").datetime(2026, 10, 2, 0, tzinfo=__import__("datetime").timezone.utc),
+        {"date": datetime(2026, 10, 2, 0, tzinfo=timezone.utc),
          "amount_minor": 54000, "type": "DEBIT", "merchant": "OFFUS EMI,INT NBR",
          "reference": "09999999981002000704656", "payment_method": "CARD",
          "category": "OTHER", "narration": "OFFUS EMI,INT NBR"},
