@@ -1315,6 +1315,7 @@ def test_credit_card_statement_attachment_updates_bill_without_active_spend(monk
         "opening_balance_minor": None,
     }
 
+    monkeypatch.setenv("HDFC_STATEMENT_SECRET", "fixture-secret")
     monkeypatch.setattr(
         "app.statement_sync.parse_hdfc_statement",
         lambda pdf, key: (fake_metadata, fake_rows),
