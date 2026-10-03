@@ -42,8 +42,7 @@ def splitwise_delta_for_transaction(t):
 def sync_transaction(t, apply_balance=True):
     with connection() as conn:
         before=conn.execute(
-            """SELECT id,amount_minor,currency,type,account_type,category,status
-               FROM transactions WHERE id=?""",
+            """SELECT * FROM transactions WHERE id=?""",
             (t.id,)
         ).fetchone()
         created_at=now_ms()
@@ -55,6 +54,72 @@ def sync_transaction(t, apply_balance=True):
 
         if before is None and apply_balance and not str(t.id).startswith("gmail:"):
             apply_transaction_to_account(conn, t, created_at, transaction_created_at=created_at)
+
+        if before is not None and before["status"] == "ACTIVE":
+            # An Android notification can be synced before Gmail/IMAP clarifies
+            # it. When the same canonical ID is later enriched, update the
+            # existing ledger row and repair any balance/Splitwise contribution
+            # that was based on the provisional direction/account identity.
+            old_delta = splitwise_delta(
+                before["account_type"], before["type"], before["amount_minor"], before["category"]
+            )
+            new_delta = splitwise_delta_for_transaction(t)
+
+            balance_adjustment = conn.execute(
+                "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
+                (t.id,),
+            ).fetchone()
+
+            materially_changed = (
+                int(before["amount_minor"]) != int(t.amountMinor)
+                or str(before["currency"]) != str(t.currency)
+                or str(before["type"]) != str(t.type)
+                or str(before["account_type"]) != str(t.accountType)
+                or str(before["bank"] or "").strip().upper() != str(t.bank or "").strip().upper()
+                or str(before["account_last4"] or "").strip() != str(t.accountLast4 or "").strip()
+            )
+
+            if materially_changed:
+                if balance_adjustment is not None:
+                    conn.execute(
+                        "UPDATE accounts SET balance_minor=balance_minor-?, updated_at=? WHERE id=?",
+                        (int(balance_adjustment["delta_minor"]), created_at, balance_adjustment["account_id"]),
+                    )
+                    conn.execute(
+                        "DELETE FROM balance_adjustments WHERE transaction_id=?",
+                        (t.id,),
+                    )
+
+                conn.execute(
+                    """UPDATE transactions SET
+                       amount_minor=?, currency=?, type=?, payment_method=?,
+                       account_type=?, bank=?, merchant_or_payee=?,
+                       account_last4=?, reference=?, timestamp=?, confidence=?,
+                       status='ACTIVE'
+                       WHERE id=?""",
+                    (
+                        t.amountMinor, t.currency, t.type, t.paymentMethod,
+                        t.accountType, t.bank, t.merchantOrPayee,
+                        t.accountLast4, normalize_reference(t.reference),
+                        t.timestamp, t.confidence, t.id,
+                    ),
+                )
+
+                if apply_balance and not str(t.id).startswith("gmail:"):
+                    apply_transaction_to_account(
+                        conn, t, created_at, transaction_created_at=created_at
+                    )
+
+                if old_delta != new_delta and not str(t.id).startswith("gmail:"):
+                    splitwise_change = new_delta - old_delta
+                    conn.execute(
+                        """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
+                           VALUES(?,?,?)
+                           ON CONFLICT(currency) DO UPDATE SET
+                               amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
+                               updated_at=excluded.updated_at""",
+                        (t.currency, splitwise_change, created_at),
+                    )
 
         # Splitwise is a signed ledger component. Bank debits increase the
         # amount owed to the user, bank credits decrease it, card debits
