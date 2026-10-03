@@ -60,7 +60,7 @@ def test_internal_transfer_match():
 
 
 def test_new_transactions_update_seeded_account_balances():
-    from app.ledger import sync_transaction
+    from app.ledger import get_manual_splitwise_total, sync_transaction
 
     class T:
         def __init__(self, id, typ, account_type, bank, last4, amount):
@@ -136,6 +136,7 @@ def test_provisional_bankless_debit_is_corrected_to_axis_credit():
             "SELECT balance_minor FROM accounts WHERE id='axis-provisional-account'"
         ).fetchone()["balance_minor"]
     assert before == 100000
+    assert get_manual_splitwise_total("INR") is None
 
     # Gmail is authoritative and clarifies this as an Axis credit.
     sync_transaction(T("CREDIT", "AXIS", "GROCERIES"))
@@ -149,6 +150,7 @@ def test_provisional_bankless_debit_is_corrected_to_axis_credit():
         ).fetchone()
 
     assert after == 100200
+    assert get_manual_splitwise_total("INR") == -200
     assert tx["type"] == "CREDIT"
     assert tx["bank"] == "AXIS"
     assert tx["reference"] == "898523485227"
