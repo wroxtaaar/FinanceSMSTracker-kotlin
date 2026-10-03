@@ -275,6 +275,106 @@ def test_gmail_parser_rejects_future_payment_email():
     assert parse_bank_email(message) is None
 
 
+def test_legacy_unidentified_hdfc_gmail_debit_is_voided():
+    message = _message(
+        "hdfc-legacy-3510",
+        "Rs.3510.00 is debited from your HDFC Bank A/c *9591. Payment successful.",
+        subject="HDFC Bank Transaction Alert",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "HDFC Bank Transaction Alert"},
+        {"name": "From", "value": "alerts@hdfcbank.net"},
+    ]
+
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                message["id"],
+                "thread-hdfc-3510",
+                1950000000000,
+                "alerts@hdfcbank.net",
+                "HDFC Bank Transaction Alert",
+                "hdfc-3510-fingerprint",
+                "PARSED",
+                1950000000000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO transactions
+            (id,amount_minor,currency,type,payment_method,account_type,bank,
+             merchant_or_payee,account_last4,reference,timestamp,category,
+             confidence,duplicate_of,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "gmail:hdfc-legacy-3510",
+                351000,
+                "INR",
+                "DEBIT",
+                "UPI",
+                "BANK_ACCOUNT",
+                "HDFC",
+                None,
+                "9591",
+                None,
+                1950000000000,
+                "OTHER",
+                0.95,
+                None,
+                "ACTIVE",
+                1950000000000,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO evidence
+            (id,source_type,source_id,status,observed_at,transaction_id,
+             matched_transaction_id,amount_minor,currency,direction,
+             bank_provider,account_last4,reference,content_hash,confidence,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "gmail-evidence:hdfc-legacy-3510",
+                "GMAIL",
+                message["id"],
+                "UNMATCHED",
+                1950000000000,
+                "gmail:hdfc-legacy-3510",
+                None,
+                351000,
+                "INR",
+                "DEBIT",
+                "HDFC",
+                "9591",
+                None,
+                "hdfc-3510-hash",
+                0.95,
+                1950000000000,
+            ),
+        )
+
+    repaired = _repair_legacy_unidentified_hdfc_gmail_transactions()
+    assert repaired == 1
+
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT status FROM transactions WHERE id='gmail:hdfc-legacy-3510'"
+        ).fetchone()
+        status = conn.execute(
+            "SELECT status FROM gmail_messages WHERE id=?",
+            (message["id"],),
+        ).fetchone()["status"]
+
+    assert row["status"] == "VOIDED"
+    assert status == "PENDING"
+
+
 def test_gmail_parser_rejects_hdfc_bank_debit_without_reference_or_counterparty():
     message = _message(
         "hdfc-no-identity",
