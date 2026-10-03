@@ -211,7 +211,7 @@ class CrossSourceMatcherTest {
             lastFour = "3370"
         )
         val evidence = SourceEvidence(
-            sourceType = SourceType.GMAIL,
+            sourceType = SourceType.GMAIL_NOTIFICATION,
             sourceKey = "gmail-rrn",
             receivedAt = 10_000_000L,
             amountPaise = 400L,
