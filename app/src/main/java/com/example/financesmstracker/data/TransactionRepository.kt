@@ -787,17 +787,20 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ?"
                 args = arrayOf("ACTIVE", "oracle:gmail:%", "notification:%")
             } else if (isNotification) {
+                // Notifications are provisional and may have the wrong direction
+                // before Gmail/IMAP supplies the authoritative bank email. Do not
+                // filter by transaction type here; candidateScore handles the normal
+                // same-direction case and the explicit provisional-notification
+                // exception handles a bankless/wrong-direction notification.
                 selection =
                     FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
-                    FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ?"
                 args = arrayOf(
                     "ACTIVE",
                     transaction.amountMinor.toString(),
                     transaction.currency,
-                    transaction.transactionType,
                     "notification:%"
                 )
             } else {
