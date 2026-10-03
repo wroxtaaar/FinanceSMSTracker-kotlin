@@ -84,9 +84,13 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     FinanceDatabaseHelper.COLUMN_ID,
                     FinanceDatabaseHelper.COLUMN_BANK,
                     FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
-                    FinanceDatabaseHelper.COLUMN_REF_NUMBER
+                    FinanceDatabaseHelper.COLUMN_REF_NUMBER,
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH
                 ),
-                FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ? AND " +
+                "(" +
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ? OR " +
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ?" +
+                    ") AND " +
                     FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
                     FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
@@ -94,6 +98,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     "ABS(" + FinanceDatabaseHelper.COLUMN_TIMESTAMP + " - ?) <= ?",
                 arrayOf(
                     "notification:%",
+                    "oracle:gmail:%",
                     "ACTIVE",
                     transaction.amountPaise.toString(),
                     transaction.currency,
