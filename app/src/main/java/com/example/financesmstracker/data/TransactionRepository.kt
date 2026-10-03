@@ -831,6 +831,34 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             )
 
             if (updated > 0) {
+                // If the durable Gmail row confirms an SMS transaction that
+                // already has a provisional notification twin, retire the twin
+                // locally and reverse its Oracle balance contribution. Without
+                // this cleanup, the old notification row would remain visible
+                // even though Gmail has already clarified the real transaction.
+                if (matchingLocal != null && notificationLocal != null && notificationLocal.id != localId) {
+                    val notificationAge = kotlin.math.abs(
+                        notificationLocal.timestamp - matchingLocal.timestamp
+                    )
+                    if (
+                        notificationAge <= 2L * 60L * 60L * 1000L ||
+                        !transaction.reference.isNullOrBlank()
+                    ) {
+                        val voided = db.update(
+                            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                            ContentValues().apply {
+                                put(FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS, "VOIDED")
+                            },
+                            FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                            arrayOf(notificationLocal.id.toString())
+                        )
+                        if (voided > 0) {
+                            com.example.financesmstracker.integration.FinanceSyncBridge
+                                .enqueueVoidedTransaction(context, notificationLocal.id)
+                        }
+                    }
+                }
+
                 if (existingRemoteId != null && existingRemoteId != localId) {
                     db.delete(
                         FinanceDatabaseHelper.TABLE_TRANSACTIONS,
