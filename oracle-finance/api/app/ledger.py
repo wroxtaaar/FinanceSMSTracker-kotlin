@@ -39,6 +39,49 @@ def splitwise_delta(account_type, transaction_type, amount_minor, category):
 def splitwise_delta_for_transaction(t):
     return splitwise_delta(t.accountType, t.type, t.amountMinor, t.category)
 
+
+def is_provisional_unresolved_transaction(t):
+    """Return True for a fast notification row that is not authoritative yet.
+
+    These rows can have a useful account last-4 but no bank/reference and an
+    UNKNOWN payment method. They are intentionally stored for later Gmail
+    enrichment, but must not affect the account balance or Splitwise until the
+    authoritative bank evidence arrives.
+    """
+    bank = str(getattr(t, "bank", None) or "").strip()
+    reference = str(getattr(t, "reference", None) or "").strip()
+    payment_method = str(getattr(t, "paymentMethod", None) or "").strip().upper()
+    account_type = str(getattr(t, "accountType", None) or "").strip().upper()
+    last4 = str(
+        getattr(t, "accountLast4", None)
+        or getattr(t, "accountLastFour", None)
+        or ""
+    ).strip()
+    return (
+        not bank
+        and not reference
+        and payment_method == "UNKNOWN"
+        and account_type in ("BANK_ACCOUNT", "CREDIT_CARD")
+        and bool(last4)
+    )
+
+
+def is_provisional_row(row):
+    """Same unresolved-notification check for an existing SQLite row."""
+    bank = str(row["bank"] or "").strip()
+    reference = str(row["reference"] or "").strip()
+    payment_method = str(row["payment_method"] or "").strip().upper()
+    account_type = str(row["account_type"] or "").strip().upper()
+    last4 = str(row["account_last4"] or "").strip()
+    return (
+        not bank
+        and not reference
+        and payment_method == "UNKNOWN"
+        and account_type in ("BANK_ACCOUNT", "CREDIT_CARD")
+        and bool(last4)
+    )
+
+
 def sync_transaction(t, apply_balance=True):
     with connection() as conn:
         before=conn.execute(
@@ -46,13 +89,19 @@ def sync_transaction(t, apply_balance=True):
             (t.id,)
         ).fetchone()
         created_at=now_ms()
+        provisional = is_provisional_unresolved_transaction(t)
         conn.execute("""INSERT OR IGNORE INTO transactions
         (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,normalize_reference(t.reference),
          t.timestamp,t.category,t.confidence,None,"ACTIVE",created_at))
 
-        if before is None and apply_balance and not str(t.id).startswith("gmail:"):
+        if (
+            before is None
+            and apply_balance
+            and not str(t.id).startswith("gmail:")
+            and not provisional
+        ):
             apply_transaction_to_account(conn, t, created_at, transaction_created_at=created_at)
 
         if before is not None and before["status"] == "ACTIVE":
@@ -60,7 +109,7 @@ def sync_transaction(t, apply_balance=True):
             # it. When the same canonical ID is later enriched, update the
             # existing ledger row and repair any balance/Splitwise contribution
             # that was based on the provisional direction/account identity.
-            old_delta = splitwise_delta(
+            old_delta = 0 if is_provisional_row(before) else splitwise_delta(
                 before["account_type"], before["type"], before["amount_minor"], before["category"]
             )
             new_delta = splitwise_delta_for_transaction(t)
@@ -126,7 +175,12 @@ def sync_transaction(t, apply_balance=True):
         # decrease it, and card credits increase it. Gmail rows are never
         # allowed to create a Splitwise contribution until reconciliation makes
         # the canonical non-Gmail transaction authoritative.
-        if before is None and apply_balance and not str(t.id).startswith("gmail:"):
+        if (
+            before is None
+            and apply_balance
+            and not str(t.id).startswith("gmail:")
+            and not provisional
+        ):
             delta = splitwise_delta_for_transaction(t)
             if delta:
                 conn.execute(
@@ -149,7 +203,7 @@ def sync_transaction(t, apply_balance=True):
             and str(before["category"] or "").strip().upper()
                 != str(t.category or "").strip().upper()
         ):
-            old_delta = splitwise_delta(
+            old_delta = 0 if is_provisional_row(before) else splitwise_delta(
                 before["account_type"], before["type"], before["amount_minor"], before["category"]
             )
             new_delta = splitwise_delta_for_transaction(t)
