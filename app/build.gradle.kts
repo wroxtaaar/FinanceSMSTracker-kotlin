@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
 }
@@ -25,7 +27,7 @@ android {
     // Shared signing: Android Studio reads finance-signing.properties;
     // GitHub Actions supplies the equivalent values through environment variables.
     val signingPropertiesFile = rootProject.file("finance-signing.properties")
-    val signingProperties = java.util.Properties()
+    val signingProperties = Properties()
     if (signingPropertiesFile.exists()) {
         signingPropertiesFile.inputStream().use { signingProperties.load(it) }
     }
