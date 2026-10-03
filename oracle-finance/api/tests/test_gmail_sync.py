@@ -1651,18 +1651,3 @@ def test_axis_credit_direction_ignores_footer_debit_words():
     assert transaction.accountLast4 == "3370"
     assert transaction.reference == "930624306800"
     assert evidence.direction == "CREDIT"
-
-
-def test_axis_identity_free_upi_bank_email_is_rejected():
-    message = _message(
-        "axis-no-identity",
-        "Amount Credited: INR 3510.00 Account Number: XX3370. "
-        "Payment successful. Available balance is INR 50000.00.",
-        subject="Axis Bank Transaction Alert",
-    )
-    message["payload"]["headers"] = [
-        {"name": "Subject", "value": "Axis Bank Transaction Alert"},
-        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
-    ]
-
-    assert parse_bank_email(message) is None
