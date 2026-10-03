@@ -69,6 +69,23 @@ class GmailNotificationParserTest {
     }
 
     @Test
+    fun axisBankCreditIsNotChangedByCreditCardFooter() {
+        val result = GmailNotificationParser.parse(
+            "Axis Bank Alerts",
+            "INR 3.00 was credited to your A/c.\nThe transaction is subject to your credit card payment terms.",
+            null,
+            null
+        )
+
+        assertNotNull(result)
+        assertEquals(300L, result!!.amountPaise)
+        assertEquals(TransactionType.CREDIT, result.transactionType)
+        assertEquals(AccountType.BANK_ACCOUNT, result.accountType)
+        assertEquals(PaymentMethod.UNKNOWN, result.paymentMethod)
+        assertEquals("AXIS", result.bank)
+    }
+
+    @Test
     fun parsesAxisCreditCardSpendNotificationAsDebit() {
         val result = GmailNotificationParser.parse(
             "Axis Bank Alerts",
