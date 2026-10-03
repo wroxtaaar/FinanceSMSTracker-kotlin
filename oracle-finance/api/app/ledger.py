@@ -156,8 +156,17 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
     # event timestamp is older because the notification/email arrived late.
     reconciled_at = int(account["balance_reconciled_at"] or 0)
     created_at = int(transaction_created_at or applied_at)
-    if reconciled_at and int(t.timestamp) <= reconciled_at and created_at <= reconciled_at:
-        return
+    event_at = int(t.timestamp)
+    # A manual reconciliation must ignore genuinely historical rows discovered
+    # later. We still allow a recent bank event whose notification/email arrived
+    # after reconciliation; this covers the real late-Gmail case without
+    # replaying arbitrarily old transactions into a verified balance.
+    late_discovery_window_ms = 7 * 24 * 60 * 60 * 1000
+    if reconciled_at and event_at <= reconciled_at:
+        if created_at <= reconciled_at:
+            return
+        if reconciled_at - event_at > late_discovery_window_ms:
+            return
 
     # Both bank accounts and credit cards use the transaction's natural sign:
     # DEBIT decreases the tracked balance; CREDIT increases it.
