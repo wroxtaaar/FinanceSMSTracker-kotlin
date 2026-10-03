@@ -441,4 +441,81 @@ class TransactionRepositoryTest {
         assertTrue(allActive.none { it.id == wrongAxisDebit })
     }
 
+
+    @Test
+    fun oracleGmailReferenceDoesNotLeaveDuplicateHdfcCreditFromWrongDirectionNotification() {
+        val timestamp = 1_800_000_000_000L
+        val rrn = "502395202128"
+
+        // The bank SMS is the authoritative HDFC-side transaction.
+        val hdfcCredit = repository.insertTransaction(
+            Transaction(
+                amountPaise = 500L,
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "HDFC",
+                merchantName = "HDFC Bank",
+                payeeId = null,
+                accountLastFour = "9591",
+                refNumber = null,
+                timestamp = timestamp,
+                smsHash = HashUtil.sha256("hdfc-sms-5"),
+                category = "TRANSFER",
+                parserConfidence = 0.99f
+            )
+        )
+
+        // Gmail's fast notification path previously created a second provisional
+        // row with the same amount/account but the wrong direction and no bank.
+        val provisional = repository.insertTransaction(
+            Transaction(
+                amountPaise = 500L,
+                transactionType = TransactionType.DEBIT,
+                paymentMethod = PaymentMethod.UNKNOWN,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = null,
+                merchantName = null,
+                payeeId = null,
+                accountLastFour = "9591",
+                refNumber = null,
+                timestamp = timestamp + 30_000L,
+                smsHash = "notification:wrong-direction-5",
+                category = "GROCERIES",
+                parserConfidence = 0.70f
+            )
+        )
+
+        val remote = OracleTransaction(
+            id = "gmail:hdfc-5",
+            amountMinor = 500L,
+            currency = "INR",
+            transactionType = "CREDIT",
+            paymentMethod = "UPI",
+            accountType = "BANK_ACCOUNT",
+            bank = "HDFC",
+            merchantOrPayee = "HDFC Bank",
+            accountLast4 = "9591",
+            reference = rrn,
+            timestamp = timestamp + 60_000L,
+            category = "TRANSFER",
+            confidence = 1.0f
+        )
+
+        repository.upsertOracleGmailTransaction(remote)
+
+        val allActive = repository.getAllTransactions()
+        val hdfcCredits = allActive.filter {
+            it.amountPaise == 500L &&
+                it.bank == "HDFC" &&
+                it.transactionType == TransactionType.CREDIT
+        }
+
+        assertEquals(1, hdfcCredits.size)
+        assertEquals(hdfcCredit, hdfcCredits.single().id)
+        assertEquals(rrn, hdfcCredits.single().refNumber)
+        assertEquals(TransactionType.DEBIT, repository.getTransactionById(provisional)?.transactionType)
+        assertTrue(allActive.none { it.id == provisional })
+    }
+
 }
