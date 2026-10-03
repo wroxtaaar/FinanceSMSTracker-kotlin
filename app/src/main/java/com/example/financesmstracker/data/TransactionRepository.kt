@@ -173,7 +173,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             put(FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE, transaction.transactionType.name)
             put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod.name)
             put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType.name)
-            put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
+            put(FinanceDatabaseHelper.COLUMN_BANK, notificationBank)
             put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantName)
             put(FinanceDatabaseHelper.COLUMN_PAYEE_ID, transaction.payeeId)
             put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLastFour)
