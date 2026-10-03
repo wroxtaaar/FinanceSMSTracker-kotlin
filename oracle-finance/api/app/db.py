@@ -86,19 +86,13 @@ def connection():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
 
-    # The isolated Sheets service mounts the database read-only. SQLite's
-    # journal_mode=WAL pragma writes to the database, so do not execute it in
-    # read-only mode. query_only also prevents accidental writes from the
-    # snapshot service while leaving the normal API/worker behavior unchanged.
+    # The isolated Sheets service is SQL read-only, but SQLite WAL still
+    # needs filesystem access to its -wal/-shm sidecar files. The Compose
+    # override therefore keeps the database directory writable while this
+    # connection enables SQLite query_only mode. The normal API/worker path
+    # remains unchanged.
     read_only = os.getenv("DATABASE_READ_ONLY", "").strip().lower() in {"1", "true", "yes"}
     if read_only:
-        # Open SQLite in explicit read-only mode. A read-only bind mount can
-        # reject SQLite's normal READWRITE|CREATE open even when the file is
-        # readable. URI mode=ro avoids any attempt to create or modify files.
-        conn.close()
-        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA query_only=ON")
     else:
         conn.execute("PRAGMA journal_mode=WAL")
