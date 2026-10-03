@@ -17,10 +17,32 @@ def normalize_reference(value):
     raw = raw.strip(".,;:)]").strip()
     return raw.upper() or None
 
+def splitwise_delta(account_type, transaction_type, amount_minor, category):
+    """Return the signed Splitwise contribution for one ledger transaction.
+
+    Bank accounts move opposite to Splitwise; credit cards move in the same
+    direction. OTHER remains the explicit Splitwise opt-out.
+    """
+    if str(category or "").strip().upper() == "OTHER":
+        return 0
+
+    amount = int(amount_minor)
+    account_type = str(account_type or "").strip().upper()
+    transaction_type = str(transaction_type or "").strip().upper()
+
+    if account_type == "BANK_ACCOUNT":
+        return amount if transaction_type == "DEBIT" else -amount if transaction_type == "CREDIT" else 0
+    if account_type == "CREDIT_CARD":
+        return -amount if transaction_type == "DEBIT" else amount if transaction_type == "CREDIT" else 0
+    return 0
+
+def splitwise_delta_for_transaction(t):
+    return splitwise_delta(t.accountType, t.type, t.amountMinor, t.category)
+
 def sync_transaction(t, apply_balance=True):
     with connection() as conn:
         before=conn.execute(
-            """SELECT id,amount_minor,currency,type,category,status
+            """SELECT id,amount_minor,currency,type,account_type,category,status
                FROM transactions WHERE id=?""",
             (t.id,)
         ).fetchone()
@@ -34,25 +56,22 @@ def sync_transaction(t, apply_balance=True):
         if before is None and apply_balance and not str(t.id).startswith("gmail:"):
             apply_transaction_to_account(conn, t, created_at)
 
-        # Splitwise is intentionally simple: every new debit increases the
-        # manual owed amount, except transactions explicitly categorized OTHER.
-        # Credits never change it. Gmail rows are never allowed to create a
-        # Splitwise contribution.
-        if (
-            before is None
-            and apply_balance
-            and not str(t.id).startswith("gmail:")
-            and t.type == "DEBIT"
-            and str(t.category or "").strip().upper() != "OTHER"
-        ):
-            conn.execute(
-                """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-                   VALUES(?,?,?)
-                   ON CONFLICT(currency) DO UPDATE SET
-                       amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                       updated_at=excluded.updated_at""",
-                (t.currency, int(t.amountMinor), created_at),
-            )
+        # Splitwise is a signed ledger component. Bank debits increase the
+        # amount owed to the user, bank credits decrease it, card debits
+        # decrease it, and card credits increase it. Gmail rows are never
+        # allowed to create a Splitwise contribution until reconciliation makes
+        # the canonical non-Gmail transaction authoritative.
+        if before is None and apply_balance and not str(t.id).startswith("gmail:"):
+            delta = splitwise_delta_for_transaction(t)
+            if delta:
+                conn.execute(
+                    """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
+                       VALUES(?,?,?)
+                       ON CONFLICT(currency) DO UPDATE SET
+                           amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
+                           updated_at=excluded.updated_at""",
+                    (t.currency, delta, created_at),
+                )
 
         # Category edits are sent as the same transaction ID. They must update
         # the ledger metadata and Splitwise contribution without reapplying the
@@ -65,26 +84,22 @@ def sync_transaction(t, apply_balance=True):
             and str(before["category"] or "").strip().upper()
                 != str(t.category or "").strip().upper()
         ):
-            old_contributes = (
-                str(before["type"] or "").upper() == "DEBIT"
-                and str(before["category"] or "").strip().upper() != "OTHER"
+            old_delta = splitwise_delta(
+                before["account_type"], before["type"], before["amount_minor"], before["category"]
             )
-            new_contributes = (
-                str(t.type or "").upper() == "DEBIT"
-                and str(t.category or "").strip().upper() != "OTHER"
-            )
+            new_delta = splitwise_delta_for_transaction(t)
             conn.execute(
                 "UPDATE transactions SET category=? WHERE id=?",
                 (t.category, t.id),
             )
 
-            if old_contributes != new_contributes:
-                delta = int(t.amountMinor) if new_contributes else -int(t.amountMinor)
+            delta = new_delta - old_delta
+            if delta:
                 conn.execute(
                     """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
                        VALUES(?,?,?)
                        ON CONFLICT(currency) DO UPDATE SET
-                           amount_minor=MAX(0, manual_splitwise_total.amount_minor + excluded.amount_minor),
+                           amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
                            updated_at=excluded.updated_at""",
                     (t.currency, delta, created_at),
                 )
@@ -120,10 +135,14 @@ def apply_transaction_to_account(conn, t, applied_at):
     if reconciled_at and int(t.timestamp) <= reconciled_at:
         return
 
-    if t.accountType=="BANK_ACCOUNT":
-        delta=-t.amountMinor if t.type=="DEBIT" else t.amountMinor
+    # Both bank accounts and credit cards use the transaction's natural sign:
+    # DEBIT decreases the tracked balance; CREDIT increases it.
+    if t.type == "DEBIT":
+        delta = -t.amountMinor
+    elif t.type == "CREDIT":
+        delta = t.amountMinor
     else:
-        delta=t.amountMinor if t.type=="DEBIT" else -t.amountMinor
+        return
 
     inserted=conn.execute(
         """INSERT OR IGNORE INTO balance_adjustments
@@ -348,7 +367,7 @@ def sync_card_bill(bill):
 def void_transaction(transaction_id):
     with connection() as conn:
         tx=conn.execute(
-            "SELECT id,status,type,category,amount_minor,currency FROM transactions WHERE id=?",
+            "SELECT id,status,type,account_type,category,amount_minor,currency FROM transactions WHERE id=?",
             (transaction_id,)
         ).fetchone()
         if not tx:
@@ -371,22 +390,20 @@ def void_transaction(transaction_id):
                 (transaction_id,)
             )
 
-        # If this transaction previously contributed to the
-        # automatic Splitwise amount, reverse that contribution when it is
-        # voided/deleted. This makes the self-transfer workflow safe: if the
-        # debit and credit are the same amount, the user can simply delete the
-        # unwanted debit and its Splitwise contribution disappears.
-        if (
-            tx["type"] == "DEBIT"
-            and str(tx["category"] or "").strip().upper() != "OTHER"
-            and not str(tx["id"]).startswith("gmail:")
-        ):
-            conn.execute(
-                """UPDATE manual_splitwise_total
-                   SET amount_minor=MAX(0, amount_minor-?), updated_at=?
-                   WHERE currency=?""",
-                (int(tx["amount_minor"]), now_ms(), tx["currency"]),
+        # Reverse the exact signed Splitwise contribution that this
+        # transaction created. Do not clamp the aggregate: the ledger may need
+        # to move through zero when credits/card activity are reversed.
+        if not str(tx["id"]).startswith("gmail:"):
+            delta = splitwise_delta(
+                tx["account_type"], tx["type"], tx["amount_minor"], tx["category"]
             )
+            if delta:
+                conn.execute(
+                    """UPDATE manual_splitwise_total
+                       SET amount_minor=amount_minor-?, updated_at=?
+                       WHERE currency=?""",
+                    (delta, now_ms(), tx["currency"]),
+                )
 
         conn.execute(
             "UPDATE transactions SET status='VOIDED' WHERE id=?",
