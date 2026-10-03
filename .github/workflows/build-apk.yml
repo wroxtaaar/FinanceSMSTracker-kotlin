@@ -32,7 +32,7 @@ jobs:
         env:
           FINANCE_SYNC_URL: ${{ secrets.FINANCE_SYNC_URL }}
           FINANCE_SYNC_TOKEN: ${{ secrets.FINANCE_SYNC_TOKEN }}
-          FINANCE_KEYSTORE_PATH: $RUNNER_TEMP/finance-release.jks
+          FINANCE_KEYSTORE_PATH: ${{ runner.temp }}/finance-release.jks
           FINANCE_KEY_ALIAS: ${{ secrets.FINANCE_KEY_ALIAS }}
           FINANCE_KEYSTORE_PASSWORD: ${{ secrets.FINANCE_KEYSTORE_PASSWORD }}
           FINANCE_KEY_PASSWORD: ${{ secrets.FINANCE_KEY_PASSWORD }}
