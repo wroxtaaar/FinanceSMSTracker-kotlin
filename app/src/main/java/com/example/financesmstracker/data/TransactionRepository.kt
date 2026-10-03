@@ -610,11 +610,10 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             val remoteBank = normalized(transaction.bank)
             val remoteLast4 = normalized(transaction.accountLast4)
             val remoteReference = normalized(transaction.reference)
-            val remotePayee = normalized(transaction.merchantOrPayee)
+            val remoteMerchant = normalized(transaction.merchantOrPayee)
             val localBank = normalized(candidate.bank)
             val localLast4 = normalized(candidate.last4)
             val localReference = normalized(candidate.reference)
-            val localPayee = normalized(candidate.payeeId)
             val localMerchant = normalized(candidate.merchant)
 
             val age = kotlin.math.abs(candidate.timestamp - transaction.timestamp)
@@ -626,12 +625,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             if (remoteReference != null && localReference != null) {
                 if (remoteReference != localReference) return null
                 score += 100
-                strongIdentity = true
-            }
-
-            if (remotePayee != null && localPayee != null) {
-                if (remotePayee != localPayee) return null
-                score += 80
                 strongIdentity = true
             }
 
