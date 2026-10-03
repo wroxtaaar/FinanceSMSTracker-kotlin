@@ -25,10 +25,25 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Restore shared signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FINANCE_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/finance-release.jks"
+          test -s "$RUNNER_TEMP/finance-release.jks"
+
       - name: Run unit tests
         run: bash ./gradlew test
 
-      - name: Build debug APK
+      - name: Build signed debug APK
+        env:
+          FINANCE_SYNC_URL: ${{ secrets.FINANCE_SYNC_URL }}
+          FINANCE_SYNC_TOKEN: ${{ secrets.FINANCE_SYNC_TOKEN }}
+          FINANCE_KEYSTORE_PATH: ${{ runner.temp }}/finance-release.jks
+          FINANCE_KEY_ALIAS: ${{ secrets.FINANCE_KEY_ALIAS }}
+          FINANCE_KEYSTORE_PASSWORD: ${{ secrets.FINANCE_KEYSTORE_PASSWORD }}
+          FINANCE_KEY_PASSWORD: ${{ secrets.FINANCE_KEY_PASSWORD }}
         run: bash ./gradlew assembleDebug
 
       - name: Upload debug APK
