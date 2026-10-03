@@ -653,41 +653,43 @@ def reconcile_duplicate_transaction(transaction_id):
             if strong:
                 best_score = max(score for score, _ in strong)
                 best = [(score, c) for score, c in strong if score == best_score]
-                if len(best) != 1:
-                    strong = []
-                else:
-                    canonical = best[0][1]
-                conn.execute("UPDATE transactions SET duplicate_of=? WHERE id=?",(canonical["id"],tx["id"]))
+                if len(best) == 1:
+                    score, canonical = best[0]
+                    conn.execute("UPDATE transactions SET duplicate_of=? WHERE id=?",(canonical["id"],tx["id"]))
 
-                # Gmail can arrive after a notification/SMS has already created
-                # the canonical ledger row. Preserve the stronger Gmail
-                # transaction identity on that canonical row instead of leaving
-                # the RRN stranded on the duplicate Gmail row.
-                enrichment = {}
-                if not canonical["reference"] and tx["reference"]:
-                    enrichment["reference"] = normalize_reference(tx["reference"])
-                if (
-                    (not canonical["merchant_or_payee"] or str(canonical["merchant_or_payee"]).strip() == "-")
-                    and tx["merchant_or_payee"]
-                    and str(tx["merchant_or_payee"]).strip() != "-"
-                ):
-                    enrichment["merchant_or_payee"] = tx["merchant_or_payee"]
+                    # Gmail can arrive after a notification/SMS has already
+                    # created the canonical ledger row. Preserve the stronger
+                    # Gmail transaction identity on that canonical row instead
+                    # of leaving the RRN stranded on the duplicate Gmail row.
+                    enrichment = {}
+                    if not canonical["reference"] and tx["reference"]:
+                        enrichment["reference"] = normalize_reference(tx["reference"])
+                    if (
+                        (not canonical["merchant_or_payee"] or str(canonical["merchant_or_payee"]).strip() == "-")
+                        and tx["merchant_or_payee"]
+                        and str(tx["merchant_or_payee"]).strip() != "-"
+                    ):
+                        enrichment["merchant_or_payee"] = tx["merchant_or_payee"]
 
-                if enrichment:
-                    assignments = ", ".join(f"{column}=?" for column in enrichment)
-                    values = list(enrichment.values()) + [canonical["id"]]
+                    if enrichment:
+                        assignments = ", ".join(f"{column}=?"
+                                                for column in enrichment)
+                        values = list(enrichment.values()) + [canonical["id"]]
+                        conn.execute(
+                            f"UPDATE transactions SET {assignments} WHERE id=?",
+                            values,
+                        )
+
                     conn.execute(
-                        f"UPDATE transactions SET {assignments} WHERE id=?",
-                        values,
+                        "UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",
+                        (canonical["id"],tx["id"])
                     )
-
-                conn.execute("UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",(canonical["id"],tx["id"]))
-                return {
-                    "duplicate":tx["id"],
-                    "canonical":canonical["id"],
-                    "score":strong[0][0],
-                    "enriched":bool(enrichment),
-                }
+                    return {
+                        "duplicate":tx["id"],
+                        "canonical":canonical["id"],
+                        "score":score,
+                        "enriched":bool(enrichment),
+                    }
 
             # A notification often has no RRN. It can still be the provisional
             # destination-side row for the Gmail transaction, so retain the
