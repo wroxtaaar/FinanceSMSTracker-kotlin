@@ -1041,7 +1041,7 @@ def parse_bank_email(message):
     # beyond amount + account. Otherwise an unrelated amount in a bank email
     # can become a fake ledger entry. Notification ingestion is separate and
     # is intentionally not affected by this rule.
-    if not reference and not merchant_or_payee:
+    if bank == "HDFC" and not reference and not merchant_or_payee:
         return None
 
     score=0.75
