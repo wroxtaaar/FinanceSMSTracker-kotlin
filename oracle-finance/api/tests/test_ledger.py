@@ -98,6 +98,62 @@ def test_new_transactions_update_seeded_account_balances():
     assert card_balance == 44200
 
 
+def test_provisional_bankless_debit_is_corrected_to_axis_credit():
+    from app.ledger import sync_transaction
+
+    class T:
+        def __init__(self, typ, bank, category):
+            self.id = "axis-provisional"
+            self.amountMinor = 200
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UNKNOWN" if bank is None else "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = None
+            self.accountLast4 = "3370"
+            self.reference = None if bank is None else "898523485227"
+            self.timestamp = 1_800_000_000_000
+            self.category = category
+            self.confidence = 0.70 if bank is None else 1.0
+
+    set_balance(
+        "axis-provisional-account",
+        "Axis Bank",
+        "INR",
+        "BANK_ACCOUNT",
+        "AXIS BANK",
+        "3370",
+        100000,
+    )
+
+    # Fast notification: missing bank, wrong/ambiguous direction. It must not
+    # change the Axis balance or become a Splitwise debit contribution.
+    sync_transaction(T("DEBIT", None, "GROCERIES"))
+
+    with connection() as conn:
+        before = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='axis-provisional-account'"
+        ).fetchone()["balance_minor"]
+    assert before == 100000
+
+    # Gmail is authoritative and clarifies this as an Axis credit.
+    sync_transaction(T("CREDIT", "AXIS", "GROCERIES"))
+
+    with connection() as conn:
+        after = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='axis-provisional-account'"
+        ).fetchone()["balance_minor"]
+        tx = conn.execute(
+            "SELECT type,bank,reference FROM transactions WHERE id='axis-provisional'"
+        ).fetchone()
+
+    assert after == 100200
+    assert tx["type"] == "CREDIT"
+    assert tx["bank"] == "AXIS"
+    assert tx["reference"] == "898523485227"
+
+
 def test_existing_transaction_is_not_applied_twice():
     from app.ledger import sync_transaction
 
