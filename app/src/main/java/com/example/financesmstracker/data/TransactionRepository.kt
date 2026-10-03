@@ -117,6 +117,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     val notificationBank = it.getString(1)
                     val notificationLast4 = it.getString(2)
                     val notificationReference = it.getString(3)
+                    val existingSourceHash = it.getString(4)
 
                     val bankCompatible =
                         notificationBank.isNullOrBlank() ||
@@ -136,10 +137,9 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     if (bankCompatible && last4Compatible && referenceCompatible) {
                         val notificationId = it.getLong(0)
 
-                        // SMS is authoritative over a provisional Gmail notification.
-                        // Update the existing row in place instead of returning its id
-                        // unchanged; otherwise the SMS details never reach Oracle and
-                        // the notification can remain unresolved/provisional forever.
+                        // SMS is authoritative over a provisional Gmail/Oracle row.
+                        // If Gmail sync ran before the SMS arrived, reuse that canonical
+                        // row instead of creating a second SMS transaction.
                         val values = ContentValues().apply {
                             put(FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE, transaction.amountPaise)
                             put(FinanceDatabaseHelper.COLUMN_CURRENCY, transaction.currency)
