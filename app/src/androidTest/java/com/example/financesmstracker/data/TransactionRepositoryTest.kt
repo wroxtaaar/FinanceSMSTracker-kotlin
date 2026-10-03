@@ -259,6 +259,52 @@ class TransactionRepositoryTest {
         assertNull(repository.getCategoryForPayee(""))
     }
     @Test
+    fun oracleGmailCorrectsBanklessWrongDirectionNotification() {
+        val provisional = repository.insertTransaction(
+            Transaction(
+                amountPaise = 200L,
+                transactionType = TransactionType.DEBIT,
+                paymentMethod = PaymentMethod.UNKNOWN,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = null,
+                merchantName = null,
+                payeeId = null,
+                accountLastFour = "3370",
+                refNumber = null,
+                timestamp = 1_800_000_000_000L,
+                smsHash = "notification:bankless-axis",
+                category = "GROCERIES",
+                parserConfidence = 0.70f
+            )
+        )
+
+        val remote = OracleTransaction(
+            id = "gmail:bankless-axis",
+            amountMinor = 200L,
+            currency = "INR",
+            transactionType = "CREDIT",
+            paymentMethod = "UPI",
+            accountType = "BANK_ACCOUNT",
+            bank = "AXIS",
+            merchantOrPayee = "ABDUL WAS",
+            accountLast4 = "3370",
+            reference = "898523485227",
+            timestamp = 1_800_000_060_000L,
+            category = "TRANSFER",
+            confidence = 1.0f
+        )
+
+        repository.upsertOracleGmailTransaction(remote)
+
+        val corrected = repository.getTransactionById(provisional)
+        assertEquals(TransactionType.CREDIT, corrected?.transactionType)
+        assertEquals(PaymentMethod.UPI, corrected?.paymentMethod)
+        assertEquals("AXIS", corrected?.bank)
+        assertEquals("3370", corrected?.accountLastFour)
+        assertEquals("898523485227", corrected?.refNumber)
+    }
+
+    @Test
     fun oracleGmailReferenceCorrectsAxisNotificationAndVoidsWrongAxisDebit() {
         val rrn = "739593577194"
         val timestamp = 1_800_000_000_000L
