@@ -95,7 +95,7 @@ def test_new_transactions_update_seeded_account_balances():
         ).fetchone()["balance_minor"]
 
     assert bank_balance == 98500
-    assert card_balance == 55800
+    assert card_balance == 44200
 
 
 def test_existing_transaction_is_not_applied_twice():
@@ -131,7 +131,7 @@ def test_existing_transaction_is_not_applied_twice():
     assert balance == 9500
 
 
-def test_card_direction_rules_are_opposite_of_bank_rules():
+def test_card_direction_rules_match_bank_sign_convention():
     from app.ledger import sync_transaction
 
     class T:
@@ -159,7 +159,7 @@ def test_card_direction_rules_are_opposite_of_bank_rules():
             "SELECT balance_minor FROM accounts WHERE id='direction-card'"
         ).fetchone()["balance_minor"]
 
-    assert balance == 55800
+    assert balance == 44200
 
 
 def test_card_bill_and_active_spend_are_separate():
@@ -201,7 +201,7 @@ def test_card_bill_and_active_spend_are_separate():
             "SELECT balance_minor, bill_balance_minor FROM accounts WHERE id='bill-card'"
         ).fetchone()
 
-    assert row["balance_minor"] == 57000
+    assert row["balance_minor"] == 43000
     assert row["bill_balance_minor"] == 50000
 
     # Paying the bill reduces the bill bucket while leaving the active spend.
@@ -212,7 +212,7 @@ def test_card_bill_and_active_spend_are_separate():
             "SELECT balance_minor, bill_balance_minor FROM accounts WHERE id='bill-card'"
         ).fetchone()
 
-    assert row["balance_minor"] == 7000
+    assert row["balance_minor"] == 93000
     assert row["bill_balance_minor"] == 0
 
 
@@ -264,7 +264,7 @@ def test_card_bill_evidence_updates_bill_without_touching_active_spend():
             "SELECT balance_minor,bill_balance_minor FROM accounts WHERE id='bill-axis-9206'"
         ).fetchone()
 
-    assert row["balance_minor"] == 6290306
+    assert row["balance_minor"] == 4336906
     assert row["bill_balance_minor"] == 5313606
 
 
@@ -312,6 +312,82 @@ def test_full_gmail_bill_overrides_lower_priority_sms_bill():
         ).fetchone()["bill_balance_minor"]
 
     assert bill == 4585900
+
+
+def test_self_transfer_cancels_splitwise_and_preserves_true_available():
+    from app.ledger import sync_transaction, set_manual_splitwise_total, true_available
+
+    class T:
+        def __init__(self, id, typ, bank, last4):
+            self.id = id
+            self.amountMinor = 500
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "ABDUL WASIQ"
+            self.accountLast4 = last4
+            self.reference = None
+            self.timestamp = 4102444800000
+            self.category = "TRANSFER"
+            self.confidence = 0.99
+
+    set_balance("self-hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "9591", 10000)
+    set_balance("self-axis", "AXIS", "INR", "BANK_ACCOUNT", "AXIS", "3370", 20000)
+    set_manual_splitwise_total("INR", 3000)
+
+    before = true_available("INR")
+    sync_transaction(T("self-hdfc-debit", "DEBIT", "HDFC", "9591"))
+    sync_transaction(T("self-axis-credit", "CREDIT", "AXIS", "3370"))
+    after = true_available("INR")
+
+    with connection() as conn:
+        hdfc = conn.execute("SELECT balance_minor FROM accounts WHERE id='self-hdfc'").fetchone()["balance_minor"]
+        axis = conn.execute("SELECT balance_minor FROM accounts WHERE id='self-axis'").fetchone()["balance_minor"]
+
+    assert hdfc == 9500
+    assert axis == 20500
+    assert after["splitwiseReceivableMinor"] == before["splitwiseReceivableMinor"]
+    assert after["bankCashMinor"] == before["bankCashMinor"]
+    assert after["creditCardOutstandingMinor"] == before["creditCardOutstandingMinor"]
+    assert after["trueAvailableMinor"] == before["trueAvailableMinor"]
+
+
+def test_true_available_invariant_holds_for_bank_and_card_transactions():
+    from app.ledger import sync_transaction, set_manual_splitwise_total, true_available
+
+    class T:
+        def __init__(self, id, typ, account_type, bank, last4, amount):
+            self.id = id
+            self.amountMinor = amount
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "CARD" if account_type == "CREDIT_CARD" else "UPI"
+            self.accountType = account_type
+            self.bank = bank
+            self.merchantOrPayee = "INVARIANT TEST"
+            self.accountLast4 = last4
+            self.reference = None
+            self.timestamp = 4102444800000
+            self.category = "FOOD"
+            self.confidence = 0.99
+
+    set_balance("invariant-bank", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "1111", 10000)
+    set_balance("invariant-card", "AXIS Card", "INR", "CREDIT_CARD", "AXIS", "2222", 20000)
+    set_manual_splitwise_total("INR", 15000)
+
+    baseline = true_available("INR")["trueAvailableMinor"]
+    operations = [
+        T("inv-bank-debit", "DEBIT", "BANK_ACCOUNT", "HDFC", "1111", 500),
+        T("inv-bank-credit", "CREDIT", "BANK_ACCOUNT", "HDFC", "1111", 700),
+        T("inv-card-debit", "DEBIT", "CREDIT_CARD", "AXIS", "2222", 800),
+        T("inv-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "2222", 300),
+    ]
+
+    for tx in operations:
+        sync_transaction(tx)
+        assert true_available("INR")["trueAvailableMinor"] == baseline
 
 
 def test_bank_credit_increases_cash():
@@ -572,33 +648,36 @@ def test_voided_transactions_are_hidden_from_list():
 
     assert not any(row["id"] == "void-hidden" for row in list_transactions())
 
-def test_splitwise_increases_for_non_other_debits_only():
+def test_splitwise_uses_signed_bank_and_card_rules():
     from app.ledger import sync_transaction, get_manual_splitwise_total
 
     class T:
-        def __init__(self, id, typ, category, amount):
+        def __init__(self, id, typ, account_type, bank, category, amount, last4):
             self.id = id
             self.amountMinor = amount
             self.currency = "INR"
             self.type = typ
-            self.paymentMethod = "UPI"
-            self.accountType = "BANK_ACCOUNT"
-            self.bank = "HDFC"
+            self.paymentMethod = "CARD" if account_type == "CREDIT_CARD" else "UPI"
+            self.accountType = account_type
+            self.bank = bank
             self.merchantOrPayee = "TEST"
-            self.accountLast4 = "1234"
+            self.accountLast4 = last4
             self.reference = None
             self.timestamp = 2200000000000
             self.category = category
             self.confidence = 0.95
 
-    sync_transaction(T("splitwise-food", "DEBIT", "FOOD", 2500))
-    sync_transaction(T("splitwise-other", "DEBIT", "OTHER", 9000))
-    sync_transaction(T("splitwise-credit", "CREDIT", "FOOD", 7000))
+    # Bank debit +2500, bank credit -7000, card debit -1000, card credit +600.
+    sync_transaction(T("splitwise-bank-debit", "DEBIT", "BANK_ACCOUNT", "HDFC", "FOOD", 2500, "1234"))
+    sync_transaction(T("splitwise-other", "DEBIT", "BANK_ACCOUNT", "HDFC", "OTHER", 9000, "1234"))
+    sync_transaction(T("splitwise-bank-credit", "CREDIT", "BANK_ACCOUNT", "HDFC", "FOOD", 7000, "1234"))
+    sync_transaction(T("splitwise-card-debit", "DEBIT", "CREDIT_CARD", "AXIS", "FOOD", 1000, "5678"))
+    sync_transaction(T("splitwise-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "FOOD", 600, "5678"))
 
-    assert get_manual_splitwise_total("INR") == 2500
+    assert get_manual_splitwise_total("INR") == -4900
 
 
-def test_voiding_splitwise_debit_reverses_its_contribution():
+def test_voiding_splitwise_contribution_reverses_its_signed_delta():
     from app.ledger import sync_transaction, void_transaction, get_manual_splitwise_total
 
     class T:
@@ -620,6 +699,27 @@ def test_voiding_splitwise_debit_reverses_its_contribution():
     assert get_manual_splitwise_total("INR") == 3300
 
     result = void_transaction("splitwise-void")
+    assert result["status"] == "VOIDED"
+    assert get_manual_splitwise_total("INR") == 0
+
+    class Credit:
+        id = "splitwise-credit-void"
+        amountMinor = 1200
+        currency = "INR"
+        type = "CREDIT"
+        paymentMethod = "UPI"
+        accountType = "BANK_ACCOUNT"
+        bank = "HDFC"
+        merchantOrPayee = "CREDIT TEST"
+        accountLast4 = "1234"
+        reference = None
+        timestamp = 2200000002000
+        category = "TRANSFER"
+        confidence = 0.95
+
+    sync_transaction(Credit())
+    assert get_manual_splitwise_total("INR") == -1200
+    result = void_transaction("splitwise-credit-void")
     assert result["status"] == "VOIDED"
     assert get_manual_splitwise_total("INR") == 0
 
