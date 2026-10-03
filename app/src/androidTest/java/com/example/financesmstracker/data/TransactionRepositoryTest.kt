@@ -6,6 +6,7 @@ import com.example.financesmstracker.parser.AccountType
 import com.example.financesmstracker.parser.PaymentMethod
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.util.HashUtil
+import com.example.financesmstracker.integration.OracleTransaction
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -257,4 +258,94 @@ class TransactionRepositoryTest {
         repository.savePayeeCategoryMapping("", "FOOD")
         assertNull(repository.getCategoryForPayee(""))
     }
+    @Test
+    fun oracleGmailReferenceCorrectsAxisNotificationAndVoidsWrongAxisDebit() {
+        val rrn = "739593577194"
+        val timestamp = 1_800_000_000_000L
+
+        val hdfcDebit = repository.insertTransaction(
+            Transaction(
+                amountPaise = 400L,
+                transactionType = TransactionType.DEBIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "HDFC",
+                merchantName = "ABDUL WASIQ",
+                payeeId = null,
+                accountLastFour = "9591",
+                refNumber = rrn,
+                timestamp = timestamp,
+                smsHash = HashUtil.sha256("hdfc-$rrn"),
+                category = "OTHER",
+                parserConfidence = 0.99f
+            )
+        )
+
+        val axisNotification = repository.insertTransaction(
+            Transaction(
+                amountPaise = 400L,
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = PaymentMethod.UNKNOWN,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "AXIS",
+                merchantName = null,
+                payeeId = null,
+                accountLastFour = null,
+                refNumber = null,
+                timestamp = timestamp,
+                smsHash = "notification:axis-$rrn",
+                category = "OTHER",
+                parserConfidence = 0.90f
+            )
+        )
+
+        val wrongAxisDebit = repository.insertTransaction(
+            Transaction(
+                amountPaise = 400L,
+                transactionType = TransactionType.DEBIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "AXIS",
+                merchantName = "ABDUL WAS",
+                payeeId = null,
+                accountLastFour = "3370",
+                refNumber = "UPI/P2A/$rrn/ABDUL WAS/HDFC/Paym",
+                timestamp = timestamp,
+                smsHash = HashUtil.sha256("wrong-axis-$rrn"),
+                category = "OTHER",
+                parserConfidence = 0.99f
+            )
+        )
+
+        val remote = OracleTransaction(
+            id = "gmail:axis-$rrn",
+            amountMinor = 400L,
+            currency = "INR",
+            transactionType = "CREDIT",
+            paymentMethod = "UPI",
+            accountType = "BANK_ACCOUNT",
+            bank = "AXIS",
+            merchantOrPayee = "ABDUL WAS",
+            accountLast4 = "3370",
+            reference = rrn,
+            timestamp = timestamp + 60_000L,
+            category = "OTHER",
+            confidence = 1.0f
+        )
+
+        repository.upsertOracleGmailTransaction(remote)
+
+        val hdfc = repository.getTransactionById(hdfcDebit)
+        val axisCredit = repository.getTransactionById(axisNotification)
+        val allActive = repository.getAllTransactions()
+
+        assertEquals(TransactionType.DEBIT, hdfc?.transactionType)
+        assertEquals("HDFC", hdfc?.bank)
+        assertEquals(TransactionType.CREDIT, axisCredit?.transactionType)
+        assertEquals("AXIS", axisCredit?.bank)
+        assertEquals("3370", axisCredit?.accountLastFour)
+        assertEquals(rrn, axisCredit?.refNumber)
+        assertTrue(allActive.none { it.id == wrongAxisDebit })
+    }
+
 }
