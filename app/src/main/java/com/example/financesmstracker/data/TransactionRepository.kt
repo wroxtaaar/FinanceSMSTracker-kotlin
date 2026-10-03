@@ -573,199 +573,258 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             if (it.moveToFirst()) it.getLong(0) else null
         }
 
-        // Prefer an existing phone transaction when Oracle's Gmail copy clearly
-        // describes the same real-world transaction. This prevents a Gmail
-        // mirror from appearing as a second row beside the SMS transaction.
-        val matchingLocal = db.query(
-            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
-            arrayOf(
-                FinanceDatabaseHelper.COLUMN_ID,
-                FinanceDatabaseHelper.COLUMN_MERCHANT_NAME
-            ),
-            FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
-                FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
-                "LOWER(TRIM(COALESCE(" + FinanceDatabaseHelper.COLUMN_BANK + ",''))) = LOWER(TRIM(COALESCE(?,''))) AND " +
-                "TRIM(COALESCE(" + FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR + ",'')) = TRIM(COALESCE(?,'')) AND " +
-                "ABS(" + FinanceDatabaseHelper.COLUMN_TIMESTAMP + " - ?) <= ?",
-            arrayOf(
-                "oracle:gmail:%",
-                "ACTIVE",
-                transaction.amountMinor.toString(),
-                transaction.currency,
-                transaction.transactionType,
-                transaction.bank ?: "",
-                transaction.accountLast4 ?: "",
-                transaction.timestamp.toString(),
-                (24L * 60L * 60L * 1000L).toString()
-            ),
-            null,
-            null,
-            FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
-            "1"
-        ).use {
-            if (it.moveToFirst()) {
-                Pair(
-                    it.getLong(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_ID)),
-                    it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME))?.trim()
-                )
-            } else {
-                null
-            }
-        }
+        /*
+         * Gmail is the durable/clarifying source. A notification is only a
+         * provisional copy. Do not require every weak notification field to
+         * agree with the durable Gmail row: the notification parser can be
+         * incomplete or can have been posted much later than the actual email.
+         *
+         * Matching still requires amount + direction + time, and then at least
+         * one reliable identity:
+         *   - exact reference, or
+         *   - exact VPA/payee, or
+         *   - compatible bank/account identity.
+         *
+         * This prevents two unrelated same-value transactions from being
+         * merged just because they happened on the same day.
+         */
+        data class LocalCandidate(
+            val id: Long,
+            val merchant: String?,
+            val bank: String?,
+            val last4: String?,
+            val reference: String?,
+            val payeeId: String?,
+            val paymentMethod: String?,
+            val accountType: String?,
+            val confidence: Float,
+            val timestamp: Long,
+            val isNotification: Boolean
+        )
 
-        val notificationLocal = db.query(
-            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
-            arrayOf(
-                FinanceDatabaseHelper.COLUMN_ID,
-                FinanceDatabaseHelper.COLUMN_MERCHANT_NAME,
-                FinanceDatabaseHelper.COLUMN_BANK,
-                FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
-                FinanceDatabaseHelper.COLUMN_REF_NUMBER,
-                FinanceDatabaseHelper.COLUMN_PAYEE_ID,
-                FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD,
-                FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE
-            ),
-            FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ? AND " +
-                FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
-                "ABS(" + FinanceDatabaseHelper.COLUMN_TIMESTAMP + " - ?) <= ?",
-            arrayOf(
-                "notification:%",
-                "ACTIVE",
-                transaction.amountMinor.toString(),
-                transaction.currency,
-                transaction.transactionType,
-                transaction.timestamp.toString(),
-                (6L * 60L * 60L * 1000L).toString()
-            ),
-            null,
-            null,
-            FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
-            "20"
-        ).use {
-            var found: Pair<Long, String?>? = null
-            while (it.moveToNext()) {
-                val localBank = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_BANK))
-                val localLast4 = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR))
-                val bankCompatible = localBank.isNullOrBlank() ||
-                    transaction.bank.isNullOrBlank() ||
-                    localBank.equals(transaction.bank, ignoreCase = true)
-                val last4Compatible = localLast4.isNullOrBlank() ||
-                    transaction.accountLast4.isNullOrBlank() ||
-                    localLast4 == transaction.accountLast4
-                if (bankCompatible && last4Compatible) {
-                    found = Pair(
-                        it.getLong(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_ID)),
-                        it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME))?.trim()
-                    )
-                    break
+        fun normalized(value: String?): String? =
+            value?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true) }
+                ?.lowercase()
+
+        fun candidateScore(candidate: LocalCandidate, maxAgeMs: Long): Int? {
+            val remoteBank = normalized(transaction.bank)
+            val remoteLast4 = normalized(transaction.accountLast4)
+            val remoteReference = normalized(transaction.reference)
+            val remotePayee = normalized(transaction.merchantOrPayee)
+            val localBank = normalized(candidate.bank)
+            val localLast4 = normalized(candidate.last4)
+            val localReference = normalized(candidate.reference)
+            val localPayee = normalized(candidate.payeeId)
+            val localMerchant = normalized(candidate.merchant)
+
+            val age = kotlin.math.abs(candidate.timestamp - transaction.timestamp)
+            if (age > maxAgeMs) return null
+
+            var score = 0
+            var strongIdentity = false
+
+            if (remoteReference != null && localReference != null) {
+                if (remoteReference != localReference) return null
+                score += 100
+                strongIdentity = true
+            }
+
+            if (remotePayee != null && localPayee != null) {
+                if (remotePayee != localPayee) return null
+                score += 80
+                strongIdentity = true
+            }
+
+            if (remoteBank != null && localBank != null) {
+                if (remoteBank == localBank) {
+                    score += 25
+                } else if (!strongIdentity) {
+                    return null
                 }
             }
-            found
+
+            if (remoteLast4 != null && localLast4 != null) {
+                if (remoteLast4 == localLast4) {
+                    score += 30
+                } else if (!strongIdentity) {
+                    return null
+                }
+            }
+
+            if (remoteMerchant != null && localMerchant != null) {
+                if (remoteMerchant == localMerchant ||
+                    remoteMerchant.contains(localMerchant) ||
+                    localMerchant.contains(remoteMerchant)
+                ) {
+                    score += 25
+                }
+            }
+
+            if (transaction.accountType.equals(candidate.accountType, ignoreCase = true)) {
+                score += 8
+            }
+            if (transaction.paymentMethod.equals(candidate.paymentMethod, ignoreCase = true)) {
+                score += 5
+            }
+
+            // Prefer the closest source when multiple candidates have the same
+            // identity strength. This also makes delayed Gmail notifications safe.
+            score += (20 - (age / (15L * 60L * 1000L)).toInt()).coerceAtLeast(0)
+
+            val bankCompatible = remoteBank == null || localBank == null || remoteBank == localBank
+            val last4Compatible = remoteLast4 == null || localLast4 == null || remoteLast4 == localLast4
+            val hasBankIdentity = remoteBank != null && localBank != null
+            val hasAccountIdentity = remoteLast4 != null && localLast4 != null
+
+            val compatibleIdentity =
+                strongIdentity ||
+                    (bankCompatible && last4Compatible && (hasBankIdentity || hasAccountIdentity))
+
+            if (!compatibleIdentity) return null
+
+            // When a bank/account identity is explicitly contradictory, only a
+            // reference/payee can override it.
+            if (!strongIdentity && (!bankCompatible || !last4Compatible)) return null
+
+            return score
         }
 
+        fun findBestCandidate(isNotification: Boolean, maxAgeMs: Long): LocalCandidate? {
+            val selection = FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_SMS_HASH + if (isNotification) " LIKE ?" else " NOT LIKE ?"
+
+            val args = arrayOf(
+                "ACTIVE",
+                transaction.amountMinor.toString(),
+                transaction.currency,
+                transaction.transactionType,
+                if (isNotification) "notification:%" else "oracle:gmail:%"
+            )
+
+            var best: LocalCandidate? = null
+            var bestScore = Int.MIN_VALUE
+
+            db.query(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                arrayOf(
+                    FinanceDatabaseHelper.COLUMN_ID,
+                    FinanceDatabaseHelper.COLUMN_MERCHANT_NAME,
+                    FinanceDatabaseHelper.COLUMN_BANK,
+                    FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
+                    FinanceDatabaseHelper.COLUMN_REF_NUMBER,
+                    FinanceDatabaseHelper.COLUMN_PAYEE_ID,
+                    FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD,
+                    FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE,
+                    FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE,
+                    FinanceDatabaseHelper.COLUMN_TIMESTAMP,
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH
+                ),
+                selection,
+                args,
+                null,
+                null,
+                FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
+                "50"
+            ).use {
+                while (it.moveToNext()) {
+                    val candidate = LocalCandidate(
+                        id = it.getLong(0),
+                        merchant = it.getString(1),
+                        bank = it.getString(2),
+                        last4 = it.getString(3),
+                        reference = it.getString(4),
+                        payeeId = it.getString(5),
+                        paymentMethod = it.getString(6),
+                        accountType = it.getString(7),
+                        confidence = it.getFloat(8),
+                        timestamp = it.getLong(9),
+                        isNotification = it.getString(10)?.startsWith("notification:") == true
+                    )
+
+                    val score = candidateScore(candidate, maxAgeMs) ?: continue
+                    if (score > bestScore) {
+                        bestScore = score
+                        best = candidate
+                    }
+                }
+            }
+
+            return best
+        }
+
+        val matchingLocal = findBestCandidate(
+            isNotification = false,
+            maxAgeMs = 24L * 60L * 60L * 1000L
+        )
+        val notificationLocal = findBestCandidate(
+            isNotification = true,
+            maxAgeMs = 6L * 60L * 60L * 1000L
+        )
+
+        // Prefer the real SMS/local transaction. If there is no safe SMS match,
+        // clarify the provisional Gmail notification. If neither exists, keep
+        // the durable Gmail row as a new local transaction.
         val resolvedLocal = matchingLocal ?: notificationLocal
 
         if (resolvedLocal != null) {
-            val localId = resolvedLocal.first
-            val localMerchant = resolvedLocal.second
+            val localId = resolvedLocal.id
+            val localMerchant = resolvedLocal.merchant
 
-            val localDetails = db.query(
+            val values = ContentValues().apply {
+                // Durable Gmail is the strongest available clarification source,
+                // so it is allowed to correct weak notification fields and timestamp.
+                put(FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE, transaction.amountMinor)
+                put(FinanceDatabaseHelper.COLUMN_CURRENCY, transaction.currency)
+                put(FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE, transaction.transactionType)
+                put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod)
+                put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType)
+                put(FinanceDatabaseHelper.COLUMN_TIMESTAMP, transaction.timestamp)
+                put(FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS, "ACTIVE")
+
+                if (!transaction.bank.isNullOrBlank()) {
+                    put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
+                }
+                if (!transaction.accountLast4.isNullOrBlank()) {
+                    put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLast4)
+                }
+                if (!transaction.reference.isNullOrBlank()) {
+                    put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, transaction.reference)
+                }
+                if (!transaction.merchantOrPayee.isNullOrBlank() &&
+                    localMerchant.isNullOrBlank()
+                ) {
+                    put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantOrPayee)
+                }
+                if (transaction.confidence >= resolvedLocal.confidence) {
+                    put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, transaction.confidence)
+                }
+            }
+
+            // Convert the provisional notification row into the durable Gmail
+            // identity. This makes subsequent Gmail pulls idempotent and prevents
+            // the same transaction from being reinserted as a second row.
+            values.put(FinanceDatabaseHelper.COLUMN_SMS_HASH, remoteMarker)
+
+            val updated = db.update(
                 FinanceDatabaseHelper.TABLE_TRANSACTIONS,
-                arrayOf(
-                    FinanceDatabaseHelper.COLUMN_BANK,
-                    FinanceDatabaseHelper.COLUMN_PAYEE_ID,
-                    FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR,
-                    FinanceDatabaseHelper.COLUMN_REF_NUMBER,
-                    FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD,
-                    FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE,
-                    FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE
-                ),
+                values,
                 FinanceDatabaseHelper.COLUMN_ID + " = ?",
-                arrayOf(localId.toString()),
-                null,
-                null,
-                null,
-                "1"
-            ).use {
-                if (it.moveToFirst()) {
-                    arrayOf(
-                        it.getString(0),
-                        it.getString(1),
-                        it.getString(2),
-                        it.getString(3),
-                        it.getString(4),
-                        it.getString(5),
-                        it.getFloat(6)
-                    )
-                } else {
-                    null
-                }
-            }
+                arrayOf(localId.toString())
+            )
 
-            var changed = false
-            if (localDetails != null) {
-                val values = ContentValues()
-                fun isBlankLike(value: String?): Boolean =
-                    value.isNullOrBlank() ||
-                        value.equals("null", ignoreCase = true) ||
-                        value.equals("none", ignoreCase = true)
-
-                val remoteMerchant = transaction.merchantOrPayee?.trim()
-                    ?.takeIf { !isBlankLike(it) }
-
-                if (isBlankLike(localMerchant) && remoteMerchant != null) {
-                    values.put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, remoteMerchant)
-                }
-                if (isBlankLike(localDetails[0] as String?) && !transaction.bank.isNullOrBlank()) {
-                    values.put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
-                }
-                if (isBlankLike(localDetails[2] as String?) && !transaction.accountLast4.isNullOrBlank()) {
-                    values.put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLast4)
-                }
-                if (isBlankLike(localDetails[3] as String?) && !transaction.reference.isNullOrBlank()) {
-                    values.put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, transaction.reference)
-                }
-                if ((localDetails[4] as String?).isNullOrBlank() ||
-                    (localDetails[4] as String?).equals("UNKNOWN", ignoreCase = true)
-                ) {
-                    values.put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod)
-                }
-                if ((localDetails[5] as String?).isNullOrBlank() ||
-                    (localDetails[5] as String?).equals("UNKNOWN", ignoreCase = true)
-                ) {
-                    values.put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType)
-                }
-                val localConfidence = (localDetails[6] as Float?) ?: 0f
-                if (transaction.confidence > localConfidence) {
-                    values.put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, transaction.confidence)
-                }
-
-                if (values.size() > 0) {
-                    changed = db.update(
+            if (updated > 0) {
+                if (existingRemoteId != null && existingRemoteId != localId) {
+                    db.delete(
                         FinanceDatabaseHelper.TABLE_TRANSACTIONS,
-                        values,
                         FinanceDatabaseHelper.COLUMN_ID + " = ?",
-                        arrayOf(localId.toString())
-                    ) > 0
+                        arrayOf(existingRemoteId.toString())
+                    )
                 }
+                return localId
             }
-
-            if (existingRemoteId != null && existingRemoteId != localId) {
-                db.delete(
-                    FinanceDatabaseHelper.TABLE_TRANSACTIONS,
-                    FinanceDatabaseHelper.COLUMN_ID + " = ?",
-                    arrayOf(existingRemoteId.toString())
-                )
-                changed = true
-            }
-
-            return if (changed) localId else 0L
         }
 
         val values = ContentValues().apply {
