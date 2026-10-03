@@ -1088,11 +1088,11 @@ def parse_bank_email(message):
     account_type = _account_type_for_email(combined, subject, last4)
     payment_method = "CARD" if account_type == "CREDIT_CARD" else "UPI"
 
-    # UPI bank-account emails must carry a stable transaction identity or
-    # counterparty. This prevents generic balance/footer amounts from becoming
-    # fake ledger debits while leaving card alerts and non-UPI bank formats
-    # governed by their own identity signals.
-    if account_type == "BANK_ACCOUNT" and payment_method == "UPI" and not reference and not merchant_or_payee:
+    # HDFC UPI bank-account emails must carry a stable transaction identity
+    # or counterparty. This is the hardened path for the legacy false-HDFC
+    # amount-only rows; other bank/card formats retain their established
+    # identity rules until they expose an equivalent proven false-positive case.
+    if bank == "HDFC" and account_type == "BANK_ACCOUNT" and payment_method == "UPI" and not reference and not merchant_or_payee:
         return None
 
     score=0.75
