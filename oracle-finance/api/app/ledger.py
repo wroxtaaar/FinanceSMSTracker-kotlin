@@ -10,8 +10,8 @@ def normalize_reference(value):
     raw = str(value).strip()
     if not raw or raw.lower() in ("null", "none"):
         return None
-    raw = re.sub(r"(?i)^\\s*Transaction\\s+Info\\s*:\\s*", "", raw).strip()
-    match = re.match(r"(?i)^UPI/[^/\\s]+/([^/\\s]+)", raw)
+    raw = re.sub(r"(?i)^\s*Transaction\s+Info\s*:\s*", "", raw).strip()
+    match = re.match(r"(?i)^UPI/[^/\s]+/([^/\s]+)", raw)
     if match:
         raw = match.group(1)
     raw = raw.strip(".,;:)]").strip()
