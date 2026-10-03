@@ -175,7 +175,7 @@ def sync_evidence(e):
                 confidence=excluded.confidence
         """,
         (e.id,e.sourceType,e.sourceId,e.status,e.observedAt,e.transactionId,e.matchedTransactionId,e.amountMinor,e.currency,
-         e.direction,e.bankProvider,e.accountLast4,e.reference,e.contentHash,e.confidence,now_ms()))
+         e.direction,e.bankProvider,e.accountLast4,normalize_reference(e.reference),e.contentHash,e.confidence,now_ms()))
         return before is None
 
 def sync_card_bill(bill):
