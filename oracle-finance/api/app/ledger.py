@@ -161,11 +161,15 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
     # later. We still allow a recent bank event whose notification/email arrived
     # after reconciliation; this covers the real late-Gmail case without
     # replaying arbitrarily old transactions into a verified balance.
-    late_discovery_window_ms = 7 * 24 * 60 * 60 * 1000
+    # A real bank event timestamp is epoch milliseconds. Keep the
+    # "discovered after reconciliation" exception for plausible transaction
+    # timestamps, while rejecting obviously synthetic/invalid ancient values.
+    # This also preserves late-email/SMS ingestion of legitimate older events.
+    min_plausible_event_ms = 946684800000  # 2000-01-01
     if reconciled_at and event_at <= reconciled_at:
         if created_at <= reconciled_at:
             return
-        if reconciled_at - event_at > late_discovery_window_ms:
+        if event_at < min_plausible_event_ms:
             return
 
     # Both bank accounts and credit cards use the transaction's natural sign:
