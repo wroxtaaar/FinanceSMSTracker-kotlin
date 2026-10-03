@@ -91,7 +91,35 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                             notificationReference.equals(transaction.refNumber, ignoreCase = true)
 
                     if (bankCompatible && last4Compatible && referenceCompatible) {
-                        return it.getLong(0)
+                        val notificationId = it.getLong(0)
+
+                        // SMS is authoritative over a provisional Gmail notification.
+                        // Update the existing row in place instead of returning its id
+                        // unchanged; otherwise the SMS details never reach Oracle and
+                        // the notification can remain unresolved/provisional forever.
+                        val values = ContentValues().apply {
+                            put(FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE, transaction.amountPaise)
+                            put(FinanceDatabaseHelper.COLUMN_CURRENCY, transaction.currency)
+                            put(FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE, transaction.transactionType.name)
+                            put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod.name)
+                            put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType.name)
+                            put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
+                            put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantName)
+                            put(FinanceDatabaseHelper.COLUMN_PAYEE_ID, transaction.payeeId)
+                            put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLastFour)
+                            put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, transaction.refNumber)
+                            put(FinanceDatabaseHelper.COLUMN_TIMESTAMP, transaction.timestamp)
+                            put(FinanceDatabaseHelper.COLUMN_SMS_HASH, transaction.smsHash)
+                            put(FinanceDatabaseHelper.COLUMN_CATEGORY, transaction.category)
+                            put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, transaction.parserConfidence)
+                        }
+                        db.update(
+                            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                            values,
+                            FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                            arrayOf(notificationId.toString())
+                        )
+                        return notificationId
                     }
                 }
             }
@@ -749,9 +777,12 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                 // Reference-first lookup: deliberately no amount/type/time
                 // restriction in SQL. candidateScore performs the side-aware
                 // validation after normalization.
+                // A Gmail RRN is authoritative, but the earlier SMS/notification
+                // transaction often has no RRN yet. Do not require a local reference
+                // here; candidateScore will prefer an exact RRN and otherwise match
+                // the same bank/account/amount/direction within the fallback window.
                 selection =
                     FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
-                    FinanceDatabaseHelper.COLUMN_REF_NUMBER + " IS NOT NULL AND " +
                     FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
                     FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ?"
                 args = arrayOf("ACTIVE", "oracle:gmail:%", "notification:%")
