@@ -48,6 +48,12 @@ class GmailNotificationListenerService : NotificationListenerService() {
         private val notificationExecutor = Executors.newSingleThreadExecutor()
         private val gmailSyncInFlight = AtomicBoolean(false)
         private val lastGmailSyncTriggerAt = AtomicLong(0L)
+
+        internal fun notificationIdentity(
+            packageName: String,
+            notificationKey: String,
+            postTime: Long
+        ): String = HashUtil.sha256("$packageName|$notificationKey|$postTime")
     }
 
     override fun onListenerConnected() {
@@ -236,7 +242,17 @@ class GmailNotificationListenerService : NotificationListenerService() {
         val parsed = CardBillPaymentNotificationParser.parse(title, text, bigText, subText) ?: return
         val content = listOfNotNull(title, text, bigText, subText).joinToString("\n")
         val contentHash = HashUtil.sha256(content)
-        val sourceKey = "app-notification:card-bill:" + contentHash
+        // Notification identity is based on the Android notification instance,
+        // not only its text. This prevents an uncleared active notification from
+        // being ingested again after listener reconnect, while postTime still
+        // allows a genuinely new notification that reuses the same notification
+        // key to be treated as a new event.
+        val notificationIdentity = notificationIdentity(
+            sbn.packageName,
+            sbn.key,
+            sbn.postTime
+        )
+        val sourceKey = "app-notification:card-bill:" + notificationIdentity
 
         val dbHelper = FinanceDatabaseHelper(applicationContext)
         val repository = TransactionRepository(dbHelper, applicationContext)
@@ -368,8 +384,18 @@ class GmailNotificationListenerService : NotificationListenerService() {
         )
 
         val content = listOfNotNull(title, text, bigText, subText).joinToString("\n")
+        // Android can deliver the same outstanding notification again when the
+        // listener reconnects. Use the notification instance identity so an
+        // uncleared notification can never create a second financial event.
+        // Include postTime so a bank/Gmail app reusing a notification key for a
+        // genuinely new notification still produces a new event.
+        val notificationIdentity = notificationIdentity(
+            sbn.packageName,
+            sbn.key,
+            sbn.postTime
+        )
         val contentHash = HashUtil.sha256(content)
-        val sourceKey = "gmail-notification:" + contentHash
+        val sourceKey = "gmail-notification:" + notificationIdentity
 
         val dbHelper = FinanceDatabaseHelper(applicationContext)
         val repository = TransactionRepository(dbHelper, applicationContext)

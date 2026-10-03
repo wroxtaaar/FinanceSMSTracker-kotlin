@@ -171,6 +171,50 @@ def _reference(combined):
     return token.strip().upper() or None
 
 
+def _explicit_transaction_direction(subject, text, bank):
+    """Return direction from an authoritative transaction sentence when present.
+
+    Bank alert footers routinely contain words such as "charged", "payment",
+    "debit", or "credit card". Those words are not the direction of the
+    transaction itself. Prefer the bank's explicit account-credit/debit wording
+    before falling back to broad transaction-language detection.
+    """
+    subject_text = _plain_text(subject)
+    body_text = _plain_text(text)
+    subject_and_body = f"{subject_text}\n{body_text}"
+
+    # Axis account alerts put the authoritative direction in the subject:
+    # "INR X was credited/debited to/from your A/c."
+    if bank == "AXIS":
+        if re.search(r"(?i)\bwas\s+credited\s+to\s+your\s+A/c\b|"
+                     r"\bhas\s+been\s+credited\b", subject_text):
+            return "CREDIT"
+        if re.search(r"(?i)\bwas\s+debited\s+from\s+your\s+A/c\b|"
+                     r"\bhas\s+been\s+debited\b", subject_text):
+            return "DEBIT"
+
+    # Generic bank transaction lines. These are deliberately specific enough
+    # not to treat footer words such as "credit card" or "payment" as a side.
+    credit_patterns = (
+        r"(?i)\b(?:amount\s+credited|amount\s+has\s+been\s+credited)\b",
+        r"(?i)\b(?:was|has\s+been|is)\s+credited\s+(?:to|into)\s+your\s+(?:A/c|account)\b",
+        r"(?i)\b(?:your\s+(?:A/c|account)\s+has\s+been\s+credited)\b",
+        r"(?i)\bcredited\s+with\s+(?:INR|Rs\\.?|₹)",
+    )
+    debit_patterns = (
+        r"(?i)\b(?:amount\s+debited|amount\s+has\s+been\s+debited)\b",
+        r"(?i)\b(?:was|has\s+been|is)\s+debited\s+from\s+your\s+(?:A/c|account)\b",
+        r"(?i)\b(?:your\s+(?:A/c|account)\s+has\s+been\s+debited)\b",
+        r"(?i)\bdebited\s+by\s+(?:INR|Rs\\.?|₹)",
+    )
+
+    if any(re.search(pattern, subject_and_body) for pattern in credit_patterns):
+        return "CREDIT"
+    if any(re.search(pattern, subject_and_body) for pattern in debit_patterns):
+        return "DEBIT"
+    return None
+
+
 def _merchant_or_payee(combined):
     normalized = _plain_text(combined)
 
@@ -1014,21 +1058,26 @@ def parse_bank_email(message):
 
     m=re.search(r"(?i)(?:INR|Rs\.?)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)",combined)
     amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
-    # Debit signals must be evaluated first. A credit-card purchase can contain
-    # "credit card" and therefore the word "credit" must never by itself make
-    # the transaction a CREDIT.
-    direction="DEBIT" if re.search(
-        r"(?i)debited|spent|sent|purchase|withdrawn|payment.*successful|"
-        r"used\s+for\s+(?:a\s+)?transaction|charged",
-        combined,
-    ) else (
-        "CREDIT" if re.search(
-            r"(?i)credited|credit alert|payment.*received|refund|"
-            r"amount\s+credited",
-            combined,
-        ) else None
-    )
     bank=_recognized_bank(combined, sender)
+    # Resolve direction only after bank identification so bank-specific
+    # authoritative wording (especially Axis account alerts) can win over
+    # unrelated footer text.
+    direction=_explicit_transaction_direction(subject, text, bank)
+    if direction is None:
+        # Broad fallback is retained for bank/card formats that do not expose
+        # a structured account-credit/debit sentence.
+        direction="DEBIT" if re.search(
+            r"(?i)debited|spent|sent|purchase|withdrawn|payment.*successful|"
+            r"used\s+for\s+(?:a\s+)?transaction|charged",
+            combined,
+        ) else (
+            "CREDIT" if re.search(
+                r"(?i)credited|credit alert|payment.*received|refund|"
+                r"amount\s+credited",
+                combined,
+            ) else None
+        )
+
     last4=_account_last4(combined)
 
     if not bank or not last4 or not _looks_like_transaction(combined, amount, direction):
@@ -1036,12 +1085,14 @@ def parse_bank_email(message):
 
     reference=_reference(combined)
     merchant_or_payee=_merchant_or_payee(combined)
+    account_type = _account_type_for_email(combined, subject, last4)
+    payment_method = "CARD" if account_type == "CREDIT_CARD" else "UPI"
 
-    # Gmail bank-account transactions must carry a transaction identity
-    # beyond amount + account. Otherwise an unrelated amount in a bank email
-    # can become a fake ledger entry. Notification ingestion is separate and
-    # is intentionally not affected by this rule.
-    if bank == "HDFC" and not reference and not merchant_or_payee:
+    # HDFC UPI bank-account emails must carry a stable transaction identity
+    # or counterparty. This is the hardened path for the legacy false-HDFC
+    # amount-only rows; other bank/card formats retain their established
+    # identity rules until they expose an equivalent proven false-positive case.
+    if bank == "HDFC" and account_type == "BANK_ACCOUNT" and payment_method == "UPI" and not reference and not merchant_or_payee:
         return None
 
     score=0.75
@@ -1066,7 +1117,6 @@ def parse_bank_email(message):
     if score < 0.90:
         return None
 
-    account_type = _account_type_for_email(combined, subject, last4)
     tx_id="gmail:"+hashlib.sha256((message["id"]+":"+str(amount)+":"+direction).encode()).hexdigest()[:32]
     ev_id="gmail-evidence:"+message["id"]
     t=SyncTransactionModel(id=tx_id,amountMinor=amount,currency="INR",type=direction,
@@ -1203,7 +1253,12 @@ def ingest_messages(service,query="newer_than:30d"):
         "gmailDiagnostics":None,
     }
 
+    # These two repairs are cheap, database-only safety passes. Run them
+    # on every sync so a long-lived API process also cleans up false rows that
+    # were created after its one-time legacy repair pass.
     stats["repairedTransactions"] = _run_legacy_repairs_once(service)
+    stats["repairedTransactions"] += _repair_legacy_axis_credit_direction_conflicts()
+    stats["repairedTransactions"] += _repair_legacy_unidentified_hdfc_gmail_transactions()
 
     # Retry previously discovered statement emails before the normal date-bounded
     # mailbox scan. This is intentionally limited to PENDING statement rows,
