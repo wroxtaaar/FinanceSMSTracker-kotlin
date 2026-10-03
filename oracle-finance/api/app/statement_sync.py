@@ -185,8 +185,8 @@ def _icici_payment_method(detail):
 def _extract_statement_bill_amount(text):
     normalized = re.sub(r"\s+", " ", text or "")
     patterns = (
-        r"(?is)total\s+amount\s+due.{0,180}?(?:INR|Rs\.?|₹)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
-        r"(?is)total\s+amt\s*[:\-]?\s*(?:INR|Rs\.?|₹)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
+        r"(?is)total\s+amount\s+due.{0,180}?(?:INR|Rs\.?|₹|C)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
+        r"(?is)total\s+amt\s*[:\-]?\s*(?:INR|Rs\.?|₹|C)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
     )
     for pattern in patterns:
         match = re.search(pattern, normalized)
