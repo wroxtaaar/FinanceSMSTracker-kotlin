@@ -25,6 +25,7 @@ from app.ledger import set_balance, sync_transaction
 from app.statement_sync import (
     _hdfc_metadata,
     _parse_hdfc_rows,
+    parse_hdfc_credit_card_statement,
     _icici_metadata,
     parse_icici_statement,
     process_statement_attachments,
@@ -297,7 +298,6 @@ def test_gmail_parser_extracts_numeric_reference_only():
         "ref-1",
         "HDFC Bank A/c XX9591 debited INR 5.00. Ref UPI-12345.",
     )
-
     parsed = parse_bank_email(message)
 
     assert parsed is not None
@@ -597,8 +597,7 @@ def test_repair_legacy_icici_credit_card_reparses_existing_row():
             INSERT INTO transactions
             (id,amount_minor,currency,type,payment_method,account_type,bank,
              merchant_or_payee,account_last4,reference,timestamp,category,
-             confidence,duplicate_of,status,created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             confidence,duplicate_of,status,created_at)            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 transaction_id,
@@ -897,8 +896,7 @@ def test_axis_self_transfer_merchant_can_use_matching_hdfc_entry():
 
 def test_axis_transaction_info_is_not_merchant():
     message = _message(
-        "axis-no-merchant",
-        "Dear Customer, Here's the summary of your transaction: "
+        "axis-no-merchant",        "Dear Customer, Here's the summary of your transaction: "
         "Amount Debited: INR 6.00 Account Number: XX3370 "
         "Date & Time: 30-09-26, 23:54:16 IST "
         "Transaction Info: UPI/P2A/361639089310/ABDUL WASIQ "
@@ -1197,7 +1195,6 @@ Statement period : August 29, 2026 to September 28, 2026
         lambda pdf_bytes, key: text,
     )
     metadata, rows = parse_icici_statement(b"fixture", "fixture-secret")
-
     assert len(rows) == 3
     assert rows[0]["type"] == "CREDIT"
     assert rows[0]["amount_minor"] == 163100
@@ -1208,3 +1205,142 @@ Statement period : August 29, 2026 to September 28, 2026
     assert rows[1]["amount_minor"] == 50499
     assert rows[1]["merchant"] == "AMAZON PAY IN E COMMERC BANGALORE IN"
     assert rows[2]["amount_minor"] == 49499
+
+def test_hdfc_credit_card_statement_parser_recognizes_payment_as_credit(monkeypatch):
+    text = """Millennia Credit Card Statement
+Credit Card No.
+518159XXXXXX5304
+Billing Period
+03 Sep, 2026 - 02 Oct, 2026
+Domestic Transactions
+02/09/2026| 00:00
+IGST-VPS2724613165004-RATE 18.0 -09 (Ref# 09999999980902000707495)
+ C 166.50
+l
+04/09/2026| 16:51
+BPPY CC PAYMENT DP2162474X634UHN7IH (Ref# ST262480083000010111274)
++  C 9,548.00
+l
+02/10/2026| 00:00
+OFFUS EMI,PRIN NB:02,00000144037257 (Ref# 09999999981002000704649)
+ C 4,531.00
+l
+02/10/2026| 00:00
+OFFUS EMI,INT NBR:02,00000144037257 (Ref# 09999999981002000704656)
+ C 540.00
+l
+"""
+    monkeypatch.setattr("app.statement_sync._pdf_text", lambda pdf, key: text)
+
+    metadata, rows = parse_hdfc_credit_card_statement(b"fixture", "fixture-secret")
+
+    assert metadata["account_type"] == "CREDIT_CARD"
+    assert metadata["account_last4"] == "5304"
+    assert [(row["amount_minor"], row["type"]) for row in rows] == [
+        (16650, "DEBIT"),
+        (954800, "CREDIT"),
+        (453100, "DEBIT"),
+        (54000, "DEBIT"),
+    ]
+    assert rows[1]["payment_method"] == "BILL_PAYMENT"
+    assert rows[1]["category"] == "PAYMENT"
+
+
+def test_credit_card_statement_attachment_updates_bill_without_active_spend(monkeypatch):
+    set_balance(
+        "statement-hdfc-card",
+        "HDFC Millennia 5304",
+        "INR",
+        "CREDIT_CARD",
+        "HDFC",
+        "5304",
+        1478550,
+        523800,
+    )
+
+    message = {
+        "id": "statement-hdfc-card-1",
+        "internalDate": "1791026220000",
+        "payload": {
+            "headers": [
+                {
+                    "name": "Subject",
+                    "value": "Your HDFC Bank - Millennia Credit Card Statement - October-2026",
+                },
+                {
+                    "name": "From",
+                    "value": "HDFC Bank Cards <Emailstatements.cards@hdfcbank.bank.in>",
+                },
+            ],
+            "parts": [
+                {
+                    "filename": "5181XXXXXXXXXX04_02-10-2026_306.pdf",
+                    "mimeType": "application/pdf",
+                    "body": {"data": base64.urlsafe_b64encode(b"fixture-pdf").decode().rstrip("=")},
+                }
+            ],
+        },
+    }
+
+    fake_rows = [
+        {"date": __import__("datetime").datetime(2026, 9, 2, 0, tzinfo=__import__("datetime").timezone.utc),
+         "amount_minor": 16650, "type": "DEBIT", "merchant": "IGST",
+         "reference": "09999999980902000707495", "payment_method": "CARD",
+         "category": "OTHER", "narration": "IGST"},
+        {"date": __import__("datetime").datetime(2026, 9, 4, 16, 51, tzinfo=__import__("datetime").timezone.utc),
+         "amount_minor": 954800, "type": "CREDIT", "merchant": "BPPY CC PAYMENT",
+         "reference": "ST262480083000010111274", "payment_method": "BILL_PAYMENT",
+         "category": "PAYMENT", "narration": "BPPY CC PAYMENT"},
+        {"date": __import__("datetime").datetime(2026, 10, 2, 0, tzinfo=__import__("datetime").timezone.utc),
+         "amount_minor": 453100, "type": "DEBIT", "merchant": "OFFUS EMI,PRIN",
+         "reference": "09999999981002000704649", "payment_method": "CARD",
+         "category": "OTHER", "narration": "OFFUS EMI,PRIN"},
+        {"date": __import__("datetime").datetime(2026, 10, 2, 0, tzinfo=__import__("datetime").timezone.utc),
+         "amount_minor": 54000, "type": "DEBIT", "merchant": "OFFUS EMI,INT NBR",
+         "reference": "09999999981002000704656", "payment_method": "CARD",
+         "category": "OTHER", "narration": "OFFUS EMI,INT NBR"},
+    ]
+    fake_metadata = {
+        "bank": "HDFC",
+        "account_type": "CREDIT_CARD",
+        "account_last4": "5304",
+        "currency": "INR",
+        "statement_from": "03 Sep, 2026",
+        "statement_to": "02 Oct, 2026",
+        "opening_balance_minor": None,
+    }
+
+    monkeypatch.setattr(
+        "app.statement_sync.parse_hdfc_statement",
+        lambda pdf, key: (fake_metadata, fake_rows),
+    )
+    bill_calls = []
+    monkeypatch.setattr(
+        "app.statement_sync.sync_card_bill",
+        lambda bill: bill_calls.append(bill) or {"status": "APPLIED"},
+    )
+
+    result = process_statement_attachments(FakeService([message]), message)
+
+    assert result["attachmentsParsed"] == 1
+    assert result["transactionsAdded"] == 0
+    assert result["transactionsMatched"] == 0
+    assert len(bill_calls) == 1
+    assert bill_calls[0]["amountMinor"] == 523800
+
+    with connection() as conn:
+        account = conn.execute(
+            "SELECT balance_minor,bill_balance_minor FROM accounts WHERE id='statement-hdfc-card'"
+        ).fetchone()
+        statement_rows = conn.execute(
+            "SELECT COUNT(*) value FROM transactions WHERE id LIKE 'statement:%'"
+        ).fetchone()["value"]
+        attachment = conn.execute(
+            "SELECT status,transaction_count FROM gmail_attachments WHERE message_id='statement-hdfc-card-1'"
+        ).fetchone()
+
+    assert account["balance_minor"] == 1478550
+    assert account["bill_balance_minor"] == 523800
+    assert statement_rows == 0
+    assert attachment["status"] == "PARSED"
+    assert attachment["transaction_count"] == 0
