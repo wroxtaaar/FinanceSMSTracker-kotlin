@@ -48,6 +48,12 @@ class GmailNotificationListenerService : NotificationListenerService() {
         private val notificationExecutor = Executors.newSingleThreadExecutor()
         private val gmailSyncInFlight = AtomicBoolean(false)
         private val lastGmailSyncTriggerAt = AtomicLong(0L)
+
+        internal fun notificationIdentity(
+            packageName: String,
+            notificationKey: String,
+            postTime: Long
+        ): String = HashUtil.sha256("$packageName|$notificationKey|$postTime")
     }
 
     override fun onListenerConnected() {
@@ -241,8 +247,10 @@ class GmailNotificationListenerService : NotificationListenerService() {
         // being ingested again after listener reconnect, while postTime still
         // allows a genuinely new notification that reuses the same notification
         // key to be treated as a new event.
-        val notificationIdentity = HashUtil.sha256(
-            sbn.packageName + "|" + sbn.key + "|" + sbn.postTime
+        val notificationIdentity = notificationIdentity(
+            sbn.packageName,
+            sbn.key,
+            sbn.postTime
         )
         val sourceKey = "app-notification:card-bill:" + notificationIdentity
 
@@ -381,8 +389,10 @@ class GmailNotificationListenerService : NotificationListenerService() {
         // uncleared notification can never create a second financial event.
         // Include postTime so a bank/Gmail app reusing a notification key for a
         // genuinely new notification still produces a new event.
-        val notificationIdentity = HashUtil.sha256(
-            sbn.packageName + "|" + sbn.key + "|" + sbn.postTime
+        val notificationIdentity = notificationIdentity(
+            sbn.packageName,
+            sbn.key,
+            sbn.postTime
         )
         val contentHash = HashUtil.sha256(content)
         val sourceKey = "gmail-notification:" + notificationIdentity
