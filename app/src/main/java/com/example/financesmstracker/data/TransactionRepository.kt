@@ -117,7 +117,6 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                     val notificationBank = it.getString(1)
                     val notificationLast4 = it.getString(2)
                     val notificationReference = it.getString(3)
-                    val existingSourceHash = it.getString(4)
 
                     val bankCompatible =
                         notificationBank.isNullOrBlank() ||
