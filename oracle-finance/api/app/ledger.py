@@ -342,7 +342,10 @@ def sync_card_bill(bill):
                     "accountId":account["id"],
                 }
 
-        bill_value = min(amount, int(account["balance_minor"]))
+        # Bill balance is a separate statement/debt bucket. It must not be
+        # capped by the signed live card balance because the live card balance
+        # follows the application's invariant sign convention.
+        bill_value = amount
         conn.execute(
             """UPDATE accounts
                SET bill_balance_minor=?, updated_at=?
