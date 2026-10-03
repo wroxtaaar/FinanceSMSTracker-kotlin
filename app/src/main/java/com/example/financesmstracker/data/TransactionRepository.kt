@@ -690,19 +690,39 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         }
 
         fun findBestCandidate(isNotification: Boolean, maxAgeMs: Long): LocalCandidate? {
-            val selection = FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_SMS_HASH + if (isNotification) " LIKE ?" else " NOT LIKE ?"
+            val selection = if (isNotification) {
+                FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " LIKE ?"
+            } else {
+                FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
+                    FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ?"
+            }
 
-            val args = arrayOf(
-                "ACTIVE",
-                transaction.amountMinor.toString(),
-                transaction.currency,
-                transaction.transactionType,
-                if (isNotification) "notification:%" else "oracle:gmail:%"
-            )
+            val args = if (isNotification) {
+                arrayOf(
+                    "ACTIVE",
+                    transaction.amountMinor.toString(),
+                    transaction.currency,
+                    transaction.transactionType,
+                    "notification:%"
+                )
+            } else {
+                arrayOf(
+                    "ACTIVE",
+                    transaction.amountMinor.toString(),
+                    transaction.currency,
+                    transaction.transactionType,
+                    "oracle:gmail:%",
+                    "notification:%"
+                )
+            }
 
             var best: LocalCandidate? = null
             var bestScore = Int.MIN_VALUE
@@ -803,10 +823,12 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                 }
             }
 
-            // Convert the provisional notification row into the durable Gmail
-            // identity. This makes subsequent Gmail pulls idempotent and prevents
-            // the same transaction from being reinserted as a second row.
-            values.put(FinanceDatabaseHelper.COLUMN_SMS_HASH, remoteMarker)
+            // Convert only a provisional notification row into the durable
+            // Gmail identity. A real SMS/local transaction keeps its original
+            // source hash; subsequent Gmail pulls will find it again by identity.
+            if (resolvedLocal.isNotification) {
+                values.put(FinanceDatabaseHelper.COLUMN_SMS_HASH, remoteMarker)
+            }
 
             val updated = db.update(
                 FinanceDatabaseHelper.TABLE_TRANSACTIONS,
