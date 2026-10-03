@@ -17,6 +17,7 @@ from app.gmail_sync import (
     parse_bank_email,
     _repair_legacy_gmail_account_classifications,
     _repair_legacy_axis_credit_direction_conflicts,
+    _repair_legacy_unidentified_hdfc_gmail_transactions,
     _repair_legacy_icici_credit_card_classifications,
     _repair_legacy_gmail_merchants,
     _repair_legacy_gmail_merchant_values,
@@ -271,6 +272,21 @@ def test_gmail_parser_rejects_future_payment_email():
         "HDFC Bank A/c XX9591 INR 500.00 will be debited on 10-Oct-2026.",
         subject="HDFC Bank Payment Notification",
     )
+    assert parse_bank_email(message) is None
+
+
+def test_gmail_parser_rejects_hdfc_bank_debit_without_reference_or_counterparty():
+    message = _message(
+        "hdfc-no-identity",
+        "Rs.3510.00 is debited from your HDFC Bank A/c *9591. "
+        "Payment successful. Your available balance is Rs.48000.00.",
+        subject="HDFC Bank Transaction Alert",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "HDFC Bank Transaction Alert"},
+        {"name": "From", "value": "alerts@hdfcbank.net"},
+    ]
+
     assert parse_bank_email(message) is None
 
 
