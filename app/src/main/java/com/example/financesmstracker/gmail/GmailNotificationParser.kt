@@ -82,7 +82,7 @@ object GmailNotificationParser {
 
         val line = transactionLine(haystack, amountMatch)
         val lowerLine = line.lowercase()
-        val lowerAll = haystack.lowercase()
+        val issuerText = listOfNotNull(title, line).joinToString(" ").lowercase()
 
         // Direction is determined from the transaction line, never from the
         // entire notification. This prevents a bank-account credit from being
@@ -108,12 +108,12 @@ object GmailNotificationParser {
         // can contain bank names (for example @axisb) and must not override the
         // issuer inferred from the notification itself.
         val bank = when {
-            Regex("""\baxis(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "AXIS"
-            Regex("""\bhdfc(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "HDFC"
-            Regex("""\bicici(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "ICICI"
-            Regex("""\bsbi(?:\s+card|\s+bank)?\b""").containsMatchIn(lowerAll) -> "SBI"
-            Regex("""\bindusind(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "INDUSIND"
-            Regex("""\bhsbc(?:\s+bank)?\b""").containsMatchIn(lowerAll) -> "HSBC"
+            Regex("""\baxis(?:\s+bank)?\b""").containsMatchIn(issuerText) -> "AXIS"
+            Regex("""\bhdfc(?:\s+bank)?\b""").containsMatchIn(issuerText) -> "HDFC"
+            Regex("""\bicici(?:\s+bank)?\b""").containsMatchIn(issuerText) -> "ICICI"
+            Regex("""\bsbi(?:\s+card|\s+bank)?\b""").containsMatchIn(issuerText) -> "SBI"
+            Regex("""\bindusind(?:\s+bank)?\b""").containsMatchIn(issuerText) -> "INDUSIND"
+            Regex("""\bhsbc(?:\s+bank)?\b""").containsMatchIn(issuerText) -> "HSBC"
             else -> null
         }
 
