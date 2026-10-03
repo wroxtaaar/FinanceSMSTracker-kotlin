@@ -1054,9 +1054,9 @@ def _gmail_default_category(transaction_type, combined):
     categories.
     """
     if str(transaction_type or "").upper() == "CREDIT":
-        if re.search(r"(?i)\\b(?:refund|reversal|reversed)\\b", combined):
+        if re.search(r"(?i)\b(?:refund|reversal|reversed)\b", combined):
             return "REFUND"
-        if re.search(r"(?i)\\b(?:salary|payroll|stipend)\\b", combined):
+        if re.search(r"(?i)\b(?:salary|payroll|stipend)\b", combined):
             return "SALARY"
         return "TRANSFER"
     return "OTHER"
