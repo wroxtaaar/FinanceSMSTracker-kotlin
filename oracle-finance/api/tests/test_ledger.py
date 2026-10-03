@@ -99,7 +99,7 @@ def test_new_transactions_update_seeded_account_balances():
 
 
 def test_provisional_bankless_debit_is_corrected_to_axis_credit():
-    from app.ledger import sync_transaction
+    from app.ledger import get_manual_splitwise_total, sync_transaction
 
     class T:
         def __init__(self, typ, bank, category):
