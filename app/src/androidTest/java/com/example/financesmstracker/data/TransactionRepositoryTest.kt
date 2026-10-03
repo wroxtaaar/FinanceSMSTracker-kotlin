@@ -560,4 +560,54 @@ class TransactionRepositoryTest {
         assertEquals("AXIS", repository.getTransactionById(notificationId)?.bank)
     }
 
+
+    @Test
+    fun smsMergesIntoExistingOracleGmailRowInsteadOfCreatingDuplicate() {
+        val remoteId = repository.upsertOracleGmailTransaction(
+            OracleTransaction(
+                id = "gmail:hdfc-existing",
+                amountMinor = 500L,
+                currency = "INR",
+                transactionType = "DEBIT",
+                paymentMethod = "UPI",
+                accountType = "BANK_ACCOUNT",
+                bank = "HDFC",
+                merchantOrPayee = "ABDUL WASIQ",
+                accountLast4 = "9591",
+                reference = "502395202128",
+                timestamp = 1_800_000_000_000L,
+                category = "TRANSFER",
+                confidence = 1.0f
+            )
+        )
+
+        val smsId = repository.insertTransaction(
+            Transaction(
+                amountPaise = 500L,
+                transactionType = TransactionType.DEBIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "HDFC",
+                merchantName = "ABDUL WASIQ",
+                payeeId = null,
+                accountLastFour = "9591",
+                refNumber = "502395202128",
+                timestamp = 1_800_000_060_000L,
+                smsHash = HashUtil.sha256("hdfc-sms-after-gmail"),
+                category = "TRANSFER",
+                parserConfidence = 0.99f
+            )
+        )
+
+        assertEquals(remoteId, smsId)
+        val active = repository.getAllTransactions().filter {
+            it.amountPaise == 500L &&
+                it.bank == "HDFC" &&
+                it.transactionType == TransactionType.DEBIT
+        }
+        assertEquals(1, active.size)
+        assertEquals(HashUtil.sha256("hdfc-sms-after-gmail"), active.single().smsHash)
+        assertEquals("502395202128", active.single().refNumber)
+    }
+
 }
