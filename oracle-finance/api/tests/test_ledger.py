@@ -424,6 +424,71 @@ def test_gmail_duplicate_does_not_double_count_balance():
     assert adjustments == 0
 
 
+def test_gmail_rrn_reconciles_to_correct_ledger_side_not_cross_account_side():
+    from app.ledger import sync_transaction, reconcile_duplicate_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, last4, reference, timestamp):
+            self.id = id
+            self.amountMinor = 400
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "ABDUL WASIQ"
+            self.accountLast4 = last4
+            self.reference = reference
+            self.timestamp = timestamp
+            self.category = "OTHER"
+            self.confidence = 0.99
+
+    # Both sides of the same UPI transfer share the same RRN.
+    sync_transaction(T(
+        "hdfc-debit-739",
+        "DEBIT",
+        "HDFC",
+        "9591",
+        "739593577194",
+        1800000000000,
+    ))
+    sync_transaction(T(
+        "axis-credit-739",
+        "CREDIT",
+        "AXIS",
+        "3370",
+        None,
+        1800000000000 + 3 * 24 * 60 * 60 * 1000,
+    ))
+
+    gmail = T(
+        "gmail:axis-credit-739",
+        "CREDIT",
+        "AXIS",
+        "3370",
+        "UPI/P2A/739593577194/ABDUL WAS/HDFC/Paym",
+        1800000000000 + 3 * 24 * 60 * 60 * 1000 + 60000,
+    )
+    sync_transaction(gmail)
+
+    result = reconcile_duplicate_transaction(gmail.id)
+
+    assert result is not None
+    assert result["canonical"] == "axis-credit-739"
+
+    with connection() as conn:
+        hdfc = conn.execute(
+            "SELECT duplicate_of FROM transactions WHERE id='hdfc-debit-739'"
+        ).fetchone()
+        axis = conn.execute(
+            "SELECT duplicate_of,reference FROM transactions WHERE id='axis-credit-739'"
+        ).fetchone()
+
+    assert hdfc["duplicate_of"] is None
+    assert axis["duplicate_of"] is None
+    assert axis["reference"] is None
+
+
 def test_void_transaction_reverses_account_adjustment_once():
     from app.ledger import sync_transaction, void_transaction
 
