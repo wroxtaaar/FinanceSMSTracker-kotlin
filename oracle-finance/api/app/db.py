@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS splitwise_receivables (
 CREATE TABLE IF NOT EXISTS manual_splitwise_total (
   currency TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS splitwise_adjustments (
+  transaction_id TEXT PRIMARY KEY, currency TEXT NOT NULL, delta_minor INTEGER NOT NULL,
+  applied_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS internal_transfers (
   id TEXT PRIMARY KEY, debit_transaction_id TEXT NOT NULL, credit_transaction_id TEXT NOT NULL,
   currency TEXT NOT NULL, amount_minor INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'MATCHED',
@@ -77,6 +81,7 @@ CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(account_type);
 CREATE INDEX IF NOT EXISTS idx_splitwise_status ON splitwise_receivables(status);
 CREATE INDEX IF NOT EXISTS idx_review_status ON review_queue(status);
 CREATE INDEX IF NOT EXISTS idx_balance_adjustments_account ON balance_adjustments(account_id);
+CREATE INDEX IF NOT EXISTS idx_splitwise_adjustments_currency ON splitwise_adjustments(currency);
 """
 
 @contextmanager
