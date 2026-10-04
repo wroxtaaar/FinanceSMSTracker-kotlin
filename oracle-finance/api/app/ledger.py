@@ -609,7 +609,12 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
     # for that bank/type/currency, use that unambiguous identity instead of
     # dropping the balance adjustment. Never guess when multiple matching
     # accounts exist.
-    if account is None and not last4 and bank:
+    if (
+        account is None
+        and not last4
+        and bank
+        and str(getattr(t, "paymentMethod", "") or "").strip().upper() == "UNKNOWN"
+    ):
         fallback = conn.execute(
             """
             SELECT id, balance_minor, bill_balance_minor, balance_reconciled_at, bank, last4
