@@ -175,7 +175,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
                             android:text="—"
-                            android:textColor="@color.negative"
+                            android:textColor="@color/negative"
                             android:textSize="15sp"
                             android:textStyle="bold" />
                     </LinearLayout>
