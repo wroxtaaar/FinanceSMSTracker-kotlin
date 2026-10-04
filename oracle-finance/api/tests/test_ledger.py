@@ -701,7 +701,10 @@ def test_repair_same_side_duplicate_keeps_referenced_hdfc_credit_only_once():
         before = conn.execute(
             "SELECT balance_minor FROM accounts WHERE id='dedupe-hdfc'"
         ).fetchone()["balance_minor"]
-    assert before == 100600 + 600
+    # The referenced source omits the last-four and therefore cannot apply a
+    # second account adjustment on insertion. Only the first representation
+    # has contributed to the balance so far.
+    assert before == 100600
 
     repaired = repair_duplicate_transactions()
     assert repaired == 1
