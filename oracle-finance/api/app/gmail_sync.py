@@ -1507,6 +1507,10 @@ def ingest_messages(service,query="newer_than:30d"):
         if not page_token:
             break
 
+    # Final safety pass collapses same-side duplicates that may have been
+    # created by separate notification/email sources during this sync.
+    stats["repairedTransactions"] += repair_duplicate_transactions()
+
     return stats
 
 def test_axis_credit_card_spend_email_is_debit():
