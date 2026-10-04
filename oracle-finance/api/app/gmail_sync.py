@@ -1397,6 +1397,10 @@ def ingest_messages(service,query="newer_than:30d"):
                         "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
                         (msg_id,),
                     )
+                    # Treat this as a fresh parse below. The local variable
+                    # still contains the old PARSED marker and would otherwise
+                    # hit the post-fetch terminal-message guard.
+                    existing = None
 
             message=service.users().messages().get(
                 userId="me",id=msg_id,format="full"
