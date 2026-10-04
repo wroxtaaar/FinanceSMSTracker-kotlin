@@ -323,6 +323,43 @@ def test_self_transfer_has_zero_splitwise_net_change():
     assert hdfc == 50600
 
 
+def test_internal_transfer_neutralizes_splitwise_even_when_credit_category_differs():
+    from app.ledger import get_manual_splitwise_total, match_internal_transfers, sync_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, last4, category):
+            self.id = id
+            self.amountMinor = 300
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "ABDUL WASIQ"
+            self.accountLast4 = last4
+            self.reference = None
+            self.timestamp = 4_200_000_000_000
+            self.category = category
+            self.confidence = 1.0
+
+    set_balance("transfer-axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "3370", 1000)
+    set_balance("transfer-hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "9591", 2000)
+
+    # Reproduce the device pattern: the debit is TRANSFER while the receiving
+    # side was classified independently as REFUND.
+    sync_transaction(T("axis-debit-300", "DEBIT", "AXIS", "3370", "TRANSFER"))
+    sync_transaction(T("hdfc-credit-300", "CREDIT", "HDFC", "9591", "REFUND"))
+
+    assert get_manual_splitwise_total("INR") == 0
+    matches = match_internal_transfers()
+    assert len(matches) == 1
+
+    # Bank balances remain real, but the matched own-account transfer is
+    # completely excluded from Splitwise.
+    assert get_manual_splitwise_total("INR") == 0
+    assert match_internal_transfers() == []
+    assert get_manual_splitwise_total("INR") == 0
+
 def test_existing_transaction_is_not_applied_twice():
     from app.ledger import sync_transaction
 
