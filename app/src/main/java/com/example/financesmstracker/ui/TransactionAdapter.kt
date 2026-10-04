@@ -19,6 +19,7 @@ class TransactionAdapter(
 ) : RecyclerView.Adapter<TransactionAdapter.TransactionViewHolder>() {
 
     class TransactionViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val textViewMerchantInitial: TextView = view.findViewById(R.id.textViewMerchantInitial)
         val textViewMerchant: TextView = view.findViewById(R.id.textViewMerchant)
         val textViewAmount: TextView = view.findViewById(R.id.textViewAmount)
         val textViewCategory: TextView = view.findViewById(R.id.textViewCategory)
@@ -37,24 +38,42 @@ class TransactionAdapter(
     override fun onBindViewHolder(holder: TransactionViewHolder, position: Int) {
         val tx = transactions[position]
 
-        val merchantDisplay = listOfNotNull(tx.merchantName, tx.payeeId, tx.bank, "Transaction").firstOrNull { !it.isBlank() } ?: "Transaction"
+        val merchantDisplay = listOfNotNull(
+            tx.merchantName,
+            tx.payeeId,
+            tx.bank,
+            "Transaction"
+        ).firstOrNull { it.isNotBlank() } ?: "Transaction"
+
         holder.textViewMerchant.text = merchantDisplay
+        holder.textViewMerchantInitial.text =
+            merchantDisplay.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "T"
 
         val rupees = tx.amountPaise / 100.0
         val sign = if (tx.transactionType == TransactionType.CREDIT) "+" else "-"
-        holder.textViewAmount.text = String.format(Locale.getDefault(), "%s₹%.2f", sign, rupees)
+        holder.textViewAmount.text =
+            String.format(Locale.getDefault(), "%s₹%.2f", sign, rupees)
+
         if (tx.transactionType == TransactionType.CREDIT) {
-            holder.textViewAmount.setTextColor(Color.parseColor("#2E7D32")) // Green
+            holder.textViewAmount.setTextColor(
+                Color.parseColor("#7FD694")
+            )
         } else {
-            holder.textViewAmount.setTextColor(Color.parseColor("#C62828")) // Red
+            holder.textViewAmount.setTextColor(
+                Color.parseColor("#FF8989")
+            )
         }
 
         holder.textViewCategory.text = tx.category ?: "OTHER"
         holder.textViewType.text = tx.transactionType.name
         holder.textViewPaymentMethod.text = tx.paymentMethod.name
+
         holder.textViewBank.text = tx.bank ?: ""
 
-        val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+        val sdf = SimpleDateFormat(
+            "dd MMM yyyy · h:mm a",
+            Locale.getDefault()
+        )
         holder.textViewDateTime.text = sdf.format(Date(tx.timestamp))
 
         holder.itemView.setOnClickListener { onClick(tx) }
