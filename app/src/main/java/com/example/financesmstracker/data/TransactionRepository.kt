@@ -1250,6 +1250,17 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             }
 
             if (resolvedLocal.isNotification) {
+                // The same Gmail row may already exist locally from an earlier
+                // sync. We are about to move the provisional notification row
+                // onto that Gmail marker. Remove the older Gmail copy first so
+                // the unique sms_hash constraint cannot crash the app.
+                if (existingRemoteId != null && existingRemoteId != localId) {
+                    db.delete(
+                        FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                        FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                        arrayOf(existingRemoteId.toString())
+                    )
+                }
                 values.put(FinanceDatabaseHelper.COLUMN_SMS_HASH, remoteMarker)
             }
 
