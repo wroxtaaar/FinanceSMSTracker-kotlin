@@ -28,6 +28,92 @@ def test_true_available_formula():
     assert result["trueAvailableMinor"] >= 80000
 
 
+
+def test_gmail_only_bank_credit_changes_splitwise():
+    from app.ledger import apply_splitwise_contribution, get_manual_splitwise_total, sync_transaction
+
+    class T:
+        id = "gmail:axis-credit-only"
+        amountMinor = 500
+        currency = "INR"
+        type = "CREDIT"
+        paymentMethod = "UPI"
+        accountType = "BANK_ACCOUNT"
+        bank = "AXIS"
+        merchantOrPayee = "ABDUL WAS"
+        accountLast4 = "3370"
+        reference = "240201254528"
+        timestamp = 1800000000000
+        category = "GROCERIES"
+        confidence = 0.99
+
+    from app.ledger import set_manual_splitwise_total
+    set_manual_splitwise_total("INR", 10000)
+
+    sync_transaction(T())
+    assert get_manual_splitwise_total("INR") == 10000
+
+    with connection() as conn:
+        assert apply_splitwise_contribution(conn, T(), 1800000001000) is True
+        assert apply_splitwise_contribution(conn, T(), 1800000002000) is False
+
+    assert get_manual_splitwise_total("INR") == 9500
+
+
+def test_gmail_splitwise_contribution_is_reversed_when_later_sms_is_canonical():
+    from app.ledger import (
+        apply_splitwise_contribution,
+        get_manual_splitwise_total,
+        repair_duplicate_transactions,
+        set_manual_splitwise_total,
+        sync_transaction,
+    )
+
+    class T:
+        def __init__(self, id, gmail):
+            self.id = id
+            self.amountMinor = 500
+            self.currency = "INR"
+            self.type = "CREDIT"
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = "AXIS"
+            self.merchantOrPayee = "ABDUL WAS"
+            self.accountLast4 = "3370"
+            self.reference = "240201254528"
+            self.timestamp = 1800000000000
+            self.category = "GROCERIES"
+            self.confidence = 0.99
+
+    set_manual_splitwise_total("INR", 10000)
+
+    gmail = T("gmail:axis-credit-late", True)
+    sms = T("axis-credit-sms", False)
+
+    sync_transaction(gmail)
+    with connection() as conn:
+        apply_splitwise_contribution(conn, gmail, 1800000001000)
+
+    # The SMS arrives later and is the preferred canonical source.
+    sync_transaction(sms)
+    repaired = repair_duplicate_transactions()
+
+    assert repaired == 1
+    assert get_manual_splitwise_total("INR") == 9500
+
+    with connection() as conn:
+        gmail_row = conn.execute(
+            "SELECT status,duplicate_of FROM transactions WHERE id=?",
+            (gmail.id,),
+        ).fetchone()
+        sms_row = conn.execute(
+            "SELECT status,duplicate_of FROM transactions WHERE id=?",
+            (sms.id,),
+        ).fetchone()
+    assert gmail_row["status"] == "VOIDED"
+    assert gmail_row["duplicate_of"] == sms.id
+    assert sms_row["status"] == "ACTIVE"
+
 def test_internal_transfer_match():
     from app.ledger import sync_transaction, match_internal_transfers
 
