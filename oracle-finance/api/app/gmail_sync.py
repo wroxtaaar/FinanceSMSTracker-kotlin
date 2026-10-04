@@ -1174,6 +1174,7 @@ def _retry_pending_statement_messages(service, stats):
     recover without broadening the normal mailbox search.
     """
     retried = 0
+    retried_message_ids = set()
 
     with connection() as conn:
         rows = conn.execute(
@@ -1192,6 +1193,7 @@ def _retry_pending_statement_messages(service, stats):
 
     for row in rows:
         msg_id = row["id"]
+        retried_message_ids.add(msg_id)
         try:
             message = service.users().messages().get(
                 userId="me",
@@ -1239,7 +1241,7 @@ def _retry_pending_statement_messages(service, stats):
                 )
 
     stats["pendingStatementRetries"] = retried
-    return retried
+    return retried_message_ids
 
 _LEGACY_REPAIRS_COMPLETED = False
 
@@ -1298,7 +1300,7 @@ def ingest_messages(service,query="newer_than:30d"):
     # Retry previously discovered statement emails before the normal date-bounded
     # mailbox scan. This is intentionally limited to PENDING statement rows,
     # so historical statements do not require a full mailbox search.
-    _retry_pending_statement_messages(service, stats)
+    retried_statement_message_ids = _retry_pending_statement_messages(service, stats)
 
     # Gmail's API is paginated. IMAPService intentionally exposes only one
     # result page, so this loop also works with IMAP while consuming every
@@ -1315,6 +1317,13 @@ def ingest_messages(service,query="newer_than:30d"):
         for item in result.get("messages",[]):
             stats["messagesScanned"] += 1
             msg_id=item["id"]
+
+            # A PENDING statement was already fetched and processed by the
+            # explicit retry pass above. Do not process the same message again
+            # during the normal mailbox scan.
+            if msg_id in retried_statement_message_ids:
+                stats["alreadyProcessed"] += 1
+                continue
 
             # IMAP can cheaply return headers without downloading the full
             # message. On a first/manual scan this avoids fetching newsletters,
