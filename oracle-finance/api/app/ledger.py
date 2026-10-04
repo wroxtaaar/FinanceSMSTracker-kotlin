@@ -447,6 +447,29 @@ def repair_duplicate_transactions():
                     candidates.append(referenced)
                     candidate_refs.add(reference)
 
+            # A mirror source can legitimately omit the reference. If
+            # there is exactly one compatible cross-source mirror candidate,
+            # it is still safe to collapse because amount/type/bank/account/
+            # merchant identity are all checked by _rows_are_duplicate.
+            if not candidate_refs:
+                mirror_candidates_without_ref = [
+                    candidate for candidate in rows
+                    if (
+                        str(candidate["id"]) != str(row["id"])
+                        and str(candidate["id"]) not in assigned
+                        and not normalize_reference(candidate["reference"])
+                        and not is_card_bill_credit(candidate)
+                        and (
+                            str(candidate["id"]).startswith("gmail:")
+                            or str(candidate["id"]).startswith("notification:")
+                        )
+                        and _rows_are_duplicate(row, candidate)
+                    )
+                ]
+                if len(mirror_candidates_without_ref) == 1:
+                    candidates = mirror_candidates_without_ref
+                    candidate_refs.add("__MIRROR_NO_REFERENCE__")
+
             if len(candidate_refs) != 1:
                 continue
 
