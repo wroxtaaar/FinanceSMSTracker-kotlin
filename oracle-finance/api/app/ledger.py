@@ -204,7 +204,33 @@ def _void_transaction_in_connection(conn, transaction_id, duplicate_of=None):
             (transaction_id,),
         )
 
-    if not str(tx["id"]).startswith("gmail:"):
+    # Reverse any explicitly tracked Splitwise contribution. Gmail rows
+    # can be authoritative and therefore may have contributed before a later
+    # SMS/notification row proves them to be duplicates.
+    splitwise_adjustment = conn.execute(
+        "SELECT currency,delta_minor FROM splitwise_adjustments WHERE transaction_id=?",
+        (transaction_id,),
+    ).fetchone()
+    if splitwise_adjustment:
+        conn.execute(
+            """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
+               VALUES(?,?,?)
+               ON CONFLICT(currency) DO UPDATE SET
+                   amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
+                   updated_at=excluded.updated_at""",
+            (
+                splitwise_adjustment["currency"],
+                -int(splitwise_adjustment["delta_minor"]),
+                now_ms(),
+            ),
+        )
+        conn.execute(
+            "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
+            (transaction_id,),
+        )
+    elif not str(tx["id"]).startswith("gmail:"):
+        # Legacy/local transactions predate splitwise_adjustments, so preserve
+        # the existing reversal behavior for those rows.
         delta = splitwise_delta(
             tx["account_type"], tx["type"], tx["amount_minor"], tx["category"]
         )
@@ -959,6 +985,42 @@ def set_manual_splitwise_total(currency, amount_minor):
                  updated_at=excluded.updated_at""",
             (currency, max(0, int(amount_minor)), now_ms())
         )
+
+def apply_splitwise_contribution(conn, t, applied_at=None):
+    """Apply a transaction's Splitwise delta exactly once.
+
+    Gmail transactions are authoritative when no SMS/notification canonical
+    row exists. They therefore need the same signed Splitwise effect as local
+    transactions. A separate adjustment row makes that effect reversible if a
+    later SMS/notification proves the Gmail row was a duplicate.
+    """
+    transaction_id = str(getattr(t, "id", None) or "")
+    if not transaction_id:
+        return False
+
+    delta = splitwise_delta_for_transaction(t)
+    if not delta:
+        return False
+
+    applied_at = int(applied_at or now_ms())
+    inserted = conn.execute(
+        """INSERT OR IGNORE INTO splitwise_adjustments
+           (transaction_id,currency,delta_minor,applied_at)
+           VALUES(?,?,?,?)""",
+        (transaction_id, t.currency, delta, applied_at),
+    )
+    if not inserted.rowcount:
+        return False
+
+    conn.execute(
+        """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
+           VALUES(?,?,?)
+           ON CONFLICT(currency) DO UPDATE SET
+               amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
+               updated_at=excluded.updated_at""",
+        (t.currency, delta, applied_at),
+    )
+    return True
 
 def get_manual_splitwise_total(currency="INR"):
     with connection() as conn:
