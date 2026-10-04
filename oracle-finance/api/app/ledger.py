@@ -127,14 +127,29 @@ def _rows_are_duplicate(first, second):
         return first_ref == second_ref
 
     # A missing reference is common on the fast/early notification path. Only
-    # merge it with a referenced row when the full same-side account identity
-    # is known and the event times are very close.
+    # merge it with a referenced row when the same bank/account side is proven
+    # and the event times are very close. One source may omit the last-four,
+    # so require at least one side to carry it and reject conflicting values.
     if bool(first_ref) == bool(second_ref):
         return False
     if not first_bank or not second_bank or first_bank != second_bank:
         return False
-    if not first_last4 or not second_last4 or first_last4 != second_last4:
+    if first_last4 and second_last4 and first_last4 != second_last4:
         return False
+    if not first_last4 and not second_last4:
+        return False
+
+    first_payment = str(first["payment_method"] or "").strip().upper()
+    second_payment = str(second["payment_method"] or "").strip().upper()
+    if (
+        first_payment
+        and second_payment
+        and first_payment != "UNKNOWN"
+        and second_payment != "UNKNOWN"
+        and first_payment != second_payment
+    ):
+        return False
+
     if abs(int(first["timestamp"]) - int(second["timestamp"])) > 120_000:
         return False
     return _merchant_values_compatible(first["merchant_or_payee"], second["merchant_or_payee"])
