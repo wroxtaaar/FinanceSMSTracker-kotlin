@@ -1,0 +1,6 @@
+<resources>
+    <dimen name="screen_padding">16dp</dimen>
+    <dimen name="section_gap">14dp</dimen>
+    <dimen name="card_radius">18dp</dimen>
+    <dimen name="compact_radius">14dp</dimen>
+</resources>
