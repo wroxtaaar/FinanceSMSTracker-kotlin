@@ -394,10 +394,8 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         db.query(
             FinanceDatabaseHelper.TABLE_TRANSACTIONS,
             null,
-            FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
-                FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
-                FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ?",
-            arrayOf("ACTIVE", "oracle:gmail:%", "notification:%"),
+            FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ?",
+            arrayOf("ACTIVE"),
             null,
             null,
             FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC"
@@ -411,10 +409,15 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
 
         fun canonicalScore(transaction: Transaction): Long {
             val reference = if (TransactionReferenceNormalizer.normalize(transaction.refNumber) != null) 1_000_000L else 0L
+            val source = when {
+                transaction.smsHash.startsWith("oracle:gmail:") -> 0L
+                transaction.smsHash.startsWith("notification:") -> 50_000L
+                else -> 100_000L
+            }
             val identity = if (!transaction.bank.isNullOrBlank() && !transaction.accountLastFour.isNullOrBlank()) 100_000L else 0L
             val merchant = if (!transaction.merchantName.isNullOrBlank() && transaction.merchantName != "-") 10_000L else 0L
             val confidence = (transaction.parserConfidence * 1000).toLong()
-            return reference + identity + merchant + confidence - transaction.id
+            return reference + source + identity + merchant + confidence - transaction.id
         }
 
         for (i in rows.indices) {
