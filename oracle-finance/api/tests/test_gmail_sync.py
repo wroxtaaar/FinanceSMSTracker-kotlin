@@ -448,6 +448,68 @@ def test_axis_bank_credit_email_is_parsed_from_trusted_sender():
     assert evidence.direction == "CREDIT"
 
 
+def test_parsed_gmail_message_without_active_transaction_is_reprocessed():
+    message = _message(
+        "axis-orphaned-parsed",
+        "Amount Credited: INR 5.00 Account Number: XX3370 "
+        "Transaction Info: UPI/P2A/123456789012/ABDUL WAS/HDFC/Paym",
+        subject="INR 5.00 was credited to your A/c.",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "INR 5.00 was credited to your A/c."},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                message["id"],
+                "thread-axis-orphaned",
+                1950000000000,
+                "alerts@axis.bank.in",
+                "INR 5.00 was credited to your A/c.",
+                "axis-orphaned-fingerprint",
+                "PARSED",
+                1950000000000,
+            ),
+        )
+
+    result = ingest_messages(FakeService([message]), query="newer_than:30d")
+
+    assert result["parsedTransactions"] == 1
+    assert result["axisCredits"] == 1
+
+    with connection() as conn:
+        tx = conn.execute(
+            """
+            SELECT type,bank,account_type,account_last4,status
+            FROM transactions
+            WHERE id LIKE 'gmail:%'
+              AND amount_minor=500
+              AND bank='AXIS'
+              AND account_last4='3370'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        status = conn.execute(
+            "SELECT status FROM gmail_messages WHERE id=?",
+            (message["id"],),
+        ).fetchone()["status"]
+
+    assert tx["type"] == "CREDIT"
+    assert tx["bank"] == "AXIS"
+    assert tx["account_type"] == "BANK_ACCOUNT"
+    assert tx["account_last4"] == "3370"
+    assert tx["status"] == "ACTIVE"
+    assert status == "PARSED"
+
+
 def test_axis_credit_with_available_balance_is_not_rejected():
     message = _message(
         "axis-credit-balance",
