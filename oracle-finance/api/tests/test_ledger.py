@@ -347,10 +347,18 @@ def test_internal_transfer_neutralizes_splitwise_even_when_credit_category_diffe
 
     # Reproduce the device pattern: the debit is TRANSFER while the receiving
     # side was classified independently as REFUND.
-    sync_transaction(T("axis-debit-300", "DEBIT", "AXIS", "3370", "TRANSFER"))
+    sync_transaction(T("axis-debit-300", "DEBIT", "AXIS", "3370", "OTHER"))
     sync_transaction(T("hdfc-credit-300", "CREDIT", "HDFC", "9591", "REFUND"))
 
-    assert get_manual_splitwise_total("INR") == 0
+    # Only the receiving credit contributes to Splitwise in this setup.
+    with connection() as conn:
+        from app.ledger import apply_splitwise_contribution
+        credit = conn.execute(
+            "SELECT * FROM transactions WHERE id='hdfc-credit-300'"
+        ).fetchone()
+        assert apply_splitwise_contribution(conn, credit, 4_200_000_001_000) is True
+
+    assert get_manual_splitwise_total("INR") == -300
     matches = match_internal_transfers()
     assert len(matches) == 1
 
