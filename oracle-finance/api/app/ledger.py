@@ -466,10 +466,13 @@ def repair_duplicate_transactions():
             else:
                 canonical = max(candidates, key=_duplicate_canonical_score)
 
-            duplicates = [
-                candidate for candidate in candidates
-                if str(candidate["id"]) != str(canonical["id"])
-            ]
+            if str(canonical["id"]) == str(row["id"]):
+                duplicates = candidates
+            else:
+                # The current unreferenced row is the duplicate when a
+                # referenced candidate is selected as canonical.
+                duplicates = [row]
+
             for duplicate in duplicates:
                 repair_pair(canonical, duplicate)
             assigned.add(str(canonical["id"]))
