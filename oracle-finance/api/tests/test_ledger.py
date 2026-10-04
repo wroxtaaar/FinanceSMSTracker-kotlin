@@ -145,6 +145,47 @@ def test_internal_transfer_match():
     )
 
 
+def test_bank_only_alert_without_last4_updates_unique_account_balance():
+    from app.ledger import get_manual_splitwise_total, set_manual_splitwise_total, sync_transaction
+
+    class T:
+        id = "notification:axis-credit-without-last4"
+        amountMinor = 300
+        currency = "INR"
+        type = "CREDIT"
+        paymentMethod = "UNKNOWN"
+        accountType = "BANK_ACCOUNT"
+        bank = "AXIS"
+        merchantOrPayee = None
+        accountLast4 = None
+        reference = None
+        timestamp = 1800000000000
+        category = "TRANSFER"
+        confidence = 0.95
+
+    set_balance(
+        "axis-bank-only",
+        "Axis Bank",
+        "INR",
+        "BANK_ACCOUNT",
+        "AXIS",
+        "3370",
+        10000,
+    )
+    set_manual_splitwise_total("INR", 10000)
+
+    sync_transaction(T())
+
+    with connection() as conn:
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='axis-bank-only'"
+        ).fetchone()["balance_minor"]
+
+    assert balance == 10300
+    # Bank credits reduce the signed Splitwise contribution.
+    assert get_manual_splitwise_total("INR") == 9700
+
+
 def test_new_transactions_update_seeded_account_balances():
     from app.ledger import get_manual_splitwise_total, sync_transaction
 
