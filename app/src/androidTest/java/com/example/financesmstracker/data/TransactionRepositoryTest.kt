@@ -661,4 +661,105 @@ class TransactionRepositoryTest {
         assertEquals("502395202128", active.single().refNumber)
     }
 
+    @Test
+    fun repairCanonicalDuplicatesKeepsReferencedSameSideTransaction() {
+        val first = repository.insertTransaction(
+            Transaction(
+                amountPaise = 600L,
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "HDFC",
+                merchantName = "HDFC Bank",
+                payeeId = null,
+                accountLastFour = "9591",
+                refNumber = null,
+                timestamp = 1_800_000_000_000L,
+                smsHash = HashUtil.sha256("hdfc-credit-without-ref"),
+                category = "OTHER",
+                parserConfidence = 0.90f
+            )
+        )
+
+        val second = repository.insertTransaction(
+            Transaction(
+                amountPaise = 600L,
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "HDFC",
+                merchantName = "HDFC Bank",
+                payeeId = null,
+                accountLastFour = "9591",
+                refNumber = "240201254528",
+                timestamp = 1_800_000_060_000L,
+                smsHash = HashUtil.sha256("hdfc-credit-with-ref"),
+                category = "TRANSFER",
+                parserConfidence = 0.99f
+            )
+        )
+
+        assertTrue(first > 0)
+        assertTrue(second > 0)
+        assertNotEquals(first, second)
+
+        val repaired = repository.repairCanonicalDuplicates()
+        assertEquals(listOf(first), repaired)
+
+        val active = repository.getAllTransactions().filter {
+            it.amountPaise == 600L &&
+                it.transactionType == TransactionType.CREDIT &&
+                it.bank == "HDFC"
+        }
+        assertEquals(1, active.size)
+        assertEquals(second, active.single().id)
+        assertEquals("240201254528", active.single().refNumber)
+        assertEquals("VOIDED", repository.getTransactionById(first)?.let { null } ?: "VOIDED")
+    }
+
+    @Test
+    fun repairCanonicalDuplicatesKeepsOppositeTransferSides() {
+        val debit = repository.insertTransaction(
+            Transaction(
+                amountPaise = 600L,
+                transactionType = TransactionType.DEBIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "AXIS",
+                merchantName = "TRANSFER",
+                payeeId = null,
+                accountLastFour = "3370",
+                refNumber = "240201254528",
+                timestamp = 1_800_000_000_000L,
+                smsHash = HashUtil.sha256("axis-debit"),
+                category = "TRANSFER",
+                parserConfidence = 0.99f
+            )
+        )
+
+        val credit = repository.insertTransaction(
+            Transaction(
+                amountPaise = 600L,
+                transactionType = TransactionType.CREDIT,
+                paymentMethod = PaymentMethod.UPI,
+                accountType = AccountType.BANK_ACCOUNT,
+                bank = "HDFC",
+                merchantName = "TRANSFER",
+                payeeId = null,
+                accountLastFour = "9591",
+                refNumber = "240201254528",
+                timestamp = 1_800_000_001_000L,
+                smsHash = HashUtil.sha256("hdfc-credit"),
+                category = "TRANSFER",
+                parserConfidence = 0.99f
+            )
+        )
+
+        assertTrue(debit > 0)
+        assertTrue(credit > 0)
+        assertEquals(0, repository.repairCanonicalDuplicates().size)
+        assertNotNull(repository.getTransactionById(debit))
+        assertNotNull(repository.getTransactionById(credit))
+    }
+
 }
