@@ -663,6 +663,98 @@ def test_gmail_rrn_reconciles_to_correct_ledger_side_not_cross_account_side():
     assert axis["reference"] == "739593577194"
 
 
+
+def test_repair_same_side_duplicate_keeps_referenced_hdfc_credit_only_once():
+    from app.ledger import repair_duplicate_transactions, sync_transaction
+
+    class T:
+        def __init__(self, id, reference, timestamp):
+            self.id = id
+            self.amountMinor = 600
+            self.currency = "INR"
+            self.type = "CREDIT"
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = "HDFC"
+            self.merchantOrPayee = "HDFC Bank"
+            self.accountLast4 = "9591"
+            self.reference = reference
+            self.timestamp = timestamp
+            self.category = "OTHER"
+            self.confidence = 0.99
+
+    set_balance(
+        "dedupe-hdfc",
+        "HDFC 9591",
+        "INR",
+        "BANK_ACCOUNT",
+        "HDFC",
+        "9591",
+        100000,
+    )
+
+    sync_transaction(T("hdfc-credit-no-ref", None, 1_800_000_000_000))
+    sync_transaction(T("hdfc-credit-with-ref", "240201254528", 1_800_000_060_000))
+
+    with connection() as conn:
+        before = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='dedupe-hdfc'"
+        ).fetchone()["balance_minor"]
+    assert before == 100600 + 600
+
+    repaired = repair_duplicate_transactions()
+    assert repaired == 1
+
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT id,status,duplicate_of,reference
+               FROM transactions
+               WHERE amount_minor=600 AND bank='HDFC' AND type='CREDIT'
+               ORDER BY id"""
+        ).fetchall()
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='dedupe-hdfc'"
+        ).fetchone()["balance_minor"]
+
+    active = [row for row in rows if row["status"] == "ACTIVE" and row["duplicate_of"] is None]
+    assert len(active) == 1
+    assert active[0]["id"] == "hdfc-credit-with-ref"
+    assert active[0]["reference"] == "240201254528"
+    assert balance == 100600
+
+
+def test_repair_does_not_merge_opposite_sides_with_same_rrn():
+    from app.ledger import repair_duplicate_transactions, sync_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, last4, reference):
+            self.id = id
+            self.amountMinor = 600
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "TRANSFER"
+            self.accountLast4 = last4
+            self.reference = reference
+            self.timestamp = 1_800_000_010_000
+            self.category = "TRANSFER"
+            self.confidence = 0.99
+
+    sync_transaction(T("axis-debit-rrn", "DEBIT", "AXIS", "3370", "240201254528"))
+    sync_transaction(T("hdfc-credit-rrn", "CREDIT", "HDFC", "9591", "240201254528"))
+
+    repaired = repair_duplicate_transactions()
+    assert repaired == 0
+
+    with connection() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) value FROM transactions WHERE duplicate_of IS NULL AND reference='240201254528'"
+        ).fetchone()["value"]
+    assert count == 2
+
+
 def test_void_transaction_reverses_account_adjustment_once():
     from app.ledger import sync_transaction, void_transaction
 
