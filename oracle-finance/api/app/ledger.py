@@ -125,11 +125,14 @@ def _rows_are_duplicate(first, second):
     if first_ref and second_ref:
         return first_ref == second_ref
 
-    if bool(first_ref) == bool(second_ref):
-        return False
+    # A reference on only one source is still enough to identify the
+    # same real-world transaction when the other source is a weaker mirror
+    # (SMS/notification/Gmail). Bank + account identity and counterparty
+    # identity are required for the wider window so two legitimate same-value
+    # payments do not collapse together.
     if not first_bank or not second_bank or first_bank != second_bank:
         return False
-    if not first_last4 and not second_last4:
+    if not first_last4 or not second_last4 or first_last4 != second_last4:
         return False
 
     first_payment = str(first["payment_method"] or "").strip().upper()
@@ -143,10 +146,36 @@ def _rows_are_duplicate(first, second):
     ):
         return False
 
-    if abs(int(first["timestamp"]) - int(second["timestamp"])) > 120_000:
+    merchant_first = str(first["merchant_or_payee"] or "").strip()
+    merchant_second = str(second["merchant_or_payee"] or "").strip()
+    merchant_known = bool(merchant_first and merchant_first != "-" and merchant_second and merchant_second != "-")
+    if not merchant_known:
+        return False
+    if not _merchant_values_compatible(merchant_first, merchant_second):
         return False
 
-    return _merchant_values_compatible(first["merchant_or_payee"], second["merchant_or_payee"])
+    first_source = str(first["id"])
+    second_source = str(second["id"])
+    first_mirror = first_source.startswith("gmail:") or first_source.startswith("notification:")
+    second_mirror = second_source.startswith("gmail:") or second_source.startswith("notification:")
+    cross_source = first_mirror != second_mirror
+
+    # Gmail/notification delivery can lag the SMS by substantially more than
+    # two minutes. Only widen the window when the two rows are clearly from
+    # different ingestion channels and the full same-account identity plus
+    # merchant identity agrees.
+    if not cross_source:
+        return False
+
+    if first_source.startswith("gmail:") or second_source.startswith("gmail:"):
+        max_time_diff = 24 * 60 * 60 * 1000
+    else:
+        max_time_diff = 2 * 60 * 60 * 1000
+
+    if abs(int(first["timestamp"]) - int(second["timestamp"])) > max_time_diff:
+        return False
+
+    return True
 
 
 def _duplicate_canonical_score(row):
@@ -1083,7 +1112,14 @@ def add_review(kind,reason,transaction_id=None,evidence_id=None):
 
 def match_internal_transfers():
     with connection() as conn:
-        txs=conn.execute("SELECT * FROM transactions WHERE account_type='BANK_ACCOUNT' AND type IN ('DEBIT','CREDIT') ORDER BY timestamp DESC").fetchall()
+        txs=conn.execute(
+            """SELECT * FROM transactions
+               WHERE account_type='BANK_ACCOUNT'
+                 AND type IN ('DEBIT','CREDIT')
+                 AND status='ACTIVE'
+                 AND duplicate_of IS NULL
+               ORDER BY timestamp DESC"""
+        ).fetchall()
         matches=[]
         for debit in txs:
             if debit["type"]!="DEBIT": continue
