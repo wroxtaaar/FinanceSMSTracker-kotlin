@@ -714,7 +714,21 @@ class TransactionRepositoryTest {
         assertEquals(1, active.size)
         assertEquals(second, active.single().id)
         assertEquals("240201254528", active.single().refNumber)
-        assertEquals("VOIDED", repository.getTransactionById(first)?.let { null } ?: "VOIDED")
+
+        val db = dbHelper.readableDatabase
+        val status = db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            arrayOf(FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS),
+            FinanceDatabaseHelper.COLUMN_ID + " = ?",
+            arrayOf(first.toString()),
+            null,
+            null,
+            null
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            cursor.getString(0)
+        }
+        assertEquals("VOIDED", status)
     }
 
     @Test
