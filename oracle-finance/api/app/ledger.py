@@ -450,8 +450,27 @@ def repair_duplicate_transactions():
             if len(candidate_refs) != 1:
                 continue
 
-            canonical = max(candidates, key=_duplicate_canonical_score)
-            repair_pair(canonical, row)
+            # When the current row is a real local/SMS transaction and
+            # the only referenced candidate is a Gmail/notification mirror,
+            # keep the local row canonical. Otherwise a later-arriving Gmail
+            # reference could incorrectly become the ledger owner.
+            row_source = str(row["id"])
+            row_is_mirror = row_source.startswith("gmail:") or row_source.startswith("notification:")
+            mirror_candidates = [
+                candidate for candidate in candidates
+                if str(candidate["id"]).startswith("gmail:")
+                or str(candidate["id"]).startswith("notification:")
+            ]
+            if not row_is_mirror and mirror_candidates:
+                canonical = row
+            else:
+                canonical = max(candidates, key=_duplicate_canonical_score)
+
+            duplicate = next(
+                candidate for candidate in candidates
+                if str(candidate["id"]) != str(canonical["id"])
+            )
+            repair_pair(canonical, duplicate)
             assigned.add(str(canonical["id"]))
 
         return repaired
