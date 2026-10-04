@@ -604,6 +604,29 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
             account=candidate
             break
 
+    # Gmail/notification alerts can sometimes identify the issuing bank but
+    # omit the account last-four. When there is exactly one configured account
+    # for that bank/type/currency, use that unambiguous identity instead of
+    # dropping the balance adjustment. Never guess when multiple matching
+    # accounts exist.
+    if account is None and not last4 and bank:
+        fallback = conn.execute(
+            """
+            SELECT id, balance_minor, bill_balance_minor, balance_reconciled_at, bank, last4
+            FROM accounts
+            WHERE account_type=?
+              AND currency=?
+            ORDER BY updated_at DESC
+            """,
+            (t.accountType, t.currency),
+        ).fetchall()
+        bank_matches = [
+            row for row in fallback
+            if _normalize_account_bank(row["bank"]) == bank
+        ]
+        if len(bank_matches) == 1:
+            account = bank_matches[0]
+
     # If the transaction has no bank name, only use an unambiguous account
     # with the same type/currency/last4.
     if account is None and not bank and len(candidates) == 1:
