@@ -1348,13 +1348,47 @@ def ingest_messages(service,query="newer_than:30d"):
                     "SELECT status FROM gmail_messages WHERE id=?",
                     (msg_id,),
                 ).fetchone()
-                # Normal parsed transaction mail is terminal. Statement mail is
-                # allowed through once more so a newly added PDF attachment
-                # parser can process the attachment without reparsing the mail
-                # as a transaction.
+
+                # A parsed message is terminal only while its evidence still
+                # points at an active ledger transaction. This matters after a
+                # local-history reset and after legacy repair work: the Gmail
+                # processing marker can survive while the transaction that was
+                # created from it has been voided/removed. In that case the
+                # message must be eligible for parsing again or a valid Axis
+                # credit (or any other authoritative bank email) can be lost
+                # forever behind the PARSED marker.
                 if existing and existing["status"] == "PARSED" and not statement_hint:
-                    stats["alreadyProcessed"] += 1
-                    continue
+                    active_link = conn.execute(
+                        """
+                        SELECT 1
+                        FROM evidence e
+                        JOIN transactions t
+                          ON (
+                               t.id = e.transaction_id
+                               OR t.id = e.matched_transaction_id
+                             )
+                        WHERE e.source_type='GMAIL'
+                          AND (
+                               e.source_id=?
+                               OR e.source_id LIKE 'imap:%:' || ?
+                             )
+                          AND t.status='ACTIVE'
+                          AND t.duplicate_of IS NULL
+                        LIMIT 1
+                        """,
+                        (msg_id, msg_id),
+                    ).fetchone()
+                    if active_link:
+                        stats["alreadyProcessed"] += 1
+                        continue
+
+                    # The message was marked PARSED but no active transaction
+                    # remains. Move it back to PENDING so the current parser
+                    # gets a chance to recreate the authoritative transaction.
+                    conn.execute(
+                        "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
+                        (msg_id,),
+                    )
 
             message=service.users().messages().get(
                 userId="me",id=msg_id,format="full"
