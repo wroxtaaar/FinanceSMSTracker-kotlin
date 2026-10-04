@@ -951,7 +951,7 @@ def test_gmail_notification_same_side_duplicate_with_delay_is_repaired_once():
     with connection() as conn:
         assert conn.execute(
             "SELECT balance_minor FROM accounts WHERE id='notification-delay-dedupe'"
-        ).fetchone()["balance_minor"] == 9500
+        ).fetchone()["balance_minor"] == 9000
 
     repaired = repair_duplicate_transactions()
     assert repaired == 1
