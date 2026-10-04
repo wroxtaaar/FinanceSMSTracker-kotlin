@@ -101,12 +101,12 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
             voided += 1
     for t in payload.transactions:
         reconcile_duplicate_transaction(t.id)
+    # Collapse safe same-side duplicates before downstream Splitwise/transfer
+    # processing, so a duplicate can never create a second expense or transfer.
+    repair_duplicate_transactions()
     for t in payload.transactions:
         row=next((x for x in list_transactions(1000) if x["id"]==t.id),None)
         if row and not row.get("duplicate_of"): create_for_transaction(row)
-    # Collapse safe same-side duplicates created by separate notification/SMS
-    # deliveries before rebuilding transfer relationships and summaries.
-    repair_duplicate_transactions()
     reconcile_all()
     return {"acceptedTransactions":new_t,"acceptedEvidence":new_e,
             "duplicateTransactions":len(payload.transactions)-new_t,
