@@ -229,6 +229,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+
+        // Clean up any same-side duplicates that may have been created by
+        // separate SMS/notification delivery before the latest reconciliation
+        // rules were installed. Legitimate opposite-side transfers are kept.
+        repository.repairCanonicalDuplicates().forEach { duplicateId ->
+            FinanceSyncBridge.enqueueVoidedTransaction(this, duplicateId)
+        }
+
         loadTransactions()
         updateNotificationAccessStatus()
         if (NotificationAccessHelper.isNotificationAccessGranted(this)) {
