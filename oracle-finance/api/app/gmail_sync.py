@@ -11,6 +11,7 @@ from .ledger import (
     apply_splitwise_contribution,
     sync_card_bill,
     void_transaction,
+    match_internal_transfers,
 )
 from .main_models import SyncTransactionModel,SyncEvidenceModel
 from .statement_sync import process_statement_attachments
@@ -1581,6 +1582,13 @@ def ingest_messages(service,query="newer_than:30d"):
     # Final safety pass collapses same-side duplicates that may have been
     # created by separate notification/email sources during this sync.
     stats["repairedTransactions"] += repair_duplicate_transactions()
+
+    # Gmail can be the second side of an internal bank-to-bank transfer.
+    # Unlike /api/v1/sync, this ingestion path used to stop after duplicate
+    # repair, leaving the receiving Gmail credit as a Splitwise change even
+    # though the matching bank debit already existed. Pair and neutralize
+    # internal transfers here too.
+    stats["internalTransfersMatched"] = match_internal_transfers()
 
     return stats
 
