@@ -190,6 +190,49 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             }
         }
 
+        // Some bank SMS variants expose the same real transaction with a
+        // different body/hash. Prefer the existing canonical row when strong
+        // same-side identity proves that this is the same event.
+        if (!transaction.smsHash.startsWith("notification:")) {
+            val semanticDuplicate = findCanonicalDuplicate(db, transaction)
+            if (semanticDuplicate != null) {
+                val values = ContentValues().apply {
+                    if (semanticDuplicate.merchantName.isNullOrBlank() && !transaction.merchantName.isNullOrBlank()) {
+                        put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantName)
+                    }
+                    if (semanticDuplicate.payeeId.isNullOrBlank() && !transaction.payeeId.isNullOrBlank()) {
+                        put(FinanceDatabaseHelper.COLUMN_PAYEE_ID, transaction.payeeId)
+                    }
+                    if (semanticDuplicate.bank.isNullOrBlank() && !transaction.bank.isNullOrBlank()) {
+                        put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
+                    }
+                    if (semanticDuplicate.accountLastFour.isNullOrBlank() && !transaction.accountLastFour.isNullOrBlank()) {
+                        put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLastFour)
+                    }
+                    if (TransactionReferenceNormalizer.normalize(semanticDuplicate.refNumber) == null &&
+                        !transaction.refNumber.isNullOrBlank()) {
+                        put(
+                            FinanceDatabaseHelper.COLUMN_REF_NUMBER,
+                            TransactionReferenceNormalizer.normalize(transaction.refNumber)
+                        )
+                    }
+                    if (transaction.parserConfidence > semanticDuplicate.parserConfidence) {
+                        put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, transaction.parserConfidence)
+                    }
+                }
+
+                if (values.size() > 0) {
+                    db.update(
+                        FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                        values,
+                        FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                        arrayOf(semanticDuplicate.id.toString())
+                    )
+                }
+                return semanticDuplicate.id
+            }
+        }
+
         val values = ContentValues().apply {
             put(FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE, transaction.amountPaise)
             put(FinanceDatabaseHelper.COLUMN_CURRENCY, transaction.currency)
@@ -219,6 +262,212 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         }
 
         return rowId
+    }
+
+    private fun normalizedMerchant(value: String?): String? =
+        value?.trim()
+            ?.takeIf { it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true) && it != "-" }
+            ?.uppercase()
+
+    private fun merchantsCompatible(first: String?, second: String?): Boolean {
+        val a = normalizedMerchant(first)
+        val b = normalizedMerchant(second)
+        if (a == null || b == null) return true
+        return a == b || a.contains(b) || b.contains(a)
+    }
+
+    private fun transactionsAreSafeDuplicates(first: Transaction, second: Transaction): Boolean {
+        if (first.amountPaise != second.amountPaise) return false
+        if (!first.currency.equals(second.currency, ignoreCase = true)) return false
+        if (first.transactionType != second.transactionType) return false
+        if (first.accountType != second.accountType) return false
+
+        val firstBank = normalizedBank(first.bank)
+        val secondBank = normalizedBank(second.bank)
+        if (firstBank != null && secondBank != null && firstBank != secondBank) return false
+
+        val firstLast4 = first.accountLastFour?.trim().orEmpty()
+        val secondLast4 = second.accountLastFour?.trim().orEmpty()
+        if (firstLast4.isNotEmpty() && secondLast4.isNotEmpty() && firstLast4 != secondLast4) return false
+
+        val firstRef = TransactionReferenceNormalizer.normalize(first.refNumber)
+        val secondRef = TransactionReferenceNormalizer.normalize(second.refNumber)
+
+        if (firstRef != null && secondRef != null) {
+            return firstRef == secondRef
+        }
+
+        // One source may expose the RRN while another does not. Only merge
+        // that case when the complete same-side account identity is known and
+        // the events are very close together.
+        if ((firstRef == null) == (secondRef == null)) return false
+        if (firstBank == null || secondBank == null || firstBank != secondBank) return false
+        if (firstLast4.isEmpty() || secondLast4.isEmpty() || firstLast4 != secondLast4) return false
+        if (kotlin.math.abs(first.timestamp - second.timestamp) > 2L * 60L * 1000L) return false
+        return merchantsCompatible(first.merchantName, second.merchantName)
+    }
+
+    private fun findCanonicalDuplicate(
+        db: SQLiteDatabase,
+        transaction: Transaction
+    ): Transaction? {
+        if (transaction.smsHash.startsWith("notification:") ||
+            transaction.smsHash.startsWith("oracle:gmail:")
+        ) return null
+
+        val candidates = mutableListOf<Transaction>()
+        db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            null,
+            FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_CURRENCY + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
+                FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ?",
+            arrayOf(
+                "ACTIVE",
+                transaction.amountPaise.toString(),
+                transaction.currency,
+                transaction.transactionType.name,
+                transaction.accountType.name,
+                "notification:%",
+                "oracle:gmail:%"
+            ),
+            null,
+            null,
+            FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC",
+            "100"
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val candidate = cursorToTransaction(cursor)
+                if (candidate.id == 0L) continue
+                if (transactionsAreSafeDuplicates(candidate, transaction)) {
+                    candidates += candidate
+                }
+            }
+        }
+
+        if (candidates.isEmpty()) return null
+
+        val best = candidates.maxByOrNull { candidate ->
+            val hasReference = if (TransactionReferenceNormalizer.normalize(candidate.refNumber) != null) 1000 else 0
+            val hasIdentity =
+                if (!candidate.bank.isNullOrBlank() && !candidate.accountLastFour.isNullOrBlank()) 100 else 0
+            val merchant = if (!candidate.merchantName.isNullOrBlank() && candidate.merchantName != "-") 10 else 0
+            val confidence = (candidate.parserConfidence * 100).toInt()
+            hasReference + hasIdentity + merchant + confidence
+        } ?: return null
+
+        return if (candidates.count { transactionsAreSafeDuplicates(it, transaction) && (
+            (TransactionReferenceNormalizer.normalize(it.refNumber) != null) ==
+                (TransactionReferenceNormalizer.normalize(best.refNumber) != null)
+        ) } == 1 || candidates.size == 1) {
+            best
+        } else {
+            // Multiple equally plausible same-side events are left alone rather
+            // than risking the collapse of two legitimate payments.
+            null
+        }
+    }
+
+    /**
+     * Repairs already-stored active local duplicates. A transaction with an
+     * exact RRN is stronger than an otherwise identical row without one.
+     * Opposite-side transfers remain separate because direction is mandatory.
+     */
+    fun repairCanonicalDuplicates(): List<Long> {
+        val db = dbHelper.writableDatabase
+        val rows = mutableListOf<Transaction>()
+
+        db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            null,
+            FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ? AND " +
+                FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ? AND " +
+                FinanceDatabaseHelper.COLUMN_SMS_HASH + " NOT LIKE ?",
+            arrayOf("ACTIVE", "oracle:gmail:%", "notification:%"),
+            null,
+            null,
+            FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC"
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                rows += cursorToTransaction(cursor)
+            }
+        }
+
+        val duplicateToCanonical = LinkedHashMap<Long, Long>()
+
+        fun canonicalScore(transaction: Transaction): Long {
+            val reference = if (TransactionReferenceNormalizer.normalize(transaction.refNumber) != null) 1_000_000L else 0L
+            val identity = if (!transaction.bank.isNullOrBlank() && !transaction.accountLastFour.isNullOrBlank()) 100_000L else 0L
+            val merchant = if (!transaction.merchantName.isNullOrBlank() && transaction.merchantName != "-") 10_000L else 0L
+            val confidence = (transaction.parserConfidence * 1000).toLong()
+            return reference + identity + merchant + confidence - transaction.id
+        }
+
+        for (i in rows.indices) {
+            val first = rows[i]
+            if (duplicateToCanonical.containsKey(first.id)) continue
+
+            for (j in i + 1 until rows.size) {
+                val second = rows[j]
+                if (duplicateToCanonical.containsKey(second.id)) continue
+                if (!transactionsAreSafeDuplicates(first, second)) continue
+
+                val canonical: Transaction
+                val duplicate: Transaction
+                if (canonicalScore(first) >= canonicalScore(second)) {
+                    canonical = first
+                    duplicate = second
+                } else {
+                    canonical = second
+                    duplicate = first
+                }
+
+                duplicateToCanonical[duplicate.id] = canonical.id
+            }
+        }
+
+        if (duplicateToCanonical.isEmpty()) return emptyList()
+
+        val repaired = mutableListOf<Long>()
+        db.beginTransaction()
+        try {
+            duplicateToCanonical.forEach { (duplicateId, canonicalId) ->
+                val status = ContentValues().apply {
+                    put(FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS, "VOIDED")
+                }
+                val updated = db.update(
+                    FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                    status,
+                    FinanceDatabaseHelper.COLUMN_ID + " = ? AND " +
+                        FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ?",
+                    arrayOf(duplicateId.toString(), "ACTIVE")
+                )
+
+                if (updated > 0) {
+                    val evidenceValues = ContentValues().apply {
+                        put(FinanceDatabaseHelper.COLUMN_EVIDENCE_TRANSACTION_ID, canonicalId)
+                        put(FinanceDatabaseHelper.COLUMN_EVIDENCE_STATUS, EvidenceStatus.MATCHED.name)
+                    }
+                    db.update(
+                        FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+                        evidenceValues,
+                        FinanceDatabaseHelper.COLUMN_EVIDENCE_TRANSACTION_ID + " = ?",
+                        arrayOf(duplicateId.toString())
+                    )
+                    repaired += duplicateId
+                }
+            }
+
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        return repaired
     }
 
     fun insertSourceEvidence(evidence: SourceEvidence): Long {
