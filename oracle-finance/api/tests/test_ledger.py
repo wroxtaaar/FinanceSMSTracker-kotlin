@@ -668,7 +668,7 @@ def test_repair_same_side_duplicate_keeps_referenced_hdfc_credit_only_once():
     from app.ledger import repair_duplicate_transactions, sync_transaction
 
     class T:
-        def __init__(self, id, reference, timestamp):
+        def __init__(self, id, reference, timestamp, last4):
             self.id = id
             self.amountMinor = 600
             self.currency = "INR"
@@ -677,7 +677,7 @@ def test_repair_same_side_duplicate_keeps_referenced_hdfc_credit_only_once():
             self.accountType = "BANK_ACCOUNT"
             self.bank = "HDFC"
             self.merchantOrPayee = "HDFC Bank"
-            self.accountLast4 = "9591"
+            self.accountLast4 = last4
             self.reference = reference
             self.timestamp = timestamp
             self.category = "OTHER"
@@ -693,8 +693,9 @@ def test_repair_same_side_duplicate_keeps_referenced_hdfc_credit_only_once():
         100000,
     )
 
-    sync_transaction(T("hdfc-credit-no-ref", None, 1_800_000_000_000))
-    sync_transaction(T("hdfc-credit-with-ref", "240201254528", 1_800_000_060_000))
+    sync_transaction(T("hdfc-credit-no-ref", None, 1_800_000_000_000, "9591"))
+    # The second source knows the RRN but omits the last-four entirely.
+    sync_transaction(T("hdfc-credit-with-ref", "240201254528", 1_800_000_060_000, ""))
 
     with connection() as conn:
         before = conn.execute(
