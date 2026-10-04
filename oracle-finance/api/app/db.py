@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS splitwise_adjustments (
 CREATE TABLE IF NOT EXISTS internal_transfers (
   id TEXT PRIMARY KEY, debit_transaction_id TEXT NOT NULL, credit_transaction_id TEXT NOT NULL,
   currency TEXT NOT NULL, amount_minor INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'MATCHED',
-  reason TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(debit_transaction_id, credit_transaction_id)
+  reason TEXT NOT NULL, splitwise_neutralized INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL, UNIQUE(debit_transaction_id, credit_transaction_id)
 );
 CREATE TABLE IF NOT EXISTS splitwise_rules (
   id TEXT PRIMARY KEY, merchant_pattern TEXT NOT NULL, group_id INTEGER NOT NULL,
@@ -119,6 +120,14 @@ def init_db():
 
         if "status" not in transaction_columns:
             conn.execute("ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'")
+
+        transfer_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(internal_transfers)").fetchall()
+        }
+        if "splitwise_neutralized" not in transfer_columns:
+            conn.execute(
+                "ALTER TABLE internal_transfers ADD COLUMN splitwise_neutralized INTEGER NOT NULL DEFAULT 0"
+            )
 
         account_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()
