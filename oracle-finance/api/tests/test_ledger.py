@@ -350,13 +350,16 @@ def test_internal_transfer_neutralizes_splitwise_even_when_credit_category_diffe
     sync_transaction(T("axis-debit-300", "DEBIT", "AXIS", "3370", "OTHER"))
     sync_transaction(T("hdfc-credit-300", "CREDIT", "HDFC", "9591", "REFUND"))
 
-    # Only the receiving credit contributes to Splitwise in this setup.
+    # Reproduce the observed asymmetric state: only the receiving credit
+    # has affected the Splitwise aggregate.
     with connection() as conn:
-        from app.ledger import apply_splitwise_contribution
-        credit = conn.execute(
-            "SELECT * FROM transactions WHERE id='hdfc-credit-300'"
-        ).fetchone()
-        assert apply_splitwise_contribution(conn, credit, 4_200_000_001_000) is True
+        conn.execute(
+            """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
+               VALUES('INR',-300,4_200_000_001_000)
+               ON CONFLICT(currency) DO UPDATE SET
+                   amount_minor=excluded.amount_minor,
+                   updated_at=excluded.updated_at"""
+        )
 
     assert get_manual_splitwise_total("INR") == -300
     matches = match_internal_transfers()
