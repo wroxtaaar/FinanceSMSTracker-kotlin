@@ -466,11 +466,12 @@ def repair_duplicate_transactions():
             else:
                 canonical = max(candidates, key=_duplicate_canonical_score)
 
-            duplicate = next(
+            duplicates = [
                 candidate for candidate in candidates
                 if str(candidate["id"]) != str(canonical["id"])
-            )
-            repair_pair(canonical, duplicate)
+            ]
+            for duplicate in duplicates:
+                repair_pair(canonical, duplicate)
             assigned.add(str(canonical["id"]))
 
         return repaired
