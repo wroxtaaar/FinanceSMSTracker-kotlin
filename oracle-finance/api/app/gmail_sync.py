@@ -8,6 +8,7 @@ from .ledger import (
     apply_transaction_to_account,
     reconcile_duplicate_transaction,
     repair_duplicate_transactions,
+    apply_splitwise_contribution,
     sync_card_bill,
     void_transaction,
 )
@@ -1459,9 +1460,15 @@ def ingest_messages(service,query="newer_than:30d"):
                     if row and row["duplicate_of"]:
                         stats["duplicateTransactions"] += 1
                     elif row:
-                        apply_transaction_to_account(
-                            conn,t,int(time.time()*1000)
-                        )
+                        # A Gmail transaction can be the only authoritative
+                        # source (for example an Axis credit with no SMS).
+                        # In that case it must affect Splitwise just like an
+                        # SMS transaction. The adjustment is idempotent and
+                        # can be reversed if a later SMS proves this Gmail row
+                        # was a duplicate.
+                        now = int(time.time() * 1000)
+                        apply_transaction_to_account(conn, t, now)
+                        apply_splitwise_contribution(conn, t, now)
             else:
                 h=_headers(message.get("payload",{}))
                 combined=f"{h.get('subject','')}\\n{_decode(message.get('payload',{}))}"
