@@ -945,7 +945,7 @@ def test_gmail_notification_same_side_duplicate_with_delay_is_repaired_once():
         10000,
     )
 
-    sync_transaction(T("hdfc-sms-500b", None, 1_800_000_000_000))
+    sync_transaction(T("hdfc-sms-500b", 1_800_000_000_000))
     sync_transaction(T("notification:hdfc-500b", 1_800_000_000_000 + 45 * 60 * 1000))
 
     with connection() as conn:
