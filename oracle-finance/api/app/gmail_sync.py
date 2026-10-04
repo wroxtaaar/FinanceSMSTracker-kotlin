@@ -1357,7 +1357,15 @@ def ingest_messages(service,query="newer_than:30d"):
                 # message must be eligible for parsing again or a valid Axis
                 # credit (or any other authoritative bank email) can be lost
                 # forever behind the PARSED marker.
-                if existing and existing["status"] == "PARSED" and not statement_hint:
+                if existing and existing["status"] == "PARSED":
+                    # Statement attachments are retried explicitly before the
+                    # normal mailbox scan. Once that retry has marked the
+                    # message PARSED, do not fetch/process the same attachment
+                    # a second time in this pass.
+                    if statement_hint:
+                        stats["alreadyProcessed"] += 1
+                        continue
+
                     active_link = conn.execute(
                         """
                         SELECT 1
