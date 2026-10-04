@@ -302,7 +302,17 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         // the events are very close together.
         if ((firstRef == null) == (secondRef == null)) return false
         if (firstBank == null || secondBank == null || firstBank != secondBank) return false
-        if (firstLast4.isEmpty() || secondLast4.isEmpty() || firstLast4 != secondLast4) return false
+        if (firstLast4.isNotEmpty() && secondLast4.isNotEmpty() && firstLast4 != secondLast4) return false
+        if (firstLast4.isEmpty() && secondLast4.isEmpty()) return false
+
+        val firstPayment = first.paymentMethod
+        val secondPayment = second.paymentMethod
+        if (
+            firstPayment != PaymentMethod.UNKNOWN &&
+            secondPayment != PaymentMethod.UNKNOWN &&
+            firstPayment != secondPayment
+        ) return false
+
         if (kotlin.math.abs(first.timestamp - second.timestamp) > 2L * 60L * 1000L) return false
         return merchantsCompatible(first.merchantName, second.merchantName)
     }
