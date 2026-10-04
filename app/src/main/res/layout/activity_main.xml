@@ -5,237 +5,343 @@
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="16dp"
+    android:background="@color/screen_background"
+    android:padding="@dimen/screen_padding"
     tools:context=".MainActivity">
 
+    <LinearLayout
+        android:id="@+id/headerRow"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/textViewTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Finance"
+                android:textColor="@color/on_surface"
+                android:textSize="28sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/textViewNotificationStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Bank/card notification trigger: Checking..."
+                android:textColor="@color/on_surface_muted"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonRefreshOracle"
+            style="@style/Widget.Finance.ActionButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="Refresh financial data"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:text="↻"
+            android:textSize="23sp"
+            app:iconTint="@color/on_primary"
+            app:layout_constraintEnd_toEndOf="parent" />
+    </LinearLayout>
+
     <TextView
-        android:id="@+id/textViewTitle"
+        android:id="@+id/textViewOracleStatus"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Transaction History"
-        android:textSize="22sp"
+        android:layout_marginTop="8dp"
+        android:text="● Oracle ledger: Loading..."
+        android:textColor="@color/positive"
+        android:textSize="12sp"
         android:textStyle="bold"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toBottomOf="@id/headerRow" />
 
-    <Button
-        android:id="@+id/buttonOpenNotificationSettings"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="Enable Gmail Notifications"
-        android:visibility="gone"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/textViewTitle" />
-
-    <TextView
-        android:id="@+id/textViewNotificationStatus"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Notification Access: Checking..."
-        android:textSize="14sp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/buttonOpenNotificationSettings" />
-
-    <LinearLayout
+    <com.google.android.material.card.MaterialCardView
         android:id="@+id/oracleLedgerPanel"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:orientation="vertical"
+        android:layout_marginTop="10dp"
+        app:cardBackgroundColor="@color/surface_elevated"
+        app:cardCornerRadius="@dimen/card_radius"
+        app:cardElevation="0dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/textViewNotificationStatus">
-
-        <TextView
-            android:id="@+id/textViewOracleStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Oracle ledger: Loading..."
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/textViewTrueAvailable"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="True available: —"
-            android:textSize="20sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/textViewBankCash"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Bank cash: —"
-            android:textSize="14sp" />
-
-        <TextView
-            android:id="@+id/textViewCardOutstanding"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Card outstanding: —"
-            android:textSize="14sp" />
-
-        <TextView
-            android:id="@+id/textViewSplitwiseReceivable"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Splitwise owed to you: —"
-            android:textSize="14sp" />
+        app:layout_constraintTop_toBottomOf="@id/textViewOracleStatus"
+        app:strokeWidth="0dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:orientation="horizontal">
+            android:orientation="vertical"
+            android:padding="18dp">
 
-            <Button
-                android:id="@+id/buttonEditSplitwise"
-                android:layout_width="0dp"
+            <TextView
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:minHeight="0dp"
-                android:paddingStart="4dp"
-                android:paddingEnd="4dp"
-                android:text="Splitwise" />
+                android:letterSpacing="0.08"
+                android:text="TRUE AVAILABLE"
+                android:textColor="@color/on_surface_muted"
+                android:textSize="11sp"
+                android:textStyle="bold" />
 
-            <Button
-                android:id="@+id/buttonEditBankAccounts"
-                android:layout_width="0dp"
+            <TextView
+                android:id="@+id/textViewTrueAvailable"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:minHeight="0dp"
-                android:paddingStart="4dp"
-                android:paddingEnd="4dp"
-                android:text="Banks" />
+                android:layout_marginTop="2dp"
+                android:text="₹—"
+                android:textColor="@color/on_surface"
+                android:textSize="30sp"
+                android:textStyle="bold" />
 
-            <Button
-                android:id="@+id/buttonEditCreditCards"
-                android:layout_width="0dp"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:minHeight="0dp"
-                android:paddingStart="4dp"
-                android:paddingEnd="4dp"
-                android:text="Cards" />
+                android:layout_marginTop="15dp"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Bank cash"
+                        android:textColor="@color/on_surface_muted"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/textViewBankCash"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="₹—"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Cards"
+                        android:textColor="@color/on_surface_muted"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/textViewCardOutstanding"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="₹—"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Splitwise"
+                        android:textColor="@color/on_surface_muted"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/textViewSplitwiseReceivable"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="₹—"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </LinearLayout>
         </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
 
+    <LinearLayout
+        android:id="@+id/accountActionsRow"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/section_gap"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonEditSplitwise"
+            style="@style/Widget.Finance.ActionButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="Splitwise" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonEditBankAccounts"
+            style="@style/Widget.Finance.ActionButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="Banks" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonEditCreditCards"
+            style="@style/Widget.Finance.ActionButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="Cards" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/oracleControlsRow"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="8dp"
         android:orientation="horizontal"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel">
+        app:layout_constraintTop_toBottomOf="@id/accountActionsRow">
 
-        <Button
-            android:id="@+id/buttonRefreshOracle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:text="Refresh" />
-
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonViewAccounts"
+            style="@style/Widget.Finance.SecondaryButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
             android:text="Accounts" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonOracleSettings"
+            style="@style/Widget.Finance.SecondaryButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
             android:text="Settings" />
 
+        <Button
+            android:id="@+id/buttonOpenNotificationSettings"
+            style="@style/Widget.Finance.SecondaryButton"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="Enable trigger"
+            android:visibility="gone" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/oracleControlsRow2"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:orientation="horizontal"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/oracleControlsRow">
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonGmailSync"
+            style="@style/Widget.Finance.ActionButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
             android:text="Check Gmail" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonReviewReconcile"
+            style="@style/Widget.Finance.ActionButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:text="Review" />
-
+            android:text="Review &amp; Reconcile" />
     </LinearLayout>
 
-    <Button
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/buttonClearLocalHistory"
+        style="@style/Widget.Finance.SecondaryButton"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:minHeight="0dp"
-        android:text="Clear Local History"
+        android:layout_height="40dp"
+        android:layout_marginTop="6dp"
+        android:text="Clear local history"
+        android:textColor="@color/negative"
+        app:strokeColor="@color/negative"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/oracleControlsRow2" />
+
+    <TextView
+        android:id="@+id/textViewRecentTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="15dp"
+        android:text="Recent activity"
+        android:textColor="@color/on_surface"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/buttonClearLocalHistory" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerViewTransactions"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="8dp"
+        android:clipToPadding="false"
+        android:paddingBottom="8dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/buttonClearLocalHistory"
+        app:layout_constraintTop_toBottomOf="@id/textViewRecentTitle"
         tools:listitem="@layout/item_transaction" />
 
     <TextView
         android:id="@+id/textViewEmpty"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="No transactions found."
+        android:text="No transactions yet"
+        android:textColor="@color/on_surface_muted"
         android:textSize="16sp"
         android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toBottomOf="@id/recyclerViewTransactions"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="@id/recyclerViewTransactions" />
