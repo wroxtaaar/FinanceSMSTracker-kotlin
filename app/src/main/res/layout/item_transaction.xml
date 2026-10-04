@@ -82,6 +82,15 @@
                     android:text="UPI"
                     android:textColor="@color/on_surface_muted"
                     android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/textViewType"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:text="DEBIT"
+                    android:textColor="@color/on_surface_muted"
+                    android:textSize="11sp" />
             </LinearLayout>
 
             <TextView
