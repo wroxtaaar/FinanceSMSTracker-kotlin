@@ -91,15 +91,14 @@ def _merchant_values_compatible(first, second):
     return a == b or a in b or b in a
 
 
+
 def _rows_are_duplicate(first, second):
     """Return True only for a same-side transaction represented more than once.
 
     Exact normalized references are the strongest identity. When only one side
-    has a reference, allow a conservative fallback only when bank + account
-    last-4 + amount + direction + account type all agree within two minutes.
-    Opposite directions are intentionally never considered duplicates because
-    an internal transfer legitimately creates one debit and one credit with the
-    same UPI RRN.
+    has a reference, allow a conservative fallback when the same bank is known,
+    account identity is compatible, payment methods do not contradict, and the
+    events are within two minutes. Opposite directions are never duplicates.
     """
     if int(first["amount_minor"]) != int(second["amount_minor"]):
         return False
@@ -126,18 +125,13 @@ def _rows_are_duplicate(first, second):
     if first_ref and second_ref:
         return first_ref == second_ref
 
-    # One source may omit the RRN and/or last-four. Only bridge that case
-    # when the same bank is known on both sides, at least one source has the
-    # account last-four, payment methods do not contradict, and the events are
-    # very close. Conflicting known last-four values remain a hard stop.
     if bool(first_ref) == bool(second_ref):
         return False
     if not first_bank or not second_bank or first_bank != second_bank:
         return False
-    if first_last4 and second_last4 and first_last4 != second_last4:
-        return False
     if not first_last4 and not second_last4:
         return False
+
     first_payment = str(first["payment_method"] or "").strip().upper()
     second_payment = str(second["payment_method"] or "").strip().upper()
     if (
@@ -148,8 +142,10 @@ def _rows_are_duplicate(first, second):
         and first_payment != second_payment
     ):
         return False
+
     if abs(int(first["timestamp"]) - int(second["timestamp"])) > 120_000:
         return False
+
     return _merchant_values_compatible(first["merchant_or_payee"], second["merchant_or_payee"])
 
 
@@ -158,22 +154,25 @@ def _duplicate_canonical_score(row):
     bank_identity = bool(_normalize_account_bank(row["bank"])) and bool(str(row["account_last4"] or "").strip())
     merchant = bool(str(row["merchant_or_payee"] or "").strip()) and str(row["merchant_or_payee"] or "").strip() != "-"
     source = str(row["id"])
-    # Keep an authoritative non-Gmail row over a Gmail mirror/notification.
-    non_gmail = not source.startswith("gmail:")
-    non_notification = not source.startswith("notification:")
-    confidence = float(row["confidence"] or 0.0)
-    created_at = int(row["created_at"] or 0)
+
+    # Prefer an actual canonical/non-Gmail row over notification and Gmail
+    # mirrors. Reference richness then decides between rows in the same class.
+    if source.startswith("gmail:"):
+        source_score = 0
+    elif source.startswith("notification:"):
+        source_score = 2000
+    else:
+        source_score = 3000
+
     return (
+        source_score,
         1000 if ref else 0,
-        100 if non_gmail else 0,
-        50 if non_notification else 0,
         30 if bank_identity else 0,
         10 if merchant else 0,
-        confidence,
-        -created_at,
-        -int(row["id"]) if str(row["id"]).isdigit() else 0,
+        float(row["confidence"] or 0.0),
+        -int(row["created_at"] or 0),
+        -int(row["id"]) if source.isdigit() else 0,
     )
-
 
 def _void_transaction_in_connection(conn, transaction_id, duplicate_of=None):
     tx = conn.execute(
@@ -228,13 +227,14 @@ def _void_transaction_in_connection(conn, transaction_id, duplicate_of=None):
     }
 
 
+
 def repair_duplicate_transactions():
     """Collapse safe same-side duplicate ledger rows without touching transfers.
 
-    Exact-reference rows are grouped first. Then an unreferenced row may merge
-    into a referenced same-side row only when there is exactly one distinct
-    reference candidate. This avoids transitive chains where one incomplete
-    row could accidentally bridge two different real transactions.
+    Exact-reference rows are reconciled first. Then an unreferenced row may
+    merge into a referenced same-side row only when there is exactly one
+    distinct reference candidate. This prevents incomplete rows from bridging
+    unrelated transactions.
     """
     with connection() as conn:
         rows = conn.execute(
@@ -246,55 +246,121 @@ def repair_duplicate_transactions():
         assigned = set()
         repaired = 0
 
-        def repair_group(canonical, duplicates):
+        def is_card_bill_credit(row):
+            return (
+                str(row["account_type"]).strip().upper() == "CREDIT_CARD"
+                and str(row["type"]).strip().upper() == "CREDIT"
+            )
+
+        def enrich_canonical(canonical, duplicate):
+            updates = {}
+            if not normalize_reference(canonical["reference"]) and normalize_reference(duplicate["reference"]):
+                updates["reference"] = normalize_reference(duplicate["reference"])
+            if not str(canonical["bank"] or "").strip() and str(duplicate["bank"] or "").strip():
+                updates["bank"] = duplicate["bank"]
+            if not str(canonical["account_last4"] or "").strip() and str(duplicate["account_last4"] or "").strip():
+                updates["account_last4"] = duplicate["account_last4"]
+            if (
+                (not canonical["merchant_or_payee"] or str(canonical["merchant_or_payee"]).strip() == "-")
+                and duplicate["merchant_or_payee"]
+                and str(duplicate["merchant_or_payee"]).strip() != "-"
+            ):
+                updates["merchant_or_payee"] = duplicate["merchant_or_payee"]
+
+            if updates:
+                assignments = ", ".join(f"{column}=?" for column in updates)
+                values = list(updates.values()) + [canonical["id"]]
+                conn.execute(
+                    f"UPDATE transactions SET {assignments} WHERE id=?",
+                    values,
+                )
+
+        def repair_pair(canonical, duplicate):
             nonlocal repaired
-            for duplicate in duplicates:
+            enrich_canonical(canonical, duplicate)
+
+            canonical_adjustment = conn.execute(
+                "SELECT account_id,delta_minor,applied_at FROM balance_adjustments WHERE transaction_id=?",
+                (canonical["id"],),
+            ).fetchone()
+            duplicate_adjustment = conn.execute(
+                "SELECT account_id,delta_minor,applied_at FROM balance_adjustments WHERE transaction_id=?",
+                (duplicate["id"],),
+            ).fetchone()
+
+            if canonical_adjustment is None and duplicate_adjustment is not None:
+                conn.execute(
+                    "DELETE FROM balance_adjustments WHERE transaction_id=?",
+                    (duplicate["id"],),
+                )
+                conn.execute(
+                    """INSERT INTO balance_adjustments(transaction_id,account_id,delta_minor,applied_at)
+                       VALUES(?,?,?,?)""",
+                    (
+                        canonical["id"],
+                        duplicate_adjustment["account_id"],
+                        duplicate_adjustment["delta_minor"],
+                        duplicate_adjustment["applied_at"],
+                    ),
+                )
+                conn.execute(
+                    "UPDATE transactions SET status='VOIDED', duplicate_of=? WHERE id=?",
+                    (canonical["id"], duplicate["id"]),
+                )
+                result_status = "VOIDED"
+            else:
                 result = _void_transaction_in_connection(
                     conn,
                     duplicate["id"],
                     duplicate_of=canonical["id"],
                 )
-                if result["status"] != "VOIDED":
-                    continue
-                conn.execute(
-                    "UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",
-                    (canonical["id"], duplicate["id"]),
-                )
-                conn.execute(
-                    "UPDATE review_queue SET transaction_id=? WHERE transaction_id=?",
-                    (canonical["id"], duplicate["id"]),
-                )
-                assigned.add(str(duplicate["id"]))
-                repaired += 1
+                result_status = result["status"]
+
+            if result_status != "VOIDED":
+                return
+
+            conn.execute(
+                "UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",
+                (canonical["id"], duplicate["id"]),
+            )
+            conn.execute(
+                "UPDATE review_queue SET transaction_id=? WHERE transaction_id=?",
+                (canonical["id"], duplicate["id"]),
+            )
+            assigned.add(str(duplicate["id"]))
+            repaired += 1
 
         referenced_groups = {}
         for row in rows:
+            if is_card_bill_credit(row):
+                continue
             reference = normalize_reference(row["reference"])
             if reference:
                 referenced_groups.setdefault(reference, []).append(row)
 
         for group in referenced_groups.values():
-            if len(group) < 2:
-                continue
             remaining = [row for row in group if str(row["id"]) not in assigned]
 
             while remaining:
                 canonical = max(remaining, key=_duplicate_canonical_score)
-                same_side = [
+                duplicates = [
                     row for row in remaining
                     if str(row["id"]) != str(canonical["id"])
                     and _rows_are_duplicate(canonical, row)
+                    and not is_card_bill_credit(row)
                 ]
 
-                if not same_side:
+                if not duplicates:
                     remaining = [
                         row for row in remaining
                         if str(row["id"]) != str(canonical["id"])
                     ]
                     continue
 
-                repair_group(canonical, same_side)
-                consumed = {str(canonical["id"])} | {str(row["id"]) for row in same_side}
+                for duplicate in duplicates:
+                    repair_pair(canonical, duplicate)
+
+                consumed = {str(canonical["id"])} | {str(row["id"]) for row in duplicates}
                 remaining = [
                     row for row in remaining
                     if str(row["id"]) not in consumed
@@ -304,12 +370,16 @@ def repair_duplicate_transactions():
         for row in rows:
             if str(row["id"]) in assigned or normalize_reference(row["reference"]):
                 continue
+            if is_card_bill_credit(row):
+                continue
 
             candidates = []
             candidate_refs = set()
 
             for referenced in rows:
                 if str(referenced["id"]) == str(row["id"]) or str(referenced["id"]) in assigned:
+                    continue
+                if is_card_bill_credit(referenced):
                     continue
 
                 reference = normalize_reference(referenced["reference"])
@@ -324,7 +394,7 @@ def repair_duplicate_transactions():
                 continue
 
             canonical = max(candidates, key=_duplicate_canonical_score)
-            repair_group(canonical, [row])
+            repair_pair(canonical, row)
             assigned.add(str(canonical["id"]))
 
         return repaired
