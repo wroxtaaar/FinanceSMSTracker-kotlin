@@ -82,6 +82,210 @@ def is_provisional_row(row):
     )
 
 
+
+def _merchant_values_compatible(first, second):
+    a = str(first or "").strip().upper()
+    b = str(second or "").strip().upper()
+    if not a or not b or a == "-" or b == "-":
+        return True
+    return a == b or a in b or b in a
+
+
+def _rows_are_duplicate(first, second):
+    """Return True only for a same-side transaction represented more than once.
+
+    Exact normalized references are the strongest identity. When only one side
+    has a reference, allow a conservative fallback only when bank + account
+    last-4 + amount + direction + account type all agree within two minutes.
+    Opposite directions are intentionally never considered duplicates because
+    an internal transfer legitimately creates one debit and one credit with the
+    same UPI RRN.
+    """
+    if int(first["amount_minor"]) != int(second["amount_minor"]):
+        return False
+    if str(first["currency"]).strip().upper() != str(second["currency"]).strip().upper():
+        return False
+    if str(first["type"]).strip().upper() != str(second["type"]).strip().upper():
+        return False
+    if str(first["account_type"]).strip().upper() != str(second["account_type"]).strip().upper():
+        return False
+
+    first_bank = _normalize_account_bank(first["bank"])
+    second_bank = _normalize_account_bank(second["bank"])
+    if first_bank and second_bank and first_bank != second_bank:
+        return False
+
+    first_last4 = str(first["account_last4"] or "").strip()
+    second_last4 = str(second["account_last4"] or "").strip()
+    if first_last4 and second_last4 and first_last4 != second_last4:
+        return False
+
+    first_ref = normalize_reference(first["reference"])
+    second_ref = normalize_reference(second["reference"])
+
+    if first_ref and second_ref:
+        return first_ref == second_ref
+
+    # A missing reference is common on the fast/early notification path. Only
+    # merge it with a referenced row when the full same-side account identity
+    # is known and the event times are very close.
+    if bool(first_ref) == bool(second_ref):
+        return False
+    if not first_bank or not second_bank or first_bank != second_bank:
+        return False
+    if not first_last4 or not second_last4 or first_last4 != second_last4:
+        return False
+    if abs(int(first["timestamp"]) - int(second["timestamp"])) > 120_000:
+        return False
+    return _merchant_values_compatible(first["merchant_or_payee"], second["merchant_or_payee"])
+
+
+def _duplicate_canonical_score(row):
+    ref = bool(normalize_reference(row["reference"]))
+    bank_identity = bool(_normalize_account_bank(row["bank"])) and bool(str(row["account_last4"] or "").strip())
+    merchant = bool(str(row["merchant_or_payee"] or "").strip()) and str(row["merchant_or_payee"] or "").strip() != "-"
+    source = str(row["id"])
+    # Keep an authoritative non-Gmail row over a Gmail mirror/notification.
+    non_gmail = not source.startswith("gmail:")
+    non_notification = not source.startswith("notification:")
+    confidence = float(row["confidence"] or 0.0)
+    created_at = int(row["created_at"] or 0)
+    return (
+        1000 if ref else 0,
+        100 if non_gmail else 0,
+        50 if non_notification else 0,
+        30 if bank_identity else 0,
+        10 if merchant else 0,
+        confidence,
+        -created_at,
+        -int(row["id"]) if str(row["id"]).isdigit() else 0,
+    )
+
+
+def _void_transaction_in_connection(conn, transaction_id, duplicate_of=None):
+    tx = conn.execute(
+        "SELECT id,status,type,account_type,category,amount_minor,currency FROM transactions WHERE id=?",
+        (transaction_id,),
+    ).fetchone()
+    if not tx:
+        return {"status": "NOT_FOUND", "transactionId": transaction_id}
+    if tx["status"] == "VOIDED":
+        if duplicate_of:
+            conn.execute(
+                "UPDATE transactions SET duplicate_of=? WHERE id=?",
+                (duplicate_of, transaction_id),
+            )
+        return {"status": "ALREADY_VOIDED", "transactionId": transaction_id}
+
+    adjustment = conn.execute(
+        "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
+        (transaction_id,),
+    ).fetchone()
+
+    if adjustment:
+        conn.execute(
+            "UPDATE accounts SET balance_minor=balance_minor-?, updated_at=? WHERE id=?",
+            (adjustment["delta_minor"], now_ms(), adjustment["account_id"]),
+        )
+        conn.execute(
+            "DELETE FROM balance_adjustments WHERE transaction_id=?",
+            (transaction_id,),
+        )
+
+    if not str(tx["id"]).startswith("gmail:"):
+        delta = splitwise_delta(
+            tx["account_type"], tx["type"], tx["amount_minor"], tx["category"]
+        )
+        if delta:
+            conn.execute(
+                """UPDATE manual_splitwise_total
+                   SET amount_minor=amount_minor-?, updated_at=?
+                   WHERE currency=?""",
+                (delta, now_ms(), tx["currency"]),
+            )
+
+    conn.execute(
+        "UPDATE transactions SET status='VOIDED', duplicate_of=? WHERE id=?",
+        (duplicate_of, transaction_id),
+    )
+    return {
+        "status": "VOIDED",
+        "transactionId": transaction_id,
+        "reversedAdjustment": bool(adjustment),
+    }
+
+
+def repair_duplicate_transactions():
+    """Collapse safe same-side duplicate ledger rows without touching transfers.
+
+    Only exact-reference duplicates, or a very conservative referenced-vs-
+    unreferenced same-bank/same-account pair within two minutes, are merged.
+    Credit-card credits are intentionally left alone because their bill bucket
+    reversal needs historical bill-delta information not stored in the legacy
+    balance_adjustments table.
+    """
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT * FROM transactions
+               WHERE status='ACTIVE' AND duplicate_of IS NULL
+               ORDER BY created_at, id"""
+        ).fetchall()
+
+        parent = {str(row["id"]): str(row["id"]) for row in rows}
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for i, first in enumerate(rows):
+            if str(first["account_type"]).strip().upper() == "CREDIT_CARD" and str(first["type"]).strip().upper() == "CREDIT":
+                continue
+            for second in rows[i + 1:]:
+                if str(second["account_type"]).strip().upper() == "CREDIT_CARD" and str(second["type"]).strip().upper() == "CREDIT":
+                    continue
+                if _rows_are_duplicate(first, second):
+                    union(str(first["id"]), str(second["id"]))
+
+        groups = {}
+        for row in rows:
+            key = find(str(row["id"]))
+            groups.setdefault(key, []).append(row)
+
+        repaired = 0
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            canonical = max(group, key=_duplicate_canonical_score)
+            for duplicate in group:
+                if str(duplicate["id"]) == str(canonical["id"]):
+                    continue
+                result = _void_transaction_in_connection(
+                    conn,
+                    duplicate["id"],
+                    duplicate_of=canonical["id"],
+                )
+                if result["status"] != "VOIDED":
+                    continue
+                conn.execute(
+                    "UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",
+                    (canonical["id"], duplicate["id"]),
+                )
+                conn.execute(
+                    "UPDATE review_queue SET transaction_id=? WHERE transaction_id=?",
+                    (canonical["id"], duplicate["id"]),
+                )
+                repaired += 1
+
+        return repaired
+
+
 def sync_transaction(t, apply_balance=True):
     with connection() as conn:
         before=conn.execute(
