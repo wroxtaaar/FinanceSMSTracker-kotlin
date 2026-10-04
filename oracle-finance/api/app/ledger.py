@@ -233,11 +233,10 @@ def _void_transaction_in_connection(conn, transaction_id, duplicate_of=None):
 def repair_duplicate_transactions():
     """Collapse safe same-side duplicate ledger rows without touching transfers.
 
-    Only exact-reference duplicates, or a very conservative referenced-vs-
-    unreferenced same-bank/same-account pair within two minutes, are merged.
-    Credit-card credits are intentionally left alone because their bill bucket
-    reversal needs historical bill-delta information not stored in the legacy
-    balance_adjustments table.
+    Exact-reference rows are grouped first. Then an unreferenced row may merge
+    into a referenced same-side row only when there is exactly one distinct
+    reference candidate. This avoids transitive chains where one incomplete
+    row could accidentally bridge two different real transactions.
     """
     with connection() as conn:
         rows = conn.execute(
@@ -246,41 +245,12 @@ def repair_duplicate_transactions():
                ORDER BY created_at, id"""
         ).fetchall()
 
-        parent = {str(row["id"]): str(row["id"]) for row in rows}
-
-        def find(x):
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        def union(a, b):
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[rb] = ra
-
-        for i, first in enumerate(rows):
-            if str(first["account_type"]).strip().upper() == "CREDIT_CARD" and str(first["type"]).strip().upper() == "CREDIT":
-                continue
-            for second in rows[i + 1:]:
-                if str(second["account_type"]).strip().upper() == "CREDIT_CARD" and str(second["type"]).strip().upper() == "CREDIT":
-                    continue
-                if _rows_are_duplicate(first, second):
-                    union(str(first["id"]), str(second["id"]))
-
-        groups = {}
-        for row in rows:
-            key = find(str(row["id"]))
-            groups.setdefault(key, []).append(row)
-
+        assigned = set()
         repaired = 0
-        for group in groups.values():
-            if len(group) < 2:
-                continue
-            canonical = max(group, key=_duplicate_canonical_score)
-            for duplicate in group:
-                if str(duplicate["id"]) == str(canonical["id"]):
-                    continue
+
+        def repair_group(canonical, duplicates):
+            nonlocal repaired
+            for duplicate in duplicates:
                 result = _void_transaction_in_connection(
                     conn,
                     duplicate["id"],
@@ -296,153 +266,85 @@ def repair_duplicate_transactions():
                     "UPDATE review_queue SET transaction_id=? WHERE transaction_id=?",
                     (canonical["id"], duplicate["id"]),
                 )
+                assigned.add(str(duplicate["id"]))
                 repaired += 1
 
+        # First collapse exact-reference same-side duplicates. Opposite sides
+        # of an internal transfer do not pass _rows_are_duplicate because type
+        # and account identity are mandatory.
+        referenced_groups = {}
+        for row in rows:
+            reference = normalize_reference(row["reference"])
+            if reference:
+                referenced_groups.setdefault(reference, []).append(row)
+
+        for group in referenced_groups.values():
+            if len(group) < 2:
+                continue
+
+            remaining = []
+            for row in group:
+                if str(row["id"]) not in assigned:
+                    remaining.append(row)
+
+            while remaining:
+                canonical = max(remaining, key=_duplicate_canonical_score)
+                same_side = [
+                    row
+                    for row in remaining
+                    if str(row["id"]) != str(canonical["id"])
+                    and _rows_are_duplicate(canonical, row)
+                ]
+                if not same_side:
+                    remaining = [
+                        row for row in remaining
+                        if str(row["id"]) != str(canonical["id"])
+                    ]
+                    continue
+
+                repair_group(canonical, same_side)
+                consumed = {str(canonical["id"])} | {str(row["id"]) for row in same_side}
+                remaining = [
+                    row for row in remaining
+                    if str(row["id"]) not in consumed
+                ]
+                assigned.add(str(canonical["id"]))
+
+        # Then attach an unreferenced row to exactly one referenced candidate.
+        # This is the path needed when one source supplies the RRN/account
+        # identity and another source omits it.
+        for row in rows:
+            if str(row["id"]) in assigned:
+                continue
+            if normalize_reference(row["reference"]):
+                continue
+
+            candidates = []
+            candidate_refs = set()
+
+            for referenced in rows:
+                if str(referenced["id"]) == str(row["id"]):
+                    continue
+                if str(referenced["id"]) in assigned:
+                    continue
+
+                reference = normalize_reference(referenced["reference"])
+                if not reference:
+                    continue
+                if _rows_are_duplicate(row, referenced):
+                    candidates.append(referenced)
+                    candidate_refs.add(reference)
+
+            # Do not let an incomplete row bridge two different referenced
+            # transactions, even when amount/type/account metadata are similar.
+            if len(candidate_refs) != 1:
+                continue
+
+            canonical = max(candidates, key=_duplicate_canonical_score)
+            repair_group(canonical, [row])
+            assigned.add(str(canonical["id"]))
+
         return repaired
-
-
-def sync_transaction(t, apply_balance=True):
-    with connection() as conn:
-        before=conn.execute(
-            """SELECT * FROM transactions WHERE id=?""",
-            (t.id,)
-        ).fetchone()
-        created_at=now_ms()
-        provisional = is_provisional_unresolved_transaction(t)
-        conn.execute("""INSERT OR IGNORE INTO transactions
-        (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,normalize_reference(t.reference),
-         t.timestamp,t.category,t.confidence,None,"ACTIVE",created_at))
-
-        if (
-            before is None
-            and apply_balance
-            and not str(t.id).startswith("gmail:")
-            and not provisional
-        ):
-            apply_transaction_to_account(conn, t, created_at, transaction_created_at=created_at)
-
-        if before is not None and before["status"] == "ACTIVE":
-            # An Android notification can be synced before Gmail/IMAP clarifies
-            # it. When the same canonical ID is later enriched, update the
-            # existing ledger row and repair any balance/Splitwise contribution
-            # that was based on the provisional direction/account identity.
-            old_delta = 0 if is_provisional_row(before) else splitwise_delta(
-                before["account_type"], before["type"], before["amount_minor"], before["category"]
-            )
-            new_delta = splitwise_delta_for_transaction(t)
-
-            balance_adjustment = conn.execute(
-                "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
-                (t.id,),
-            ).fetchone()
-
-            materially_changed = (
-                int(before["amount_minor"]) != int(t.amountMinor)
-                or str(before["currency"]) != str(t.currency)
-                or str(before["type"]) != str(t.type)
-                or str(before["account_type"]) != str(t.accountType)
-                or str(before["bank"] or "").strip().upper() != str(t.bank or "").strip().upper()
-                or str(before["account_last4"] or "").strip() != str(t.accountLast4 or "").strip()
-            )
-
-            if materially_changed:
-                if balance_adjustment is not None:
-                    conn.execute(
-                        "UPDATE accounts SET balance_minor=balance_minor-?, updated_at=? WHERE id=?",
-                        (int(balance_adjustment["delta_minor"]), created_at, balance_adjustment["account_id"]),
-                    )
-                    conn.execute(
-                        "DELETE FROM balance_adjustments WHERE transaction_id=?",
-                        (t.id,),
-                    )
-
-                conn.execute(
-                    """UPDATE transactions SET
-                       amount_minor=?, currency=?, type=?, payment_method=?,
-                       account_type=?, bank=?, merchant_or_payee=?,
-                       account_last4=?, reference=?, timestamp=?, confidence=?,
-                       status='ACTIVE'
-                       WHERE id=?""",
-                    (
-                        t.amountMinor, t.currency, t.type, t.paymentMethod,
-                        t.accountType, t.bank, t.merchantOrPayee,
-                        t.accountLast4, normalize_reference(t.reference),
-                        t.timestamp, t.confidence, t.id,
-                    ),
-                )
-
-                if apply_balance and not str(t.id).startswith("gmail:"):
-                    apply_transaction_to_account(
-                        conn, t, created_at, transaction_created_at=created_at
-                    )
-
-                if old_delta != new_delta and not str(t.id).startswith("gmail:"):
-                    splitwise_change = new_delta - old_delta
-                    conn.execute(
-                        """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-                           VALUES(?,?,?)
-                           ON CONFLICT(currency) DO UPDATE SET
-                               amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                               updated_at=excluded.updated_at""",
-                        (t.currency, splitwise_change, created_at),
-                    )
-
-        # Splitwise is a signed ledger component. Bank debits increase the
-        # amount owed to the user, bank credits decrease it, card debits
-        # decrease it, and card credits increase it. Gmail rows are never
-        # allowed to create a Splitwise contribution until reconciliation makes
-        # the canonical non-Gmail transaction authoritative.
-        if (
-            before is None
-            and apply_balance
-            and not str(t.id).startswith("gmail:")
-            and not provisional
-        ):
-            delta = splitwise_delta_for_transaction(t)
-            if delta:
-                conn.execute(
-                    """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-                       VALUES(?,?,?)
-                       ON CONFLICT(currency) DO UPDATE SET
-                           amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                           updated_at=excluded.updated_at""",
-                    (t.currency, delta, created_at),
-                )
-
-        # Category edits are sent as the same transaction ID. They must update
-        # the ledger metadata and Splitwise contribution without reapplying the
-        # bank/card balance. OTHER is the explicit Splitwise opt-out; every
-        # other debit category contributes its full amount.
-        if (
-            before is not None
-            and before["status"] == "ACTIVE"
-            and not str(t.id).startswith("gmail:")
-            and str(before["category"] or "").strip().upper()
-                != str(t.category or "").strip().upper()
-        ):
-            old_delta = 0 if is_provisional_row(before) else splitwise_delta(
-                before["account_type"], before["type"], before["amount_minor"], before["category"]
-            )
-            new_delta = splitwise_delta_for_transaction(t)
-            conn.execute(
-                "UPDATE transactions SET category=? WHERE id=?",
-                (t.category, t.id),
-            )
-
-            delta = new_delta - old_delta
-            if delta:
-                conn.execute(
-                    """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-                       VALUES(?,?,?)
-                       ON CONFLICT(currency) DO UPDATE SET
-                           amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                           updated_at=excluded.updated_at""",
-                    (t.currency, delta, created_at),
-                )
-
-        return before is None
 
 def _normalize_account_bank(value):
     raw=(value or "").strip().upper()
