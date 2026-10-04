@@ -13,10 +13,15 @@ def reconcile_transaction(transaction_id):
     return {"status":"OK","matchedEvidence":matched}
 
 def reconcile_all():
+    # Always collapse safe same-side source duplicates before pairing internal
+    # transfers. Otherwise an SMS/Gmail duplicate can look like a second
+    # transfer side and create misleading transfer records.
+    from .ledger import repair_duplicate_transactions
+    repaired = repair_duplicate_transactions()
     transfers=match_internal_transfers()
     with connection() as conn:
         ids=[r["id"] for r in conn.execute("SELECT id FROM transactions").fetchall()]
     reviews=[]
     for tx_id in ids:
         if reconcile_transaction(tx_id)["status"]=="REVIEW": reviews.append(tx_id)
-    return {"internalTransfers":transfers,"reviewTransactionIds":reviews}
+    return {"internalTransfers":transfers,"reviewTransactionIds":reviews,"repairedTransactions":repaired}
