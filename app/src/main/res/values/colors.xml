@@ -2,4 +2,17 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="screen_background">#FF0F0D13</color>
+    <color name="surface_primary">#FF17151D</color>
+    <color name="surface_soft">#FF211E29</color>
+    <color name="surface_elevated">#FF2A2634</color>
+    <color name="primary">#FFD0BCFF</color>
+    <color name="primary_container">#FF4F378B</color>
+    <color name="on_primary">#FF381E72</color>
+    <color name="on_surface">#FFE8E1EC</color>
+    <color name="on_surface_muted">#FFB9B1BF</color>
+    <color name="positive">#FF7FD694</color>
+    <color name="negative">#FFFF8989</color>
+    <color name="chip_background">#FF332E3E</color>
+    <color name="divider">#FF3B3645</color>
 </resources>
