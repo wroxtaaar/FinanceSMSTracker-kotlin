@@ -1158,8 +1158,89 @@ def add_review(kind,reason,transaction_id=None,evidence_id=None):
                      (review_id,kind,transaction_id,evidence_id,reason,now_ms()))
     return review_id
 
+def _neutralize_internal_transfer_splitwise(conn, transfer_id, debit_id, credit_id):
+    """Make a matched internal transfer pair invisible to Splitwise.
+
+    Moving money between two of the user's own bank accounts changes bank
+    balances but is not an expense or receivable. The operation is persisted
+    with an idempotency marker because the pair may be encountered repeatedly
+    during reconciliation.
+    """
+    marker = conn.execute(
+        "SELECT splitwise_neutralized FROM internal_transfers WHERE id=?",
+        (transfer_id,),
+    ).fetchone()
+    if marker is None or int(marker["splitwise_neutralized"] or 0) == 1:
+        return False
+
+    for transaction_id in (debit_id, credit_id):
+        tx = conn.execute(
+            "SELECT * FROM transactions WHERE id=?",
+            (transaction_id,),
+        ).fetchone()
+        if not tx or tx["status"] != "ACTIVE" or tx["duplicate_of"] is not None:
+            return False
+
+        adjustment = conn.execute(
+            "SELECT currency,delta_minor FROM splitwise_adjustments WHERE transaction_id=?",
+            (transaction_id,),
+        ).fetchone()
+
+        if adjustment is not None:
+            # Gmail-derived rows keep an exact Splitwise adjustment record.
+            delta = int(adjustment["delta_minor"])
+            currency = adjustment["currency"]
+            conn.execute(
+                """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
+                   VALUES(?,?,?)
+                   ON CONFLICT(currency) DO UPDATE SET
+                       amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
+                       updated_at=excluded.updated_at""",
+                (currency, -delta, now_ms()),
+            )
+            conn.execute(
+                "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
+                (transaction_id,),
+            )
+        elif not str(transaction_id).startswith("gmail:"):
+            # Local/SMS rows use the signed Splitwise delta directly.
+            delta = splitwise_delta(
+                tx["account_type"], tx["type"], tx["amount_minor"], tx["category"]
+            )
+            if delta:
+                conn.execute(
+                    """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
+                       VALUES(?,?,?)
+                       ON CONFLICT(currency) DO UPDATE SET
+                           amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
+                           updated_at=excluded.updated_at""",
+                    (tx["currency"], -delta, now_ms()),
+                )
+
+    conn.execute(
+        "UPDATE internal_transfers SET splitwise_neutralized=1 WHERE id=?",
+        (transfer_id,),
+    )
+    return True
+
+
 def match_internal_transfers():
     with connection() as conn:
+        existing_unneutralized = conn.execute(
+            """SELECT id,debit_transaction_id,credit_transaction_id
+               FROM internal_transfers
+               WHERE status='MATCHED'
+                 AND COALESCE(splitwise_neutralized,0)=0"""
+        ).fetchall()
+
+        for transfer in existing_unneutralized:
+            _neutralize_internal_transfer_splitwise(
+                conn,
+                transfer["id"],
+                transfer["debit_transaction_id"],
+                transfer["credit_transaction_id"],
+            )
+
         txs=conn.execute(
             """SELECT * FROM transactions
                WHERE account_type='BANK_ACCOUNT'
@@ -1184,6 +1265,12 @@ def match_internal_transfers():
                 (id,debit_transaction_id,credit_transaction_id,currency,amount_minor,status,reason,created_at)
                 VALUES(?,?,?,?,?,'MATCHED',?,?)""",
                 (transfer_id,debit["id"],credit["id"],debit["currency"],debit["amount_minor"],reason,now_ms()))
+                _neutralize_internal_transfer_splitwise(
+                    conn,
+                    transfer_id,
+                    debit["id"],
+                    credit["id"],
+                )
                 matches.append({"id":transfer_id,"debitTransactionId":debit["id"],"creditTransactionId":credit["id"],
                                 "amountMinor":debit["amount_minor"],"currency":debit["currency"],"reason":reason})
         return matches
