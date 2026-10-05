@@ -1824,3 +1824,66 @@ def test_self_transfer_sequence_with_nonzero_state_repairs_missing_leg_and_stays
     assert adjustment["delta_minor"] == -300
     assert get_manual_splitwise_total("INR") == 0
 
+
+
+
+def test_splitwise_is_rebuilt_from_final_bank_and_card_ledger_movements():
+    from app.ledger import (
+        get_manual_splitwise_total,
+        rebuild_manual_splitwise_total,
+        set_manual_splitwise_total,
+        sync_transaction,
+    )
+
+    class T:
+        def __init__(self, id, typ, account_type, bank, last4, amount, category="GROCERIES"):
+            self.id = id
+            self.amountMinor = amount
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = account_type
+            self.bank = bank
+            self.merchantOrPayee = "TEST"
+            self.accountLast4 = last4
+            self.reference = None
+            self.timestamp = 2_100_000_000_000 + amount
+            self.category = category
+            self.confidence = 1.0
+
+    set_balance("sw-axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "3370", 0)
+    set_balance("sw-hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "9591", 0)
+    set_balance("sw-card", "Axis Card", "INR", "CREDIT_CARD", "AXIS", "9206", 0)
+
+    # Bank movement is negated into Splitwise:
+    #   -100 bank => +100 Splitwise
+    #    +40 bank => -40 Splitwise
+    sync_transaction(T("sw-bank-debit", "DEBIT", "BANK_ACCOUNT", "AXIS", "3370", 10000))
+    sync_transaction(T("sw-bank-credit", "CREDIT", "BANK_ACCOUNT", "HDFC", "9591", 4000))
+
+    # Credit-card outstanding movement has the same sign in Splitwise:
+    #   +70 outstanding => +70 Splitwise
+    #   -20 outstanding => -20 Splitwise
+    sync_transaction(T("sw-card-spend", "DEBIT", "CREDIT_CARD", "AXIS", "9206", 7000))
+    sync_transaction(T("sw-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "9206", 2000))
+
+    # Category does not alter the ledger-derived Splitwise amount.
+    sync_transaction(T("sw-other", "DEBIT", "BANK_ACCOUNT", "AXIS", "3370", 500, "OTHER"))
+
+    # A bank -> card payment is a +20 bank effect in Splitwise and a -20
+    # card-outstanding effect, so it cancels completely.
+    sync_transaction(T("sw-card-payment-bank", "DEBIT", "BANK_ACCOUNT", "AXIS", "3370", 2000))
+    sync_transaction(T("sw-card-payment-card", "CREDIT", "CREDIT_CARD", "AXIS", "9206", 2000))
+
+    rebuild_manual_splitwise_total()
+
+    assert get_manual_splitwise_total("INR") == 11500
+
+    # Rebuilding again must produce exactly the same value.
+    rebuild_manual_splitwise_total()
+    assert get_manual_splitwise_total("INR") == 11500
+
+    # Even a stale/corrupt materialized value is repaired from the ledger.
+    set_manual_splitwise_total("INR", 999999)
+    rebuild_manual_splitwise_total()
+    assert get_manual_splitwise_total("INR") == 11500
