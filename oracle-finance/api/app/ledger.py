@@ -1537,6 +1537,63 @@ def _resolve_transaction_row(conn, transaction_id):
     return row
 
 
+def _ensure_internal_transfer_balance_adjustment(conn, row):
+    """Repair a missing bank/card balance effect before classifying a transfer.
+
+    A transaction can arrive before its account exists, or a previous sync can
+    persist the transaction while the balance adjustment is temporarily absent.
+    Once both legs are recognized as an own-account transfer, the transfer must
+    still have both real bank-balance effects. Never replay a transaction that
+    was already covered by a manual reconciliation.
+    """
+    transaction_id = str(row["id"])
+    if transaction_id.startswith("gmail:"):
+        return False
+    if row["status"] != "ACTIVE" or row["duplicate_of"] is not None:
+        return False
+
+    existing = conn.execute(
+        "SELECT 1 FROM balance_adjustments WHERE transaction_id=?",
+        (transaction_id,),
+    ).fetchone()
+    if existing is not None:
+        return False
+
+    reconciled_at = int(row["balance_reconciled_at"] or 0) if "balance_reconciled_at" in row.keys() else 0
+    created_at = int(row["created_at"] or 0)
+    # If a user manually reconciled the account after this transaction was
+    # created, that transaction is already represented by the verified balance.
+    if reconciled_at and created_at <= reconciled_at:
+        return False
+
+    from types import SimpleNamespace
+    transaction = SimpleNamespace(
+        id=transaction_id,
+        amountMinor=int(row["amount_minor"]),
+        currency=row["currency"],
+        type=row["type"],
+        paymentMethod=row["payment_method"],
+        accountType=row["account_type"],
+        bank=row["bank"],
+        merchantOrPayee=row["merchant_or_payee"],
+        accountLast4=row["account_last4"],
+        reference=row["reference"],
+        timestamp=int(row["timestamp"]),
+        category=row["category"],
+        confidence=float(row["confidence"] or 0.0),
+    )
+    apply_transaction_to_account(
+        conn,
+        transaction,
+        now_ms(),
+        transaction_created_at=created_at,
+    )
+    return conn.execute(
+        "SELECT 1 FROM balance_adjustments WHERE transaction_id=?",
+        (transaction_id,),
+    ).fetchone() is not None
+
+
 def _record_internal_transfer(conn, debit, credit, reason):
     transfer_id = f"transfer:{debit['id']}:{credit['id']}"
     existing = conn.execute(
@@ -1628,6 +1685,12 @@ def match_internal_transfers():
         ).fetchall()
 
         for transfer in existing_unneutralized:
+            debit_row = _resolve_transaction_row(conn, transfer["debit_transaction_id"])
+            credit_row = _resolve_transaction_row(conn, transfer["credit_transaction_id"])
+            if debit_row:
+                _ensure_internal_transfer_balance_adjustment(conn, debit_row)
+            if credit_row:
+                _ensure_internal_transfer_balance_adjustment(conn, credit_row)
             _neutralize_internal_transfer_splitwise(
                 conn,
                 transfer["id"],
@@ -1665,6 +1728,8 @@ def match_internal_transfers():
                 if exists:
                     continue
 
+                _ensure_internal_transfer_balance_adjustment(conn, debit)
+                _ensure_internal_transfer_balance_adjustment(conn, credit)
                 matches.append(_record_internal_transfer(conn, debit, credit, reason))
 
         return matches
