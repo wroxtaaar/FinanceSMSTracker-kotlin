@@ -30,6 +30,7 @@ repair_missing_balance_adjustments()
 # contribution without requiring a new bank SMS.
 repair_duplicate_transactions()
 match_internal_transfers()
+rebuild_manual_splitwise_total()
 
 class SyncTransaction(BaseModel):
     id:str; amountMinor:int; currency:str; type:str; paymentMethod:str; accountType:str
@@ -148,6 +149,12 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
     for t in payload.transactions:
         row=next((x for x in list_transactions(1000) if x["id"]==t.id),None)
         if row and not row.get("duplicate_of"): create_for_transaction(row)
+
+    # Rebuild the materialized Splitwise total from the canonical ledger after
+    # all duplicate/transfer reconciliation. This makes repeated app-open
+    # syncs idempotent and repairs totals left behind by older incremental
+    # accounting bugs.
+    rebuild_manual_splitwise_total()
     return {"acceptedTransactions":new_t,"acceptedEvidence":new_e,
             "duplicateTransactions":len(payload.transactions)-new_t,
             "duplicateEvidence":len(payload.evidence)-new_e,
@@ -233,7 +240,10 @@ def transfers(x_sync_token:str=Header(default="")):
 
 @app.post("/api/v1/reconcile")
 def reconcile(x_sync_token:str=Header(default="")):
-    require_token(x_sync_token); return reconcile_all()
+    require_token(x_sync_token)
+    result = reconcile_all()
+    rebuild_manual_splitwise_total()
+    return result
 
 @app.post("/api/v1/splitwise/rules")
 def save_rule(payload:RuleRequest,x_sync_token:str=Header(default="")):
@@ -280,7 +290,10 @@ def gmail_sync_now(
     require_token(x_sync_token)
     if os.getenv("GMAIL_ENABLED", "false").lower() != "true":
         raise HTTPException(403, "Gmail is disabled")
-    try: return gmail_sync(query, historical=historical)
+    try:
+        result = gmail_sync(query, historical=historical)
+        rebuild_manual_splitwise_total()
+        return result
     except Exception as exc: raise HTTPException(400,str(exc))
 
 @app.post("/api/v1/splitwise/sync")
