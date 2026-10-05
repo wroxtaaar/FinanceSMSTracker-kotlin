@@ -1,6 +1,7 @@
 package com.example.financesmstracker.integration
 
 import android.content.Context
+import android.util.Log
 import com.example.financesmstracker.data.FinanceDatabaseHelper
 import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.data.TransactionRepository
@@ -161,9 +162,17 @@ object FinanceSyncBridge {
             )
         )
 
-        return candidates
+        val relevantCandidates = candidates
             .filter { it.debit.id == transaction.id || it.credit.id == transaction.id }
-            .map { candidate ->
+
+        relevantCandidates.forEach { candidate ->
+            Log.d(
+                "FinanceSource",
+                "INTERNAL_TRANSFER_CANDIDATE -> debitId=${candidate.debit.id}, creditId=${candidate.credit.id}, amountMinor=${candidate.debit.amountPaise}, timeDiffMs=${candidate.timeDifferenceMillis}"
+            )
+        }
+
+        return relevantCandidates.map { candidate ->
                 val debitReference = TransactionReferenceNormalizer.normalize(candidate.debit.refNumber)
                 val creditReference = TransactionReferenceNormalizer.normalize(candidate.credit.refNumber)
                 val matchType =
