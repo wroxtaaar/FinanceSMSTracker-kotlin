@@ -142,15 +142,15 @@ def _account_last4(combined):
 
 
 def _reference(combined):
-    # Do not treat "Transaction alert/1" or similar subject/footer wording as
-    # a reference. A transaction reference must have an explicit Ref/Reference,
-    # UTR, Transaction ID, or Transaction No. label.
+    """Extract the stable transaction identity from any bank-email format."""
     normalized = _plain_text(combined)
     patterns = (
-        r"(?i)\b(?:Ref(?:erence)?|UTR)\s*[:#-]?\s*"
+        r"(?i)\b(?:Ref(?:erence)?|UTR|RRN)\s*(?:No\.?|Number)?\s*[:#-]?\s*"
         r"([A-Z0-9][A-Z0-9/-]*\d[A-Z0-9/-]*)",
         r"(?i)\bTransaction\s+(?:ID|No\.?)\s*[:#-]?\s*"
         r"([A-Z0-9][A-Z0-9/-]*\d[A-Z0-9/-]*)",
+        r"(?i)\bUPI\s+(?:transaction\s+)?(?:reference\s+)?(?:No\.?|Number)?\s*[:#-]?\s*"
+        r"([0-9]{8,})",
     )
     token = None
     for pattern in patterns:
@@ -159,8 +159,6 @@ def _reference(combined):
             token = match.group(1)
             break
 
-    # Axis alerts often expose the transaction reference as "Transaction
-    # Info" rather than "Ref"/"UTR".
     if not token:
         # Axis account alerts put the RRN inside Transaction Info:
         # UPI/P2A/<RRN>/<counterparty>/...
@@ -181,10 +179,7 @@ def _reference(combined):
     if not token:
         return None
 
-    # Axis account alerts wrap the RRN inside Transaction Info:
-    # UPI/P2A/<RRN>/<counterparty>/... . Store only the stable RRN so it
-    # compares directly with HDFC/SMS representations of the same transfer.
-    axis_match = re.match(r"(?i)^UPI/[^/\\s]+/([^/\\s]+)", token)
+    axis_match = re.match(r"(?i)^UPI/[^/\s]+/([^/\s]+)", token)
     if axis_match:
         token = axis_match.group(1)
 
