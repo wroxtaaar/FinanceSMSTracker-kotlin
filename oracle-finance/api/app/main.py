@@ -29,6 +29,14 @@ class SyncTransaction(BaseModel):
     bank:Optional[str]=None; merchantOrPayee:Optional[str]=None; accountLast4:Optional[str]=None
     reference:Optional[str]=None; timestamp:int; category:str; confidence:float
 
+class SyncInternalTransferCandidate(BaseModel):
+    debitTransactionId:str
+    creditTransactionId:str
+    amountMinor:int
+    currency:str="INR"
+    timeDifferenceMillis:int=0
+    matchType:str="AMOUNT_TIME"
+
 class SyncEvidence(BaseModel):
     id:str; sourceType:str; sourceId:str; status:str; observedAt:int
     transactionId:Optional[str]=None; matchedTransactionId:Optional[str]=None
@@ -49,6 +57,7 @@ class SyncCardBill(BaseModel):
 
 class SyncRequest(BaseModel):
     version:int=Field(ge=1); transactions:list[SyncTransaction]=[]; evidence:list[SyncEvidence]=[]
+    internalTransferCandidates:list[SyncInternalTransferCandidate]=[]
     voidedTransactionIds:list[str]=[]
     cardBills:list[SyncCardBill]=[]
 
@@ -102,18 +111,42 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
             voided += 1
     for t in payload.transactions:
         reconcile_duplicate_transaction(t.id)
-    # Collapse safe same-side duplicates before downstream Splitwise/transfer
+    # Collapse safe same-side duplicates before downstream transfer/Splitwise
     # processing, so a duplicate can never create a second expense or transfer.
     repair_duplicate_transactions()
+
+    # Android may already have identified the two own-account legs locally.
+    # Oracle confirms the pair against its canonical ledger before Splitwise
+    # expenses are created. This also makes a late-arriving second leg able to
+    # retroactively neutralize the first leg.
+    candidate_results = apply_internal_transfer_candidates([
+        {
+            "debitTransactionId": c.debitTransactionId,
+            "creditTransactionId": c.creditTransactionId,
+            "amountMinor": c.amountMinor,
+            "currency": c.currency,
+            "timeDifferenceMillis": c.timeDifferenceMillis,
+            "matchType": c.matchType,
+        }
+        for c in payload.internalTransferCandidates
+    ])
+
+    # The server-side matcher remains authoritative for candidates discovered
+    # without Android assistance (for example Gmail-only reconciliation).
+    reconcile_all()
+
+    # Splitwise expense creation happens only after internal transfers have
+    # been classified, so an own-account debit can never create an expense
+    # before its matching credit is recognized.
     for t in payload.transactions:
         row=next((x for x in list_transactions(1000) if x["id"]==t.id),None)
         if row and not row.get("duplicate_of"): create_for_transaction(row)
-    reconcile_all()
     return {"acceptedTransactions":new_t,"acceptedEvidence":new_e,
             "duplicateTransactions":len(payload.transactions)-new_t,
             "duplicateEvidence":len(payload.evidence)-new_e,
             "voidedTransactions":voided,
             "cardBillResults":bill_results,
+            "internalTransferCandidates":candidate_results,
             "serverTime":int(datetime.now(timezone.utc).timestamp()*1000)}
 
 @app.get("/api/v1/sheets/snapshot")
