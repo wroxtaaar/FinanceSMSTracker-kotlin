@@ -23,7 +23,16 @@ def splitwise_delta(account_type, transaction_type, amount_minor, category):
     Bank accounts move opposite to Splitwise; credit cards move in the same
     direction. OTHER remains the explicit Splitwise opt-out.
     """
-    if str(category or "").strip().upper() == "OTHER":
+    normalized_category = str(category or "").strip().upper()
+    if normalized_category in {"OTHER", "TRANSFER", "REFUND", "SALARY"}:
+        return 0
+
+    # Bank credits are income/receipts, not amounts owed to the user through
+    # Splitwise. They must not make the receivable negative. Own-account
+    # transfers are handled separately and also never contribute here.
+    account_type = str(account_type or "").strip().upper()
+    transaction_type = str(transaction_type or "").strip().upper()
+    if account_type == "BANK_ACCOUNT" and transaction_type == "CREDIT":
         return 0
 
     amount = int(amount_minor)
