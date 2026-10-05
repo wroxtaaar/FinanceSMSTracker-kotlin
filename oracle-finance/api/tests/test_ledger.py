@@ -1903,3 +1903,38 @@ def test_splitwise_total_rebuild_is_idempotent_after_transfer_and_drift():
     assert rebuild_manual_splitwise_total("INR") == 900
     assert get_manual_splitwise_total("INR") == 900
 
+def test_splitwise_rebuild_removes_legacy_bank_credit_contributions():
+    from app.ledger import get_manual_splitwise_total, rebuild_manual_splitwise_total, sync_transaction
+
+    class T:
+        id = "legacy-bank-credit"
+        amountMinor = 4199147
+        currency = "INR"
+        type = "CREDIT"
+        paymentMethod = "UPI"
+        accountType = "BANK_ACCOUNT"
+        bank = "HDFC"
+        merchantOrPayee = "HDFC Bank"
+        accountLast4 = "9591"
+        reference = "LEGACY-CREDIT"
+        timestamp = 2_200_000_000_000
+        category = "GROCERIES"
+        confidence = 1.0
+
+    sync_transaction(T())
+
+    # Simulate the old incremental implementation having already recorded the
+    # bank credit as a negative Splitwise contribution.
+    with connection() as conn:
+        conn.execute(
+            """UPDATE manual_splitwise_total
+               SET amount_minor=-4199147
+               WHERE currency='INR'"""
+        )
+
+    assert get_manual_splitwise_total("INR") == -4199147
+
+    # The current rules treat bank income/credits as zero Splitwise impact.
+    assert rebuild_manual_splitwise_total("INR") == 0
+    assert get_manual_splitwise_total("INR") == 0
+
