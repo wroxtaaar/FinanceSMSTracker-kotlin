@@ -538,64 +538,11 @@ class GmailNotificationListenerService : NotificationListenerService() {
     }
 
     private fun triggerBackgroundGmailSync() {
-        val now = SystemClock.elapsedRealtime()
-        val lastTriggered = lastGmailSyncTriggerAt.get()
-        if (now - lastTriggered < GMAIL_NOTIFICATION_DEBOUNCE_MS) {
-            Log.d(TAG, "Ignoring duplicate Gmail bank notification trigger within debounce window")
-            return
-        }
-
-        if (!gmailSyncInFlight.compareAndSet(false, true)) {
-            Log.d(TAG, "Gmail notification sync already in progress")
-            return
-        }
-
-        lastGmailSyncTriggerAt.set(now)
-        Log.d(TAG, "Gmail bank notification detected -> triggering background Oracle Gmail sync")
-
-        gmailSyncExecutor.execute {
-            try {
-                val result = FinanceSyncClient(applicationContext).triggerGmailSync()
-                result.onSuccess { sync ->
-                    Log.d(
-                        TAG,
-                        "Background Gmail clarification -> scanned=" + sync.messagesScanned +
-                            ", parsed=" + sync.parsedTransactions +
-                            ", duplicates=" + sync.duplicateTransactions +
-                            ", reviews=" + sync.reviewCount
-                    )
-
-                    // Pull the clarified Gmail rows immediately so the local
-                    // notification transaction is enriched even when the app
-                    // UI is not currently open.
-                    FinanceSyncClient(applicationContext).fetchGmailTransactions()
-                        .onSuccess { transactions ->
-                            val dbHelper = FinanceDatabaseHelper(applicationContext)
-                            val repository = TransactionRepository(dbHelper, applicationContext)
-                            try {
-                                transactions.forEach { remote ->
-                                    // This is a read-only mirror hydration pass.
-                                    // Never push the resolved local row back to
-                                    // Oracle from here: doing so can re-submit
-                                    // metadata for an existing transaction every
-                                    // time the notification listener reconnects.
-                                    repository.upsertOracleGmailTransaction(remote)
-                                }
-                            } finally {
-                                dbHelper.close()
-                            }
-                        }
-                        .onFailure { error ->
-                            Log.w(TAG, "Could not pull Gmail clarification rows: " + error.message, error)
-                        }
-                }.onFailure { error ->
-                    Log.w(TAG, "Background Gmail clarification failed: " + error.message, error)
-                }
-            } catch (error: Exception) {
-                Log.e(TAG, "Background Gmail clarification crashed", error)
-            } finally {
-                gmailSyncInFlight.set(false)
-            }
-        }
+        // Gmail sync is intentionally disabled during SMS/notification testing.
+        // Keep notification parsing/reconciliation active, but never contact the
+        // Oracle Gmail sync endpoint from the notification listener.
+        Log.d(TAG, "Gmail background sync disabled; notification processing continues")
     }
+
+
 }
