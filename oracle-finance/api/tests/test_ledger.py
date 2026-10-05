@@ -1696,8 +1696,9 @@ def test_self_transfer_sequence_with_nonzero_state_repairs_missing_leg_and_stays
     match_internal_transfers()
 
     # Do not reset anything. The second transfer is Axis -> HDFC ₹3.
-    # Simulate the real failure mode where the Axis debit row exists but its
-    # account adjustment was not applied yet; the matcher must repair that leg.
+    # Simulate the observed asymmetric ledger state: the Axis transaction and
+    # its Splitwise contribution exist, but its bank balance adjustment is
+    # missing. The transfer matcher must restore only that missing balance leg.
     axis_debit = T(
         "axis-debit-3",
         "DEBIT",
@@ -1707,7 +1708,17 @@ def test_self_transfer_sequence_with_nonzero_state_repairs_missing_leg_and_stays
         1_900_000_200_000,
         "797836991220",
     )
-    sync_transaction(axis_debit, apply_balance=False)
+    sync_transaction(axis_debit)
+
+    with connection() as conn:
+        conn.execute(
+            "DELETE FROM balance_adjustments WHERE transaction_id=?",
+            ("axis-debit-3",),
+        )
+        conn.execute(
+            "UPDATE accounts SET balance_minor=balance_minor+300 WHERE id=?",
+            ("seq-axis",),
+        )
     sync_transaction(
         T(
             "hdfc-credit-3",
