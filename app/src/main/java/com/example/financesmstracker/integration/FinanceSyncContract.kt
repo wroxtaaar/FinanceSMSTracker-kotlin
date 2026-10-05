@@ -35,6 +35,27 @@ data class SyncTransaction(
     val parserConfidence: Float
 )
 
+/**
+ * A locally detected candidate for an own-account transfer.
+ *
+ * This is deliberately a candidate rather than a final ledger classification.
+ * Oracle remains authoritative and must confirm the pair before excluding it
+ * from Splitwise/other income or expense calculations.
+ */
+data class SyncInternalTransferCandidate(
+    val debitTransactionId: Long,
+    val creditTransactionId: Long,
+    val amountMinor: Long,
+    val currency: String,
+    val timeDifferenceMillis: Long,
+    val matchType: InternalTransferMatchType
+)
+
+enum class InternalTransferMatchType {
+    REFERENCE,
+    AMOUNT_TIME
+}
+
 data class SyncEvidence(
     val localEvidenceId: Long,
     val sourceType: SourceType,
