@@ -591,6 +591,26 @@ def sync_transaction(t, apply_balance=True):
                         (t.currency, splitwise_change, created_at),
                     )
 
+        # A transaction can have been stored before its bank account existed
+        # (for example after a fresh database reset). On a later sync, repair the
+        # missing balance adjustment exactly once. Manual reconciliation timestamps
+        # still protect verified balances from replaying genuinely old transactions.
+        if (
+            before is not None
+            and before["status"] == "ACTIVE"
+            and apply_balance
+            and not str(t.id).startswith("gmail:")
+            and not provisional
+        ):
+            missing_adjustment = conn.execute(
+                "SELECT 1 FROM balance_adjustments WHERE transaction_id=?",
+                (t.id,),
+            ).fetchone()
+            if missing_adjustment is None:
+                apply_transaction_to_account(
+                    conn, t, created_at, transaction_created_at=created_at
+                )
+
         # Splitwise is a signed ledger component. Bank debits increase the
         # amount owed to the user, bank credits decrease it, card debits
         # decrease it, and card credits increase it. Gmail rows are never
