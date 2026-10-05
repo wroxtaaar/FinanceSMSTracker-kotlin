@@ -214,12 +214,16 @@ def splitwise_status(x_sync_token:str=Header(default="")):
 @app.get("/api/v1/gmail/auth-url")
 def gmail_auth(x_sync_token:str=Header(default="")):
     require_token(x_sync_token)
+    if os.getenv("GMAIL_ENABLED", "false").lower() != "true":
+        raise HTTPException(403, "Gmail is disabled")
     try: return {"authorizationUrl":gmail_auth_url()}
     except Exception as exc: raise HTTPException(400,str(exc))
 
 @app.get("/api/v1/gmail/callback")
 def gmail_callback(code:str="",state:str="",error:str="",x_sync_token:str=Header(default="")):
     require_token(x_sync_token)
+    if os.getenv("GMAIL_ENABLED", "false").lower() != "true":
+        raise HTTPException(403, "Gmail is disabled")
     if error: raise HTTPException(400,error)
     try:
         gmail_finish(str(os.environ.get("GMAIL_REDIRECT_URI","")) + "?code=" + code + "&state=" + state)
@@ -233,6 +237,8 @@ def gmail_sync_now(
     x_sync_token:str=Header(default="")
 ):
     require_token(x_sync_token)
+    if os.getenv("GMAIL_ENABLED", "false").lower() != "true":
+        raise HTTPException(403, "Gmail is disabled")
     try: return gmail_sync(query, historical=historical)
     except Exception as exc: raise HTTPException(400,str(exc))
 
