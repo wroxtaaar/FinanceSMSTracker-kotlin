@@ -8,7 +8,7 @@ package com.example.financesmstracker.util
  */
 object TransactionReferenceExtractor {
     private val labelledRegex = Regex(
-        """(?i)\b(?:transaction\s+)?(?:reference|ref|utr|rrn|transaction\s*(?:id|no|number))\s*(?:no\.?|number)?\s*[:#=-]?\s*([A-Z0-9][A-Z0-9/_.-]{5,})"""
+        """(?i)\b(?:transaction\s+)?(?:reference|ref|utr|rrn|transaction\s*(?:id|no|number))\s*(?:no\.?|number)?\s*[:#=-]?\s*([A-Z0-9][A-Z0-9/_.-]{4,})"""
     )
 
     private val axisUpiRegex = Regex(
