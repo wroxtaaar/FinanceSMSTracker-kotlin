@@ -1,5 +1,6 @@
 package com.example.financesmstracker.parser
 
+import com.example.financesmstracker.util.TransactionReferenceNormalizer
 import java.util.regex.Pattern
 
 class GenericSmsParser : SmsParser {
@@ -10,16 +11,15 @@ class GenericSmsParser : SmsParser {
 
         val lowerBody = messageBody.lowercase()
 
-
         val currency = AmountParser.parseCurrency(messageBody)
         val amountPaise = AmountParser.parseAmountToPaise(messageBody) ?: 0L
 
-        val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") || 
-                       lowerBody.contains("added") || lowerBody.contains("refund") || 
+        val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") ||
+                       lowerBody.contains("added") || lowerBody.contains("refund") ||
                        lowerBody.contains("reversal") || lowerBody.contains("cr")
-        val isDebit = lowerBody.contains("debited") || lowerBody.contains("deducted") || 
-                      lowerBody.contains("spent") || lowerBody.contains("paid") || 
-                      lowerBody.contains("charged") || lowerBody.contains("sent") || 
+        val isDebit = lowerBody.contains("debited") || lowerBody.contains("deducted") ||
+                      lowerBody.contains("spent") || lowerBody.contains("paid") ||
+                      lowerBody.contains("charged") || lowerBody.contains("sent") ||
                       lowerBody.contains("dr")
 
         if (!isCredit && !isDebit) {
@@ -54,8 +54,16 @@ class GenericSmsParser : SmsParser {
 
         val (merchantName, payeeId) = MerchantParser.extractMerchantAndVpa(messageBody)
 
-        val refMatcher = Pattern.compile("(?:ref|utr)\\.?\\s*:?\\s*([0-9a-zA-Z]+)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
-        val refNumber = if (refMatcher.find()) refMatcher.group(1) else null
+        val refMatcher = Pattern.compile(
+            "(?:ref|utr)\\.?\\s*:?\\s*([0-9a-zA-Z]+)|UPI/[^/\\s]+/([^/\\s]+)|UPI\\s*[:#-]?\\s*([0-9]{8,})",
+            Pattern.CASE_INSENSITIVE
+        ).matcher(messageBody)
+        val rawRefNumber = if (refMatcher.find()) {
+            refMatcher.group(1) ?: refMatcher.group(2) ?: refMatcher.group(3)
+        } else {
+            null
+        }
+        val refNumber = TransactionReferenceNormalizer.normalize(rawRefNumber)
 
         return ParserResult(
             isTransaction = true,
