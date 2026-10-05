@@ -229,4 +229,35 @@ class CrossSourceMatcherTest {
         assertTrue(result.reasons.contains("same reference"))
     }
 
+    @Test
+    fun exactReferenceWinsEvenWhenAmountAndTimeDiffer() {
+        val tx = createDummyTx(
+            id = 13L,
+            amountPaise = 1000L,
+            type = TransactionType.DEBIT,
+            bank = "AXIS",
+            ref = "911389419630",
+            timestamp = 1_000_000L,
+            lastFour = "3370"
+        )
+        val evidence = SourceEvidence(
+            sourceType = SourceType.GMAIL_NOTIFICATION,
+            sourceKey = "reference-first",
+            receivedAt = 86_400_000L,
+            amountPaise = 1200L,
+            direction = "DEBIT",
+            bankProvider = "AXIS",
+            accountLastFour = "3370",
+            reference = "911389419630",
+            contentHash = "reference-first"
+        )
+
+        val result = CrossSourceMatcher.match(evidence, listOf(tx))
+
+        assertEquals(MatchOutcome.MATCHED, result.outcome)
+        assertEquals(13L, result.matchedTransactionId)
+        assertTrue(result.reasons.contains("same reference"))
+    }
+
+
 }
