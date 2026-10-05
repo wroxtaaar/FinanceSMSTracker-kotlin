@@ -574,15 +574,12 @@ class GmailNotificationListenerService : NotificationListenerService() {
                             val repository = TransactionRepository(dbHelper, applicationContext)
                             try {
                                 transactions.forEach { remote ->
-                                    val rowId = repository.upsertOracleGmailTransaction(remote)
-                                    if (rowId != 0L) {
-                                        repository.getTransactionById(rowId)?.let { local ->
-                                            FinanceSyncBridge.enqueueCanonical(
-                                                applicationContext,
-                                                local
-                                            )
-                                        }
-                                    }
+                                    // This is a read-only mirror hydration pass.
+                                    // Never push the resolved local row back to
+                                    // Oracle from here: doing so can re-submit
+                                    // metadata for an existing transaction every
+                                    // time the notification listener reconnects.
+                                    repository.upsertOracleGmailTransaction(remote)
                                 }
                             } finally {
                                 dbHelper.close()
