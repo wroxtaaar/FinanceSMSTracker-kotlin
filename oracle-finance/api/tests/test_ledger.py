@@ -902,6 +902,69 @@ def test_repair_same_side_duplicate_keeps_referenced_hdfc_credit_only_once():
     assert balance == 100600
 
 
+def test_duplicate_repair_reverses_splitwise_for_moved_balance_adjustment():
+    from app.ledger import get_manual_splitwise_total, repair_duplicate_transactions, sync_transaction
+
+    class T:
+        def __init__(self, id, reference, timestamp, last4):
+            self.id = id
+            self.amountMinor = 600
+            self.currency = "INR"
+            self.type = "CREDIT"
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = "HDFC"
+            self.merchantOrPayee = "HDFC Bank"
+            self.accountLast4 = last4
+            self.reference = reference
+            self.timestamp = timestamp
+            self.category = "TRANSFER"
+            self.confidence = 0.99
+
+    set_balance(
+        "splitwise-duplicate-hdfc",
+        "HDFC 9591",
+        "INR",
+        "BANK_ACCOUNT",
+        "HDFC",
+        "9591",
+        100000,
+    )
+
+    # The first source has the account identity and therefore applies the bank
+    # adjustment. The later referenced source omits last-four, so it becomes
+    # canonical during duplicate repair but cannot apply a second balance
+    # adjustment on insertion.
+    sync_transaction(T("hdfc-credit-unreferenced-sw", None, 1_800_000_000_000, "9591"))
+    sync_transaction(T("hdfc-credit-referenced-sw", "240201254528", 1_800_000_060_000, ""))
+
+    # Both representations initially contribute to Splitwise.
+    assert get_manual_splitwise_total("INR") == -1200
+
+    repaired = repair_duplicate_transactions()
+    assert repaired == 1
+
+    # Only the canonical HDFC credit remains in Splitwise.
+    assert get_manual_splitwise_total("INR") == -600
+
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT id,status,duplicate_of
+               FROM transactions
+               WHERE amount_minor=600 AND bank='HDFC' AND type='CREDIT'
+                 AND id LIKE 'hdfc-credit-%'
+               ORDER BY id"""
+        ).fetchall()
+        balance = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='splitwise-duplicate-hdfc'"
+        ).fetchone()["balance_minor"]
+
+    active = [row for row in rows if row["status"] == "ACTIVE" and row["duplicate_of"] is None]
+    assert len(active) == 1
+    assert active[0]["id"] == "hdfc-credit-referenced-sw"
+    assert balance == 100600
+
+
 def test_gmail_sms_same_side_duplicate_with_delivery_delay_is_repaired_once():
     from app.ledger import repair_duplicate_transactions, sync_transaction
 
