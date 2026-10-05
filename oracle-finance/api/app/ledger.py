@@ -20,20 +20,10 @@ def normalize_reference(value):
 def splitwise_delta(account_type, transaction_type, amount_minor, category):
     """Return the signed Splitwise contribution for one ledger transaction.
 
-    Bank debits can represent amounts owed back to the user. Bank income and
-    non-expense categories never contribute. Credit-card signed behavior is
-    preserved for existing shared-expense semantics.
+    Bank accounts move opposite to Splitwise; credit cards move in the same
+    direction. OTHER remains the explicit Splitwise opt-out.
     """
-    normalized_category = str(category or "").strip().upper()
-    if normalized_category in {"OTHER", "TRANSFER", "REFUND", "SALARY"}:
-        return 0
-
-    # Bank credits are income/receipts, not amounts owed to the user through
-    # Splitwise. They must not make the receivable negative. Own-account
-    # transfers are handled separately and also never contribute here.
-    account_type = str(account_type or "").strip().upper()
-    transaction_type = str(transaction_type or "").strip().upper()
-    if account_type == "BANK_ACCOUNT" and transaction_type == "CREDIT":
+    if str(category or "").strip().upper() == "OTHER":
         return 0
 
     amount = int(amount_minor)
@@ -1408,67 +1398,6 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
         (t.currency, delta, applied_at),
     )
     return True
-
-def rebuild_manual_splitwise_total(currency="INR"):
-    """Rebuild the materialized Splitwise total from the canonical ledger.
-
-    The old implementation updated manual_splitwise_total incrementally while
-    rows were inserted, enriched, duplicated, voided, and matched as internal
-    transfers. That made the materialized value vulnerable to repeated syncs
-    and repair ordering. The transaction/evidence tables are the source of
-    truth, so rebuild the aggregate from their current canonical state.
-
-    Local/SMS transactions contribute their current category-based delta.
-    Gmail rows contribute only when their explicit splitwise_adjustments row
-    exists. Matched own-account transfer legs are always excluded.
-    """
-    with connection() as conn:
-        transfer_rows = conn.execute(
-            """SELECT debit_transaction_id AS transaction_id
-               FROM internal_transfers WHERE status='MATCHED'
-               UNION
-               SELECT credit_transaction_id AS transaction_id
-               FROM internal_transfers WHERE status='MATCHED'"""
-        ).fetchall()
-        transfer_ids = {str(row["transaction_id"]) for row in transfer_rows}
-
-        rows = conn.execute(
-            """SELECT * FROM transactions
-               WHERE status='ACTIVE'
-                 AND duplicate_of IS NULL
-                 AND currency=?""",
-            (currency,),
-        ).fetchall()
-
-        total = 0
-        for row in rows:
-            transaction_id = str(row["id"])
-            if transaction_id in transfer_ids:
-                continue
-            if is_provisional_row(row):
-                continue
-
-            # Recalculate from the transaction itself rather than from a
-            # historical splitwise_adjustments row. This is what repairs old
-            # totals created before income/TRANSFER/REFUND/SALARY exclusions
-            # were enforced. Gmail rows use the same canonical rules.
-            total += splitwise_delta(
-                row["account_type"],
-                row["type"],
-                row["amount_minor"],
-                row["category"],
-            )
-
-        conn.execute(
-            """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-               VALUES(?,?,?)
-               ON CONFLICT(currency) DO UPDATE SET
-                   amount_minor=excluded.amount_minor,
-                   updated_at=excluded.updated_at""",
-            (currency, total, now_ms()),
-        )
-        return total
-
 
 def get_manual_splitwise_total(currency="INR"):
     with connection() as conn:
