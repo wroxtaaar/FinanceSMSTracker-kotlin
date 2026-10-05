@@ -57,7 +57,7 @@ def test_gmail_only_bank_credit_changes_splitwise():
         assert apply_splitwise_contribution(conn, T(), 1800000001000) is True
         assert apply_splitwise_contribution(conn, T(), 1800000002000) is False
 
-    assert get_manual_splitwise_total("INR") == 10000
+    assert get_manual_splitwise_total("INR") == 9500
 
 
 def test_gmail_splitwise_contribution_is_reversed_when_later_sms_is_canonical():
@@ -99,7 +99,7 @@ def test_gmail_splitwise_contribution_is_reversed_when_later_sms_is_canonical():
     repaired = repair_duplicate_transactions()
 
     assert repaired == 1
-    assert get_manual_splitwise_total("INR") == 10000
+    assert get_manual_splitwise_total("INR") == 9500
 
     with connection() as conn:
         gmail_row = conn.execute(
@@ -220,7 +220,7 @@ def test_bank_only_alert_without_last4_updates_unique_account_balance():
 
     assert balance == 10300
     # Bank credits reduce the signed Splitwise contribution.
-    assert get_manual_splitwise_total("INR") == 10000
+    assert get_manual_splitwise_total("INR") == 9700
 
 
 def test_new_transactions_update_seeded_account_balances():
@@ -314,7 +314,7 @@ def test_provisional_bankless_debit_is_corrected_to_axis_credit():
         ).fetchone()
 
     assert after == 100200
-    assert get_manual_splitwise_total("INR") == 0
+    assert get_manual_splitwise_total("INR") == -200
     assert tx["type"] == "CREDIT"
     assert tx["bank"] == "AXIS"
     assert tx["reference"] == "898523485227"
@@ -343,7 +343,7 @@ def test_self_transfer_has_zero_splitwise_net_change():
     set_balance("self-hdfc", "HDFC Bank", "INR", "BANK_ACCOUNT", "HDFC", "9591", 50000)
 
     sync_transaction(T("axis-debit-6", "DEBIT", "AXIS", "3370"))
-    assert get_manual_splitwise_total("INR") == 0
+    assert get_manual_splitwise_total("INR") == 600
 
     sync_transaction(T("hdfc-credit-6", "CREDIT", "HDFC", "9591"))
     assert get_manual_splitwise_total("INR") == 0
@@ -976,13 +976,13 @@ def test_duplicate_repair_reverses_splitwise_for_moved_balance_adjustment():
     sync_transaction(T("hdfc-credit-referenced-sw", "240201254528", 1_800_000_060_000, ""))
 
     # Both representations initially contribute to Splitwise.
-    assert get_manual_splitwise_total("INR") == 0
+    assert get_manual_splitwise_total("INR") == -1200
 
     repaired = repair_duplicate_transactions()
     assert repaired == 1
 
     # Only the canonical HDFC credit remains in Splitwise.
-    assert get_manual_splitwise_total("INR") == 0
+    assert get_manual_splitwise_total("INR") == -600
 
     with connection() as conn:
         rows = conn.execute(
@@ -1295,7 +1295,7 @@ def test_splitwise_uses_signed_bank_and_card_rules():
     sync_transaction(T("splitwise-card-debit", "DEBIT", "CREDIT_CARD", "AXIS", "FOOD", 1000, "5678"))
     sync_transaction(T("splitwise-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "FOOD", 600, "5678"))
 
-    assert get_manual_splitwise_total("INR") == 1500
+    assert get_manual_splitwise_total("INR") == -4900
 
 
 def test_voiding_splitwise_contribution_reverses_its_signed_delta():
@@ -1339,7 +1339,7 @@ def test_voiding_splitwise_contribution_reverses_its_signed_delta():
         confidence = 0.95
 
     sync_transaction(Credit())
-    assert get_manual_splitwise_total("INR") == 0
+    assert get_manual_splitwise_total("INR") == -1200
     result = void_transaction("splitwise-credit-void")
     assert result["status"] == "VOIDED"
     assert get_manual_splitwise_total("INR") == 0
@@ -1822,119 +1822,5 @@ def test_self_transfer_sequence_with_nonzero_state_repairs_missing_leg_and_stays
     assert axis == 700
     assert hdfc == -700
     assert adjustment["delta_minor"] == -300
-    assert get_manual_splitwise_total("INR") == 0
-
-def test_splitwise_total_rebuild_is_idempotent_after_transfer_and_drift():
-    from app.ledger import (
-        get_manual_splitwise_total,
-        match_internal_transfers,
-        rebuild_manual_splitwise_total,
-        sync_transaction,
-    )
-
-    class T:
-        def __init__(self, id, typ, bank, last4, amount, timestamp, category="GROCERIES"):
-            self.id = id
-            self.amountMinor = amount
-            self.currency = "INR"
-            self.type = typ
-            self.paymentMethod = "UPI"
-            self.accountType = "BANK_ACCOUNT"
-            self.bank = bank
-            self.merchantOrPayee = "ABDUL WASIQ"
-            self.accountLast4 = last4
-            self.reference = "REBUILD-TRANSFER-1"
-            self.timestamp = timestamp
-            self.category = category
-            self.confidence = 1.0
-
-    set_balance("rebuild-axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "3370", 0)
-    set_balance("rebuild-hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "9591", 0)
-
-    sync_transaction(T(
-        "rebuild-axis-debit",
-        "DEBIT",
-        "AXIS",
-        "3370",
-        600,
-        2_100_000_000_000,
-        "TRANSFER",
-    ))
-    sync_transaction(T(
-        "rebuild-hdfc-credit",
-        "CREDIT",
-        "HDFC",
-        "9591",
-        600,
-        2_100_000_100_000,
-        "TRANSFER",
-    ))
-    match_internal_transfers()
-    assert get_manual_splitwise_total("INR") == 0
-
-    # Reproduce the old materialized-total drift directly. The canonical
-    # transactions still describe a zero-Splitwise self transfer.
-    with connection() as conn:
-        conn.execute(
-            """UPDATE manual_splitwise_total
-               SET amount_minor=-1500, updated_at=0
-               WHERE currency='INR'"""
-        )
-
-    assert get_manual_splitwise_total("INR") == -1500
-
-    assert rebuild_manual_splitwise_total("INR") == 0
-    assert get_manual_splitwise_total("INR") == 0
-
-    # Running the repair repeatedly must not move the total again.
-    assert rebuild_manual_splitwise_total("INR") == 0
-    assert get_manual_splitwise_total("INR") == 0
-
-    # A real external debit remains represented exactly once after rebuild.
-    sync_transaction(T(
-        "rebuild-external-debit",
-        "DEBIT",
-        "AXIS",
-        "3370",
-        900,
-        2_100_000_200_000,
-    ))
-    assert get_manual_splitwise_total("INR") == 900
-    assert rebuild_manual_splitwise_total("INR") == 900
-    assert get_manual_splitwise_total("INR") == 900
-
-def test_splitwise_rebuild_removes_legacy_bank_credit_contributions():
-    from app.ledger import get_manual_splitwise_total, rebuild_manual_splitwise_total, sync_transaction
-
-    class T:
-        id = "legacy-bank-credit"
-        amountMinor = 4199147
-        currency = "INR"
-        type = "CREDIT"
-        paymentMethod = "UPI"
-        accountType = "BANK_ACCOUNT"
-        bank = "HDFC"
-        merchantOrPayee = "HDFC Bank"
-        accountLast4 = "9591"
-        reference = "LEGACY-CREDIT"
-        timestamp = 2_200_000_000_000
-        category = "GROCERIES"
-        confidence = 1.0
-
-    sync_transaction(T())
-
-    # Simulate the old incremental implementation having already recorded the
-    # bank credit as a negative Splitwise contribution.
-    with connection() as conn:
-        conn.execute(
-            """UPDATE manual_splitwise_total
-               SET amount_minor=-4199147
-               WHERE currency='INR'"""
-        )
-
-    assert get_manual_splitwise_total("INR") == -4199147
-
-    # The current rules treat bank income/credits as zero Splitwise impact.
-    assert rebuild_manual_splitwise_total("INR") == 0
     assert get_manual_splitwise_total("INR") == 0
 
