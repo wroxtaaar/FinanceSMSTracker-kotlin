@@ -3,13 +3,15 @@ package com.example.financesmstracker.transfer
 import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.parser.AccountType
 import com.example.financesmstracker.parser.TransactionType
+import com.example.financesmstracker.util.TransactionReferenceNormalizer
 import kotlin.math.abs
 
 /**
  * Finds conservative candidates for internal bank-account transfers.
  *
- * This does not classify a transfer as fact. The central ledger must confirm
- * the pair using its wider account/evidence context.
+ * Reference/UTR matches are the strongest signal because the same bank-transfer
+ * reference identifies both sides of the same transfer. Amount/time matching
+ * remains the fallback when a reference is unavailable on one or both sides.
  */
 object InternalTransferCandidateDetector {
     const val DEFAULT_WINDOW_MILLIS = 10 * 60 * 1000L
@@ -37,8 +39,15 @@ object InternalTransferCandidateDetector {
                     credit.id != debit.id &&
                         credit.currency.equals(debit.currency, ignoreCase = true) &&
                         credit.amountPaise == debit.amountPaise &&
-                        abs(credit.timestamp - debit.timestamp) <= windowMillis &&
-                        !sameAccount(debit, credit)
+                        !sameAccount(debit, credit) &&
+                        isReferenceMatch(debit, credit) ||
+                        (
+                            credit.id != debit.id &&
+                                credit.currency.equals(debit.currency, ignoreCase = true) &&
+                                credit.amountPaise == debit.amountPaise &&
+                                !sameAccount(debit, credit) &&
+                                abs(credit.timestamp - debit.timestamp) <= windowMillis
+                        )
                 }
                 .map { credit ->
                     InternalTransferCandidate(
@@ -53,6 +62,14 @@ object InternalTransferCandidateDetector {
             compareBy<InternalTransferCandidate> { it.timeDifferenceMillis }
                 .thenBy { it.debit.timestamp }
         )
+    }
+
+    private fun isReferenceMatch(a: Transaction, b: Transaction): Boolean {
+        val referenceA = TransactionReferenceNormalizer.normalize(a.refNumber)
+        val referenceB = TransactionReferenceNormalizer.normalize(b.refNumber)
+        return !referenceA.isNullOrBlank() &&
+            !referenceB.isNullOrBlank() &&
+            referenceA.equals(referenceB, ignoreCase = true)
     }
 
     private fun sameAccount(a: Transaction, b: Transaction): Boolean {
