@@ -1477,6 +1477,142 @@ def _neutralize_internal_transfer_splitwise(conn, transfer_id, debit_id, credit_
     return True
 
 
+def _internal_transfer_reason(debit, credit, window_ms=10 * 60 * 1000):
+    """Return a match reason when two rows are the user's own-account transfer."""
+    if debit["type"] != "DEBIT" or credit["type"] != "CREDIT":
+        return None
+    if debit["currency"].strip().upper() != credit["currency"].strip().upper():
+        return None
+    if int(debit["amount_minor"]) != int(credit["amount_minor"]):
+        return None
+
+    debit_bank = _normalize_account_bank(debit["bank"])
+    credit_bank = _normalize_account_bank(credit["bank"])
+    debit_last4 = str(debit["account_last4"] or "").strip()
+    credit_last4 = str(credit["account_last4"] or "").strip()
+
+    # Never classify two events from the same known bank account as a transfer.
+    if (
+        debit_bank
+        and credit_bank
+        and debit_bank == credit_bank
+        and debit_last4
+        and credit_last4
+        and debit_last4 == credit_last4
+    ):
+        return None
+
+    debit_ref = normalize_reference(debit["reference"])
+    credit_ref = normalize_reference(credit["reference"])
+
+    # The same UPI RRN/reference is the strongest signal. Bank notifications
+    # can arrive many minutes apart, so reference matching intentionally does
+    # not have the ten-minute time restriction.
+    if debit_ref and credit_ref and debit_ref == credit_ref:
+        return "same normalized transfer reference"
+
+    if abs(int(debit["timestamp"]) - int(credit["timestamp"])) <= window_ms:
+        return "same amount/currency within 10 minutes across distinct bank accounts"
+
+    return None
+
+
+def _resolve_transaction_row(conn, transaction_id):
+    row = conn.execute(
+        "SELECT * FROM transactions WHERE id=?",
+        (str(transaction_id),),
+    ).fetchone()
+    visited = set()
+    while row and row["duplicate_of"] and row["duplicate_of"] not in visited:
+        visited.add(str(row["id"]))
+        row = conn.execute(
+            "SELECT * FROM transactions WHERE id=?",
+            (str(row["duplicate_of"]),),
+        ).fetchone()
+    return row
+
+
+def _record_internal_transfer(conn, debit, credit, reason):
+    transfer_id = f"transfer:{debit['id']}:{credit['id']}"
+    existing = conn.execute(
+        "SELECT id,splitwise_neutralized FROM internal_transfers WHERE id=?",
+        (transfer_id,),
+    ).fetchone()
+
+    if existing is None:
+        conn.execute(
+            """INSERT OR IGNORE INTO internal_transfers
+               (id,debit_transaction_id,credit_transaction_id,currency,amount_minor,status,reason,created_at)
+               VALUES(?,?,?,?,?,'MATCHED',?,?)""",
+            (
+                transfer_id,
+                debit["id"],
+                credit["id"],
+                debit["currency"],
+                debit["amount_minor"],
+                reason,
+                now_ms(),
+            ),
+        )
+
+    # If the pair already existed but its Splitwise neutralization was
+    # interrupted, _neutralize_internal_transfer_splitwise is idempotent and
+    # will finish the correction.
+    changed = _neutralize_internal_transfer_splitwise(
+        conn,
+        transfer_id,
+        debit["id"],
+        credit["id"],
+    )
+    return {
+        "id": transfer_id,
+        "debitTransactionId": debit["id"],
+        "creditTransactionId": credit["id"],
+        "amountMinor": debit["amount_minor"],
+        "currency": debit["currency"],
+        "reason": reason,
+        "splitwiseNeutralized": bool(changed or (existing and int(existing["splitwise_neutralized"] or 0) == 1)),
+    }
+
+
+def apply_internal_transfer_candidates(candidates):
+    """Confirm Android-side transfer candidates against the Oracle ledger."""
+    if not candidates:
+        return []
+
+    results = []
+    seen = set()
+
+    with connection() as conn:
+        for candidate in candidates:
+            debit = _resolve_transaction_row(conn, candidate.get("debitTransactionId"))
+            credit = _resolve_transaction_row(conn, candidate.get("creditTransactionId"))
+
+            if not debit or not credit:
+                continue
+            if debit["id"] == credit["id"]:
+                continue
+            if debit["status"] != "ACTIVE" or credit["status"] != "ACTIVE":
+                continue
+            if debit["duplicate_of"] is not None or credit["duplicate_of"] is not None:
+                continue
+            if debit["account_type"] != "BANK_ACCOUNT" or credit["account_type"] != "BANK_ACCOUNT":
+                continue
+
+            reason = _internal_transfer_reason(debit, credit)
+            if reason is None:
+                continue
+
+            key = f"{debit['id']}:{credit['id']}"
+            if key in seen:
+                continue
+            seen.add(key)
+
+            results.append(_record_internal_transfer(conn, debit, credit, reason))
+
+    return results
+
+
 def match_internal_transfers():
     with connection() as conn:
         existing_unneutralized = conn.execute(
@@ -1494,7 +1630,7 @@ def match_internal_transfers():
                 transfer["credit_transaction_id"],
             )
 
-        txs=conn.execute(
+        txs = conn.execute(
             """SELECT * FROM transactions
                WHERE account_type='BANK_ACCOUNT'
                  AND type IN ('DEBIT','CREDIT')
@@ -1502,30 +1638,30 @@ def match_internal_transfers():
                  AND duplicate_of IS NULL
                ORDER BY timestamp DESC"""
         ).fetchall()
-        matches=[]
+
+        matches = []
         for debit in txs:
-            if debit["type"]!="DEBIT": continue
+            if debit["type"] != "DEBIT":
+                continue
+
             for credit in txs:
-                if credit["type"]!="CREDIT" or debit["id"]==credit["id"]: continue
-                if debit["currency"]!=credit["currency"] or debit["amount_minor"]!=credit["amount_minor"]: continue
-                if abs(debit["timestamp"]-credit["timestamp"])>10*60*1000: continue
-                if debit["bank"]==credit["bank"] and debit["account_last4"]==credit["account_last4"]: continue
-                exists=conn.execute("SELECT 1 FROM internal_transfers WHERE debit_transaction_id=? OR credit_transaction_id=?",(debit["id"],credit["id"])).fetchone()
-                if exists: continue
-                reason="same amount/currency within 10 minutes across distinct bank accounts"
-                transfer_id=f"transfer:{debit['id']}:{credit['id']}"
-                conn.execute("""INSERT OR IGNORE INTO internal_transfers
-                (id,debit_transaction_id,credit_transaction_id,currency,amount_minor,status,reason,created_at)
-                VALUES(?,?,?,?,?,'MATCHED',?,?)""",
-                (transfer_id,debit["id"],credit["id"],debit["currency"],debit["amount_minor"],reason,now_ms()))
-                _neutralize_internal_transfer_splitwise(
-                    conn,
-                    transfer_id,
-                    debit["id"],
-                    credit["id"],
-                )
-                matches.append({"id":transfer_id,"debitTransactionId":debit["id"],"creditTransactionId":credit["id"],
-                                "amountMinor":debit["amount_minor"],"currency":debit["currency"],"reason":reason})
+                if credit["type"] != "CREDIT" or debit["id"] == credit["id"]:
+                    continue
+
+                reason = _internal_transfer_reason(debit, credit)
+                if reason is None:
+                    continue
+
+                exists = conn.execute(
+                    """SELECT 1 FROM internal_transfers
+                       WHERE debit_transaction_id=? OR credit_transaction_id=?""",
+                    (debit["id"], credit["id"]),
+                ).fetchone()
+                if exists:
+                    continue
+
+                matches.append(_record_internal_transfer(conn, debit, credit, reason))
+
         return matches
 
 def list_transfers():
