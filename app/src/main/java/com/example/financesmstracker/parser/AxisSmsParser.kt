@@ -1,6 +1,6 @@
 package com.example.financesmstracker.parser
 
-import com.example.financesmstracker.util.TransactionReferenceNormalizer
+import com.example.financesmstracker.util.TransactionReferenceExtractor
 import java.util.regex.Pattern
 
 class AxisSmsParser : SmsParser {
@@ -52,18 +52,10 @@ class AxisSmsParser : SmsParser {
 
         val (merchantName, payeeId) = MerchantParser.extractMerchantAndVpa(messageBody)
 
-        // Axis commonly embeds the UPI RRN in UPI/P2A/<RRN>/... rather than
-        // labelling it as REF/UTR. Capture both forms and normalize them.
-        val refMatcher = Pattern.compile(
-            "(?:ref|utr)\\.?\\s*:?\\s*([0-9a-zA-Z]+)|UPI/[^/\\s]+/([^/\\s]+)",
-            Pattern.CASE_INSENSITIVE
-        ).matcher(messageBody)
-        val rawRefNumber = if (refMatcher.find()) {
-            refMatcher.group(1) ?: refMatcher.group(2)
-        } else {
-            null
-        }
-        val refNumber = TransactionReferenceNormalizer.normalize(rawRefNumber)
+        // Reference/RRN is the stable identity. Accept every common Axis
+        // representation and normalize it to the same value used by email and
+        // notification sources.
+        val refNumber = TransactionReferenceExtractor.extract(messageBody)
 
         return ParserResult(
             isTransaction = true,
