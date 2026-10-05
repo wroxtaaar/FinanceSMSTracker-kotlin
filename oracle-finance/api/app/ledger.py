@@ -180,8 +180,22 @@ def _rows_are_duplicate(first, second):
     if not first_last4 or not second_last4 or first_last4 != second_last4:
         return False
 
-    if not merchant_first or merchant_first == "-" or not merchant_second or merchant_second == "-":
-        return False
+    merchants_missing = (
+        not merchant_first
+        or merchant_first == "-"
+        or not merchant_second
+        or merchant_second == "-"
+    )
+    if merchants_missing:
+        # One source may omit the merchant while the other source has the
+        # authoritative payee. If the reference is present on exactly one
+        # side, the bank + account + amount + direction + time identity above
+        # is already strong enough to collapse the mirror. Do not apply this
+        # relaxation to two reference-less rows, where merchant identity is
+        # an important extra guard.
+        one_reference_missing = (first_ref is None) != (second_ref is None)
+        if not one_reference_missing:
+            return False
 
     if first_source.startswith("gmail:") or second_source.startswith("gmail:"):
         max_time_diff = 24 * 60 * 60 * 1000
