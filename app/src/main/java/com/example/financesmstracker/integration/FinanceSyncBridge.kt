@@ -139,6 +139,15 @@ object FinanceSyncBridge {
         }
     }
 
+    private fun oracleTransactionId(transaction: Transaction): String {
+        val marker = "oracle:gmail:"
+        return if (transaction.smsHash.startsWith(marker)) {
+            transaction.smsHash.removePrefix(marker)
+        } else {
+            transaction.id.toString()
+        }
+    }
+
     private fun detectInternalTransferCandidates(
         context: Context,
         transaction: Transaction
@@ -186,8 +195,8 @@ object FinanceSyncBridge {
                     }
 
                 SyncInternalTransferCandidate(
-                    debitTransactionId = candidate.debit.id,
-                    creditTransactionId = candidate.credit.id,
+                    debitTransactionId = oracleTransactionId(candidate.debit),
+                    creditTransactionId = oracleTransactionId(candidate.credit),
                     amountMinor = candidate.debit.amountPaise,
                     currency = candidate.debit.currency,
                     timeDifferenceMillis = candidate.timeDifferenceMillis,
