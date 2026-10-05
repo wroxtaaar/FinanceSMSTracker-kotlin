@@ -1824,3 +1824,82 @@ def test_self_transfer_sequence_with_nonzero_state_repairs_missing_leg_and_stays
     assert adjustment["delta_minor"] == -300
     assert get_manual_splitwise_total("INR") == 0
 
+def test_splitwise_total_rebuild_is_idempotent_after_transfer_and_drift():
+    from app.ledger import (
+        get_manual_splitwise_total,
+        match_internal_transfers,
+        rebuild_manual_splitwise_total,
+        sync_transaction,
+    )
+
+    class T:
+        def __init__(self, id, typ, bank, last4, amount, timestamp, category="GROCERIES"):
+            self.id = id
+            self.amountMinor = amount
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "ABDUL WASIQ"
+            self.accountLast4 = last4
+            self.reference = "REBUILD-TRANSFER-1"
+            self.timestamp = timestamp
+            self.category = category
+            self.confidence = 1.0
+
+    set_balance("rebuild-axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "3370", 0)
+    set_balance("rebuild-hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "9591", 0)
+
+    sync_transaction(T(
+        "rebuild-axis-debit",
+        "DEBIT",
+        "AXIS",
+        "3370",
+        600,
+        2_100_000_000_000,
+        "TRANSFER",
+    ))
+    sync_transaction(T(
+        "rebuild-hdfc-credit",
+        "CREDIT",
+        "HDFC",
+        "9591",
+        600,
+        2_100_000_100_000,
+        "TRANSFER",
+    ))
+    match_internal_transfers()
+    assert get_manual_splitwise_total("INR") == 0
+
+    # Reproduce the old materialized-total drift directly. The canonical
+    # transactions still describe a zero-Splitwise self transfer.
+    with connection() as conn:
+        conn.execute(
+            """UPDATE manual_splitwise_total
+               SET amount_minor=-1500, updated_at=0
+               WHERE currency='INR'"""
+        )
+
+    assert get_manual_splitwise_total("INR") == -1500
+
+    assert rebuild_manual_splitwise_total("INR") == 0
+    assert get_manual_splitwise_total("INR") == 0
+
+    # Running the repair repeatedly must not move the total again.
+    assert rebuild_manual_splitwise_total("INR") == 0
+    assert get_manual_splitwise_total("INR") == 0
+
+    # A real external debit remains represented exactly once after rebuild.
+    sync_transaction(T(
+        "rebuild-external-debit",
+        "DEBIT",
+        "AXIS",
+        "3370",
+        900,
+        2_100_000_200_000,
+    ))
+    assert get_manual_splitwise_total("INR") == 900
+    assert rebuild_manual_splitwise_total("INR") == 900
+    assert get_manual_splitwise_total("INR") == 900
+
