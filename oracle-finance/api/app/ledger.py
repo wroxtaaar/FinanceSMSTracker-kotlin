@@ -1677,14 +1677,13 @@ def apply_internal_transfer_candidates(candidates):
 
 def match_internal_transfers():
     with connection() as conn:
-        existing_unneutralized = conn.execute(
+        existing_matches = conn.execute(
             """SELECT id,debit_transaction_id,credit_transaction_id
                FROM internal_transfers
-               WHERE status='MATCHED'
-                 AND COALESCE(splitwise_neutralized,0)=0"""
+               WHERE status='MATCHED'"""
         ).fetchall()
 
-        for transfer in existing_unneutralized:
+        for transfer in existing_matches:
             debit_row = _resolve_transaction_row(conn, transfer["debit_transaction_id"])
             credit_row = _resolve_transaction_row(conn, transfer["credit_transaction_id"])
             if debit_row:
