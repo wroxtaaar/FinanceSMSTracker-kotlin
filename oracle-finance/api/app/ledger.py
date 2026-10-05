@@ -110,20 +110,14 @@ def _merchant_values_compatible(first, second):
 
 
 def _rows_are_duplicate(first, second):
-    """Return True only for a same-side transaction represented more than once.
+    """Return True only for the same ledger-side transaction represented twice.
 
-    Exact normalized references are the strongest identity. When only one side
-    has a reference, allow a conservative fallback when the same bank is known,
-    account identity is compatible, payment methods do not contradict, and the
-    events are within two minutes. Opposite directions are never duplicates.
+    Exact normalized reference is the primary identity. Amount and time are not
+    identity requirements when the same reference is present. Bank/account and
+    direction still protect the two legitimate sides of an own-account UPI
+    transfer that share the same RRN.
     """
-    if int(first["amount_minor"]) != int(second["amount_minor"]):
-        return False
     if str(first["currency"]).strip().upper() != str(second["currency"]).strip().upper():
-        return False
-    if str(first["type"]).strip().upper() != str(second["type"]).strip().upper():
-        return False
-    if str(first["account_type"]).strip().upper() != str(second["account_type"]).strip().upper():
         return False
 
     first_bank = _normalize_account_bank(first["bank"])
@@ -140,61 +134,21 @@ def _rows_are_duplicate(first, second):
     second_ref = normalize_reference(second["reference"])
 
     if first_ref and second_ref:
+        if str(first["type"]).strip().upper() != str(second["type"]).strip().upper():
+            return False
+        if str(first["account_type"]).strip().upper() != str(second["account_type"]).strip().upper():
+            return False
         return first_ref == second_ref
+
+    if int(first["amount_minor"]) != int(second["amount_minor"]):
+        return False
+    if str(first["type"]).strip().upper() != str(second["type"]).strip().upper():
+        return False
+    if str(first["account_type"]).strip().upper() != str(second["account_type"]).strip().upper():
+        return False
 
     if not first_bank or not second_bank or first_bank != second_bank:
         return False
-
-    first_last4 = str(first["account_last4"] or "").strip()
-    second_last4 = str(second["account_last4"] or "").strip()
-    if first_last4 and second_last4 and first_last4 != second_last4:
-        return False
-
-    first_payment = str(first["payment_method"] or "").strip().upper()
-    second_payment = str(second["payment_method"] or "").strip().upper()
-    if (
-        first_payment
-        and second_payment
-        and first_payment != "UNKNOWN"
-        and second_payment != "UNKNOWN"
-        and first_payment != second_payment
-    ):
-        return False
-
-    merchant_first = str(first["merchant_or_payee"] or "").strip()
-    merchant_second = str(second["merchant_or_payee"] or "").strip()
-    if not _merchant_values_compatible(merchant_first, merchant_second):
-        return False
-
-    first_source = str(first["id"])
-    second_source = str(second["id"])
-    first_mirror = first_source.startswith("gmail:") or first_source.startswith("notification:")
-    second_mirror = second_source.startswith("gmail:") or second_source.startswith("notification:")
-    cross_source = first_mirror != second_mirror
-
-    # Preserve the existing conservative two-minute same-side rule for normal
-    # sources. This is important for parser variants where one source exposes
-    # the account last-four and another does not.
-    if not cross_source:
-        if not first_last4 and not second_last4:
-            return False
-        return abs(int(first["timestamp"]) - int(second["timestamp"])) <= 120_000
-
-    # For a Gmail/notification mirror, a delayed delivery can be much later
-    # than the SMS. The wider window is allowed only with complete account
-    # identity and a known compatible counterparty, preventing unrelated
-    # same-value transactions from collapsing.
-    if not first_last4 or not second_last4 or first_last4 != second_last4:
-        return False
-    if not merchant_first or merchant_first == "-" or not merchant_second or merchant_second == "-":
-        return False
-
-    if first_source.startswith("gmail:") or second_source.startswith("gmail:"):
-        max_time_diff = 24 * 60 * 60 * 1000
-    else:
-        max_time_diff = 2 * 60 * 60 * 1000
-
-    return abs(int(first["timestamp"]) - int(second["timestamp"])) <= max_time_diff
 
 
 def _duplicate_canonical_score(row):
