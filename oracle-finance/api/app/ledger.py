@@ -675,6 +675,74 @@ def _normalize_account_bank(value):
             raw=raw[:-len(suffix)].strip()
     return raw
 
+def repair_missing_balance_adjustments():
+    """Backfill account balances for active transactions missing an adjustment.
+
+    This is safe to run at API startup: each transaction gets at most one
+    balance_adjustments row, Gmail/provisional rows are excluded, and manual
+    reconciliation timestamps prevent replaying old events into a verified
+    balance.
+    """
+    from types import SimpleNamespace
+
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT t.*
+               FROM transactions t
+               LEFT JOIN balance_adjustments ba ON ba.transaction_id=t.id
+               WHERE t.status='ACTIVE'
+                 AND ba.transaction_id IS NULL
+               ORDER BY t.created_at, t.id"""
+        ).fetchall()
+
+        repaired = 0
+        for row in rows:
+            transaction_id = str(row["id"])
+            if transaction_id.startswith("gmail:"):
+                continue
+
+            provisional = is_provisional_row(row)
+            if provisional:
+                continue
+
+            transaction = SimpleNamespace(
+                id=transaction_id,
+                amountMinor=int(row["amount_minor"]),
+                currency=row["currency"],
+                type=row["type"],
+                paymentMethod=row["payment_method"],
+                accountType=row["account_type"],
+                bank=row["bank"],
+                merchantOrPayee=row["merchant_or_payee"],
+                accountLast4=row["account_last4"],
+                reference=row["reference"],
+                timestamp=int(row["timestamp"]),
+                category=row["category"],
+                confidence=float(row["confidence"] or 0.0),
+            )
+            before = conn.execute(
+                "SELECT 1 FROM balance_adjustments WHERE transaction_id=?",
+                (transaction_id,),
+            ).fetchone()
+            if before is not None:
+                continue
+
+            apply_transaction_to_account(
+                conn,
+                transaction,
+                now_ms(),
+                transaction_created_at=int(row["created_at"]),
+            )
+            after = conn.execute(
+                "SELECT 1 FROM balance_adjustments WHERE transaction_id=?",
+                (transaction_id,),
+            ).fetchone()
+            if after is not None:
+                repaired += 1
+
+        return repaired
+
+
 def _auto_provision_bank_account(conn, t, bank, last4, now_ms):
     """Create or complete an unambiguous bank account discovered from a transaction.
 
