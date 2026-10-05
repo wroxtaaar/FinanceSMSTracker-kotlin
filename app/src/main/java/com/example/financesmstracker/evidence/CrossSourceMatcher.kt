@@ -47,6 +47,34 @@ object CrossSourceMatcher {
         return evidenceLast4.isNullOrBlank() || txLast4.isNullOrBlank() || evidenceLast4 == txLast4
     }
 
+    /**
+     * A reference-bearing evidence item may still arrive before the canonical
+     * transaction's parser has extracted that reference. In that case we may
+     * use amount/time as a fallback only when the evidence and transaction
+     * share a hard account identity.
+     *
+     * This is deliberately stricter than bankCompatible()/accountCompatible():
+     * allowing both identities to be null would let an HDFC credit with RRN
+     * A match an unrelated Axis debit with the same amount/time and then copy
+     * HDFC's RRN onto the Axis row during enrichment.
+     */
+    private fun referenceFallbackIdentityCompatible(
+        evidence: SourceEvidence,
+        tx: Transaction
+    ): Boolean {
+        val evidenceBank = normalizeBank(evidence.bankProvider)
+        val txBank = normalizeBank(tx.bank)
+        if (evidenceBank != null && txBank != null && evidenceBank != txBank) return false
+
+        val evidenceLast4 = evidence.accountLastFour?.trim()?.takeIf { it.isNotBlank() }
+        val txLast4 = tx.accountLastFour?.trim()?.takeIf { it.isNotBlank() }
+        if (evidenceLast4 != null && txLast4 != null && evidenceLast4 != txLast4) return false
+
+        val sameBank = evidenceBank != null && txBank != null && evidenceBank == txBank
+        val sameAccount = evidenceLast4 != null && txLast4 != null && evidenceLast4 == txLast4
+        return sameBank || sameAccount
+    }
+
     fun match(evidence: SourceEvidence, transactions: List<Transaction>): MatchResult {
         if (evidence.amountPaise <= 0) {
             return MatchResult(MatchOutcome.UNMATCHED, reasons = listOf("Invalid or zero amount"))
@@ -101,13 +129,22 @@ object CrossSourceMatcher {
             }
         }
 
-        // FALLBACK IDENTITY: only when no reference exists.
+        // FALLBACK IDENTITY: amount/time is safe without a reference.
+        // When the evidence itself has a reference but the candidate does not,
+        // require a shared hard account identity before allowing the match. This
+        // prevents a reference from one bank transaction being copied onto an
+        // unrelated same-amount transaction at another bank.
         val matchingCandidates = transactions.filter { tx ->
             tx.currency.equals(evidence.currency, ignoreCase = true) &&
                 tx.amountPaise == evidence.amountPaise &&
                 directionCompatible(evidence, tx) &&
                 bankCompatible(evidence, tx) &&
                 accountCompatible(evidence, tx) &&
+                (
+                    evidenceReference.isNullOrBlank() ||
+                        TransactionReferenceNormalizer.normalize(tx.refNumber) != null ||
+                        referenceFallbackIdentityCompatible(evidence, tx)
+                ) &&
                 abs(tx.timestamp - evidence.receivedAt) <= MAX_TIME_DIFF_MILLIS
         }
 
