@@ -55,3 +55,59 @@ def test_manual_splitwise_total():
     summary = client.get("/api/v1/summary", headers=HEADERS)
     assert summary.status_code == 200
     assert summary.json()["splitwiseReceivableMinor"] == 850000
+
+
+def test_sync_confirms_android_internal_transfer_candidate():
+    payload = {
+        "version": 1,
+        "transactions": [
+            {
+                "id": "candidate-api-debit",
+                "amountMinor": 1000,
+                "currency": "INR",
+                "type": "DEBIT",
+                "paymentMethod": "UPI",
+                "accountType": "BANK_ACCOUNT",
+                "bank": "AXIS",
+                "merchantOrPayee": "ABDUL WASIQ",
+                "accountLast4": "3370",
+                "reference": None,
+                "timestamp": 2_100_000_000_000,
+                "category": "TRANSFER",
+                "confidence": 0.99,
+            },
+            {
+                "id": "gmail:candidate-api-credit",
+                "amountMinor": 1000,
+                "currency": "INR",
+                "type": "CREDIT",
+                "paymentMethod": "UPI",
+                "accountType": "BANK_ACCOUNT",
+                "bank": "HDFC",
+                "merchantOrPayee": "ABDUL WASIQ",
+                "accountLast4": "9591",
+                "reference": None,
+                "timestamp": 2_100_000_000_000,
+                "category": "TRANSFER",
+                "confidence": 0.99,
+            },
+        ],
+        "evidence": [],
+        "internalTransferCandidates": [
+            {
+                "debitTransactionId": "candidate-api-debit",
+                "creditTransactionId": "gmail:candidate-api-credit",
+                "amountMinor": 1000,
+                "currency": "INR",
+                "timeDifferenceMillis": 0,
+                "matchType": "AMOUNT_TIME",
+            }
+        ],
+    }
+
+    response = client.post("/api/v1/sync", headers=HEADERS, json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["internalTransferCandidates"][0]["debitTransactionId"] == "candidate-api-debit"
+    assert body["internalTransferCandidates"][0]["creditTransactionId"] == "gmail:candidate-api-credit"
