@@ -20,8 +20,9 @@ def normalize_reference(value):
 def splitwise_delta(account_type, transaction_type, amount_minor, category):
     """Return the signed Splitwise contribution for one ledger transaction.
 
-    Bank accounts move opposite to Splitwise; credit cards move in the same
-    direction. OTHER remains the explicit Splitwise opt-out.
+    Bank debits can represent amounts owed back to the user. Bank income and
+    non-expense categories never contribute. Credit-card signed behavior is
+    preserved for existing shared-expense semantics.
     """
     normalized_category = str(category or "").strip().upper()
     if normalized_category in {"OTHER", "TRANSFER", "REFUND", "SALARY"}:
