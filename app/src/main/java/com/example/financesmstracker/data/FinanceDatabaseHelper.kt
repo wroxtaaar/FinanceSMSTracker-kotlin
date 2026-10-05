@@ -129,6 +129,18 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
         db.execSQL(createUnrecognizedTable)
     }
 
+    private fun columnExists(db: SQLiteDatabase, table: String, column: String): Boolean {
+        db.rawQuery("PRAGMA table_info(${table.replace("'", "''")})", null).use { cursor ->
+            val nameIndex = cursor.getColumnIndex("name")
+            while (cursor.moveToNext()) {
+                if (nameIndex >= 0 && cursor.getString(nameIndex).equals(column, ignoreCase = true)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
             val createEvidenceTable = """
@@ -158,12 +170,12 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             db.execSQL(createEvidenceIndex)
         }
         if (oldVersion < 3) {
-            try {
-                db.execSQL("ALTER TABLE $TABLE_TRANSACTIONS ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'")
-            } catch (_: Exception) {}
-            try {
-                db.execSQL("ALTER TABLE $TABLE_SOURCE_EVIDENCE ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'")
-            } catch (_: Exception) {}
+            if (!columnExists(db, TABLE_TRANSACTIONS, COLUMN_CURRENCY)) {
+                db.execSQL("ALTER TABLE $TABLE_TRANSACTIONS ADD COLUMN $COLUMN_CURRENCY TEXT NOT NULL DEFAULT 'INR'")
+            }
+            if (!columnExists(db, TABLE_SOURCE_EVIDENCE, COLUMN_EVIDENCE_CURRENCY)) {
+                db.execSQL("ALTER TABLE $TABLE_SOURCE_EVIDENCE ADD COLUMN $COLUMN_EVIDENCE_CURRENCY TEXT NOT NULL DEFAULT 'INR'")
+            }
         }
         if (oldVersion < 4) {
             val createUnrecognizedTable = """
@@ -209,19 +221,17 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             db.execSQL(createEvidenceIndex)
         }
         if (oldVersion < 6) {
-            try {
+            if (!columnExists(db, TABLE_TRANSACTIONS, COLUMN_TRANSACTION_STATUS)) {
                 db.execSQL("ALTER TABLE $TABLE_TRANSACTIONS ADD COLUMN $COLUMN_TRANSACTION_STATUS TEXT NOT NULL DEFAULT 'ACTIVE'")
-            } catch (_: Exception) {}
+            }
         }
         if (oldVersion < 7) {
             // Truecaller was removed from the financial evidence pipeline.
             // Delete only legacy Truecaller evidence; transaction history itself
             // is preserved.
-            try {
-                db.execSQL(
-                    "DELETE FROM $TABLE_SOURCE_EVIDENCE WHERE $COLUMN_EVIDENCE_SOURCE_TYPE = 'TRUECALLER'"
-                )
-            } catch (_: Exception) {}
+            db.execSQL(
+                "DELETE FROM $TABLE_SOURCE_EVIDENCE WHERE $COLUMN_EVIDENCE_SOURCE_TYPE = 'TRUECALLER'"
+            )
         }
     }
 }
