@@ -388,13 +388,34 @@ class MainActivity : AppCompatActivity() {
              * card credits/payments reduce Bill first.
              */
             val rows = accounts.map { account ->
-                val billMinor = account.billBalanceMinor.coerceIn(0L, account.balanceMinor)
-                val activeMinor = (account.balanceMinor - billMinor).coerceAtLeast(0L)
+                // A credit card can legitimately have a negative net balance
+                // (for example, a refund/credit posted while the opening
+                // balance is zero). The old coerceIn(0, balance) call throws
+                // IllegalArgumentException when balance is negative because
+                // the lower bound becomes greater than the upper bound.
+                // Keep the editable Bill/Active buckets non-negative and show
+                // the negative amount separately as a credit balance.
+                val isCreditBalance = account.balanceMinor < 0L
+                val billMinor = if (isCreditBalance) {
+                    0L
+                } else {
+                    account.billBalanceMinor.coerceAtLeast(0L).coerceAtMost(account.balanceMinor)
+                }
+                val activeMinor = if (isCreditBalance) {
+                    0L
+                } else {
+                    (account.balanceMinor - billMinor).coerceAtLeast(0L)
+                }
+                val creditBalanceMinor = if (isCreditBalance) -account.balanceMinor else 0L
 
                 val label = TextView(this).apply {
                     text = buildString {
                         append(account.name)
                         account.last4?.let { append(" ••••").append(it) }
+                        if (isCreditBalance) {
+                            append("\nCredit balance: ")
+                            append(formatDecimalMinor(creditBalanceMinor))
+                        }
                     }
                     textSize = 14f
                     setPadding(0, 10, 0, 4)
@@ -501,8 +522,10 @@ class MainActivity : AppCompatActivity() {
                 .setTitle(title)
                 .setMessage(
                     "These values reconcile the current card balance. Bill is the statement amount remaining; " +
-                        "Active Spend is new spend after the bill. Historical transactions already discovered " +
-                        "will not change this reconciled balance. New transactions after the save continue to update it."
+                        "Active Spend is new spend after the bill. A negative card balance is treated as a credit " +
+                        "balance and is shown safely without forcing it into the non-negative Bill/Active buckets. " +
+                        "Historical transactions already discovered will not change this reconciled balance. New " +
+                        "transactions after the save continue to update it."
                 )
                 .setView(scrollView)
                 .setNegativeButton("Cancel", null)
