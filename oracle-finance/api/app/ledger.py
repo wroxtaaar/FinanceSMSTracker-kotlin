@@ -1399,6 +1399,75 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
     )
     return True
 
+def rebuild_manual_splitwise_total(currency="INR"):
+    """Rebuild the materialized Splitwise total from the canonical ledger.
+
+    The old implementation updated manual_splitwise_total incrementally while
+    rows were inserted, enriched, duplicated, voided, and matched as internal
+    transfers. That made the materialized value vulnerable to repeated syncs
+    and repair ordering. The transaction/evidence tables are the source of
+    truth, so rebuild the aggregate from their current canonical state.
+
+    Local/SMS transactions contribute their current category-based delta.
+    Gmail rows contribute only when their explicit splitwise_adjustments row
+    exists. Matched own-account transfer legs are always excluded.
+    """
+    with connection() as conn:
+        transfer_rows = conn.execute(
+            """SELECT debit_transaction_id AS transaction_id
+               FROM internal_transfers WHERE status='MATCHED'
+               UNION
+               SELECT credit_transaction_id AS transaction_id
+               FROM internal_transfers WHERE status='MATCHED'"""
+        ).fetchall()
+        transfer_ids = {str(row["transaction_id"]) for row in transfer_rows}
+
+        rows = conn.execute(
+            """SELECT * FROM transactions
+               WHERE status='ACTIVE'
+                 AND duplicate_of IS NULL
+                 AND currency=?""",
+            (currency,),
+        ).fetchall()
+
+        total = 0
+        for row in rows:
+            transaction_id = str(row["id"])
+            if transaction_id in transfer_ids:
+                continue
+            if is_provisional_row(row):
+                continue
+
+            if transaction_id.startswith("gmail:"):
+                # Gmail is only authoritative when its adjustment was actually
+                # applied by gmail_sync. Do not invent a contribution merely
+                # because an ignored/duplicate Gmail row is still ACTIVE.
+                adjustment = conn.execute(
+                    """SELECT delta_minor FROM splitwise_adjustments
+                       WHERE transaction_id=?""",
+                    (transaction_id,),
+                ).fetchone()
+                if adjustment is not None:
+                    total += int(adjustment["delta_minor"])
+            else:
+                total += splitwise_delta(
+                    row["account_type"],
+                    row["type"],
+                    row["amount_minor"],
+                    row["category"],
+                )
+
+        conn.execute(
+            """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
+               VALUES(?,?,?)
+               ON CONFLICT(currency) DO UPDATE SET
+                   amount_minor=excluded.amount_minor,
+                   updated_at=excluded.updated_at""",
+            (currency, total, now_ms()),
+        )
+        return total
+
+
 def get_manual_splitwise_total(currency="INR"):
     with connection() as conn:
         row=conn.execute("SELECT amount_minor FROM manual_splitwise_total WHERE currency=?",(currency,)).fetchone()
