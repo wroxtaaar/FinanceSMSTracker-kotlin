@@ -355,7 +355,7 @@ def test_internal_transfer_neutralizes_splitwise_even_when_credit_category_diffe
     with connection() as conn:
         conn.execute(
             """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
-               VALUES('INR',-300,4_200_000_001_000)
+               VALUES('INR',-300,4200000001000)
                ON CONFLICT(currency) DO UPDATE SET
                    amount_minor=excluded.amount_minor,
                    updated_at=excluded.updated_at"""
