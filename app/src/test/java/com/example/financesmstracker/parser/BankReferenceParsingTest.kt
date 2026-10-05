@@ -1,6 +1,7 @@
 package com.example.financesmstracker.parser
 
 import org.junit.Assert.assertEquals
+import com.example.financesmstracker.util.TransactionReferenceExtractor
 import org.junit.Test
 
 class BankReferenceParsingTest {
@@ -34,4 +35,20 @@ class BankReferenceParsingTest {
 
         assertEquals("185534369134", result?.refNumber)
     }
+    @Test
+    fun sharedExtractorHandlesAllCommonReferenceForms() {
+        assertEquals(
+            "911389419630",
+            TransactionReferenceExtractor.extract("Transaction reference no.: 911389419630")
+        )
+        assertEquals(
+            "911389419630",
+            TransactionReferenceExtractor.extract("UPI/P2A/911389419630/ABDUL WASIQ/HDFC")
+        )
+        assertEquals(
+            "911389419630",
+            TransactionReferenceExtractor.extract("Credit received (UPI 911389419630)")
+        )
+    }
+
 }
