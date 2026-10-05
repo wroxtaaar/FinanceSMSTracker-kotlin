@@ -17,23 +17,29 @@ def normalize_reference(value):
     raw = raw.strip(".,;:)]").strip()
     return raw.upper() or None
 
-def splitwise_delta(account_type, transaction_type, amount_minor, category):
-    """Return the signed Splitwise contribution for one ledger transaction.
+def splitwise_delta(account_type, transaction_type, amount_minor, category=None):
+    """Return the Splitwise effect implied by the final ledger movement.
 
-    Bank accounts move opposite to Splitwise; credit cards move in the same
-    direction. OTHER remains the explicit Splitwise opt-out.
+    Splitwise is deliberately derived from the same ledger movement as the
+    account balance, not from categories or a second set of expense rules.
+
+    Bank account:
+      DEBIT  -> bank -X, so Splitwise +X
+      CREDIT -> bank +X, so Splitwise -X
+
+    Credit card outstanding:
+      DEBIT  -> outstanding +X, so Splitwise +X
+      CREDIT -> outstanding -X, so Splitwise -X
+
+    This also makes transfers self-cancelling:
+      bank debit +X + matching bank/card credit -X = 0.
     """
-    if str(category or "").strip().upper() == "OTHER":
-        return 0
-
     amount = int(amount_minor)
     account_type = str(account_type or "").strip().upper()
     transaction_type = str(transaction_type or "").strip().upper()
 
-    if account_type == "BANK_ACCOUNT":
+    if account_type in ("BANK_ACCOUNT", "CREDIT_CARD"):
         return amount if transaction_type == "DEBIT" else -amount if transaction_type == "CREDIT" else 0
-    if account_type == "CREDIT_CARD":
-        return -amount if transaction_type == "DEBIT" else amount if transaction_type == "CREDIT" else 0
     return 0
 
 def splitwise_delta_for_transaction(t):
@@ -1360,7 +1366,7 @@ def set_manual_splitwise_total(currency, amount_minor):
                ON CONFLICT(currency) DO UPDATE SET
                  amount_minor=excluded.amount_minor,
                  updated_at=excluded.updated_at""",
-            (currency, max(0, int(amount_minor)), now_ms())
+            (currency, int(amount_minor), now_ms())
         )
 
 def apply_splitwise_contribution(conn, t, applied_at=None):
@@ -1398,6 +1404,61 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
         (t.currency, delta, applied_at),
     )
     return True
+
+def rebuild_manual_splitwise_total(currency=None):
+    """Rebuild the materialized Splitwise total from the canonical ledger.
+
+    The transactions table is the source of truth. Only active, canonical
+    transactions that actually affect a bank/card balance are included.
+    Rebuilding is idempotent, so opening the app, retrying sync, duplicate
+    repair, or a late transfer match cannot make Splitwise drift.
+
+    A bank/card transfer naturally cancels because its two ledger effects have
+    opposite signs. No category or Splitwise adjustment history is consulted.
+    """
+    with connection() as conn:
+        currencies = [currency] if currency else [
+            row["currency"]
+            for row in conn.execute(
+                "SELECT DISTINCT currency FROM transactions WHERE currency IS NOT NULL AND TRIM(currency)<>''"
+            ).fetchall()
+        ]
+
+        for cur in currencies:
+            rows = conn.execute(
+                """SELECT amount_minor,currency,type,account_type,payment_method,
+                          bank,merchant_or_payee,account_last4,reference,
+                          timestamp,category,confidence
+                   FROM transactions
+                   WHERE status='ACTIVE'
+                     AND duplicate_of IS NULL
+                     AND currency=?
+                     AND account_type IN ('BANK_ACCOUNT','CREDIT_CARD')""",
+                (cur,),
+            ).fetchall()
+
+            total = 0
+            for row in rows:
+                if is_provisional_row(row):
+                    continue
+                total += splitwise_delta(
+                    row["account_type"],
+                    row["type"],
+                    row["amount_minor"],
+                    row["category"],
+                )
+
+            conn.execute(
+                """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
+                   VALUES(?,?,?)
+                   ON CONFLICT(currency) DO UPDATE SET
+                       amount_minor=excluded.amount_minor,
+                       updated_at=excluded.updated_at""",
+                (cur, total, now_ms()),
+            )
+
+    return get_manual_splitwise_total(currency or "INR")
+
 
 def get_manual_splitwise_total(currency="INR"):
     with connection() as conn:
