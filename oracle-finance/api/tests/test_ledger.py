@@ -1583,7 +1583,9 @@ def test_referenced_mirror_with_missing_merchant_is_collapsed_and_splitwise_reve
         )
     )
 
-    assert get_manual_splitwise_total("INR") == 600
+    # Both local rows initially contribute because the duplicate is only
+    # collapsed by the repair pass.
+    assert get_manual_splitwise_total("INR") == 1200
 
     repaired = repair_duplicate_transactions()
 
@@ -1602,6 +1604,21 @@ def test_referenced_mirror_with_missing_merchant_is_collapsed_and_splitwise_reve
     assert active[0]["merchant_or_payee"] == "ABDUL WASIQ"
     assert len(voided) == 1
     assert voided[0]["duplicate_of"] == active[0]["id"]
+    assert get_manual_splitwise_total("INR") == 600
+
+    # The remaining canonical Axis debit is the legitimate transfer leg.
+    sync_transaction(
+        T(
+            "hdfc-credit-6",
+            "CREDIT",
+            "HDFC",
+            "9591",
+            "299284702774",
+            "HDFC Bank",
+            "UPI",
+        )
+    )
+
     assert get_manual_splitwise_total("INR") == 0
 
 
