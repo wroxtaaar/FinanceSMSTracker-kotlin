@@ -13,10 +13,19 @@ class FinanceSyncService(context: Context) {
     fun enqueue(
         transactions: List<SyncTransaction>,
         evidence: List<SyncEvidence>,
+        internalTransferCandidates: List<SyncInternalTransferCandidate> = emptyList(),
         voidedTransactionIds: List<Long> = emptyList(),
         cardBills: List<SyncCardBill> = emptyList()
     ) {
-        queue.enqueue(FinanceSyncPayload.build(transactions, evidence, voidedTransactionIds, cardBills))
+        queue.enqueue(
+            FinanceSyncPayload.build(
+                transactions = transactions,
+                evidence = evidence,
+                internalTransferCandidates = internalTransferCandidates,
+                voidedTransactionIds = voidedTransactionIds,
+                cardBills = cardBills
+            )
+        )
     }
 
     fun flush(): Result<Int> {
