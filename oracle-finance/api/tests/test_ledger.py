@@ -1509,3 +1509,131 @@ def test_fresh_database_auto_provisions_unambiguous_bank_accounts():
     assert hdfc["balance_minor"] == -300
     assert axis["account_type"] == "BANK_ACCOUNT"
     assert axis["balance_minor"] == 300
+
+def test_gmail_credit_and_sms_debit_self_transfer_neutralizes_splitwise():
+    from app.ledger import get_manual_splitwise_total, match_internal_transfers, sync_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, last4, reference):
+            self.id = id
+            self.amountMinor = 500
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI" if typ == "DEBIT" else "UNKNOWN"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "ABDUL WASIQ"
+            self.accountLast4 = last4
+            self.reference = reference
+            self.timestamp = 1_800_000_000_000
+            self.category = "TRANSFER"
+            self.confidence = 0.99
+
+    set_balance("observed-axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "3370", 10000)
+    set_balance("observed-hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "9591", 10000)
+
+    # This reproduces the observed device state: the Axis credit is a Gmail
+    # mirror, so it does not contribute to Splitwise; the HDFC SMS debit does.
+    sync_transaction(T("gmail:axis-credit-500", "CREDIT", "AXIS", None, None))
+    sync_transaction(T("hdfc-debit-500", "DEBIT", "HDFC", "9591", "228327297579"))
+
+    assert get_manual_splitwise_total("INR") == 500
+
+    matches = match_internal_transfers()
+
+    assert any(
+        m["debitTransactionId"] == "hdfc-debit-500"
+        and m["creditTransactionId"] == "gmail:axis-credit-500"
+        for m in matches
+    )
+    assert get_manual_splitwise_total("INR") == 0
+
+
+def test_same_transfer_reference_matches_even_when_more_than_ten_minutes_apart():
+    from app.ledger import match_internal_transfers, sync_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, last4, timestamp):
+            self.id = id
+            self.amountMinor = 1000
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "ABDUL WASIQ"
+            self.accountLast4 = last4
+            self.reference = "UPI/P2A/185534369134/ABDUL WASIQ"
+            self.timestamp = timestamp
+            self.category = "TRANSFER"
+            self.confidence = 1.0
+
+    sync_transaction(T("axis-ref-debit", "DEBIT", "AXIS", "3370", 1_900_000_000_000))
+    sync_transaction(T("hdfc-ref-credit", "CREDIT", "HDFC", "9591", 1_900_000_900_000))
+
+    matches = match_internal_transfers()
+
+    assert any(
+        m["debitTransactionId"] == "axis-ref-debit"
+        and m["creditTransactionId"] == "hdfc-ref-credit"
+        and m["reason"] == "same normalized transfer reference"
+        for m in matches
+    )
+
+
+def test_android_internal_transfer_candidate_is_confirmed_and_neutralized():
+    from app.ledger import (
+        apply_internal_transfer_candidates,
+        get_manual_splitwise_total,
+        sync_transaction,
+    )
+
+    class T:
+        def __init__(self, id, typ, bank, last4):
+            self.id = id
+            self.amountMinor = 1000
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "ABDUL WASIQ"
+            self.accountLast4 = last4
+            self.reference = None
+            self.timestamp = 2_000_000_000_000
+            self.category = "TRANSFER"
+            self.confidence = 1.0
+
+    set_balance("candidate-axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "3370", 10000)
+    set_balance("candidate-hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "9591", 10000)
+
+    sync_transaction(T("candidate-axis-debit", "DEBIT", "AXIS", "3370"))
+    sync_transaction(T("candidate-hdfc-credit", "CREDIT", "HDFC", "9591"))
+
+    assert get_manual_splitwise_total("INR") == 0
+
+    # Simulate the asymmetric state that the Android candidate confirmation
+    # must correct when only one side has contributed to Splitwise.
+    with connection() as conn:
+        conn.execute(
+            """UPDATE manual_splitwise_total
+               SET amount_minor=1000, updated_at=?
+               WHERE currency='INR'""",
+            (2_000_000_001_000,),
+        )
+
+    result = apply_internal_transfer_candidates([
+        {
+            "debitTransactionId": "candidate-axis-debit",
+            "creditTransactionId": "candidate-hdfc-credit",
+            "amountMinor": 1000,
+            "currency": "INR",
+            "timeDifferenceMillis": 0,
+            "matchType": "AMOUNT_TIME",
+        }
+    ])
+
+    assert len(result) == 1
+    assert result[0]["debitTransactionId"] == "candidate-axis-debit"
+    assert result[0]["creditTransactionId"] == "candidate-hdfc-credit"
+    assert get_manual_splitwise_total("INR") == 0
