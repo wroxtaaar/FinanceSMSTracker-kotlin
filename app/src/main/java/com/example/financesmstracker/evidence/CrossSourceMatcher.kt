@@ -4,11 +4,7 @@ import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.util.TransactionReferenceNormalizer
 import kotlin.math.abs
 
-enum class MatchOutcome {
-    MATCHED,
-    AMBIGUOUS,
-    UNMATCHED
-}
+enum class MatchOutcome { MATCHED, AMBIGUOUS, UNMATCHED }
 
 data class MatchResult(
     val outcome: MatchOutcome,
@@ -18,7 +14,6 @@ data class MatchResult(
 )
 
 object CrossSourceMatcher {
-    // 120 seconds window to account for Truecaller notification delay relative to SMS
     private const val MAX_TIME_DIFF_MILLIS = 120_000L
 
     private fun normalizeBank(bank: String?): String? {
@@ -35,17 +30,21 @@ object CrossSourceMatcher {
         }
     }
 
-    private fun isDirectionCompatible(evidenceDir: String, txDir: String): Boolean {
-        val normEv = evidenceDir.trim().uppercase()
-        val normTx = txDir.trim().uppercase()
-        if (normEv == "UNKNOWN" || normEv.isBlank()) return true
-        return normEv == normTx
+    private fun directionCompatible(evidence: SourceEvidence, tx: Transaction): Boolean {
+        val direction = evidence.direction.trim().uppercase()
+        return direction.isBlank() || direction == "UNKNOWN" || direction == tx.transactionType.name
     }
 
-    private fun isBankCompatible(evidenceBank: String?, txBank: String?): Boolean {
-        val normEv = normalizeBank(evidenceBank) ?: return true // null means unknown (neutral)
-        val normTx = normalizeBank(txBank) ?: return true // null means unknown (neutral)
-        return normEv == normTx
+    private fun bankCompatible(evidence: SourceEvidence, tx: Transaction): Boolean {
+        val evidenceBank = normalizeBank(evidence.bankProvider)
+        val txBank = normalizeBank(tx.bank)
+        return evidenceBank == null || txBank == null || evidenceBank == txBank
+    }
+
+    private fun accountCompatible(evidence: SourceEvidence, tx: Transaction): Boolean {
+        val evidenceLast4 = evidence.accountLastFour?.trim()
+        val txLast4 = tx.accountLastFour?.trim()
+        return evidenceLast4.isNullOrBlank() || txLast4.isNullOrBlank() || evidenceLast4 == txLast4
     }
 
     fun match(evidence: SourceEvidence, transactions: List<Transaction>): MatchResult {
@@ -53,93 +52,82 @@ object CrossSourceMatcher {
             return MatchResult(MatchOutcome.UNMATCHED, reasons = listOf("Invalid or zero amount"))
         }
 
-        val matchingCandidates = mutableListOf<Pair<Transaction, List<String>>>()
+        val evidenceReference = TransactionReferenceNormalizer.normalize(evidence.reference)
 
-        for (tx in transactions) {
-            val reasons = mutableListOf<String>()
-
-            // 0. Currency check (must match exactly)
-            val txCurrency = tx.currency.trim().uppercase()
-            val evCurrency = evidence.currency.trim().uppercase()
-            if (txCurrency != evCurrency) {
-                continue
-            }
-            reasons.add("currency equal")
-
-            // 1. Amount check (must match exactly)
-            if (tx.amountPaise != evidence.amountPaise) {
-                continue
-            }
-            reasons.add("amount equal")
-
-            // 2. Direction compatibility check (UNKNOWN is compatible with both)
-            val txDirection = if (tx.transactionType.name == "CREDIT") "CREDIT" else "DEBIT"
-            if (!isDirectionCompatible(evidence.direction, txDirection)) {
-                continue
-            }
-            if (evidence.direction.trim().uppercase() != "UNKNOWN" && evidence.direction.isNotBlank()) {
-                reasons.add("direction equal")
-            } else {
-                reasons.add("direction unknown (neutral)")
+        // PRIMARY IDENTITY: exact normalized reference/RRN/UTR.
+        if (!evidenceReference.isNullOrBlank()) {
+            val referenceCandidates = transactions.filter { tx ->
+                TransactionReferenceNormalizer.normalize(tx.refNumber) == evidenceReference &&
+                    tx.currency.equals(evidence.currency, ignoreCase = true) &&
+                    directionCompatible(evidence, tx) &&
+                    bankCompatible(evidence, tx) &&
+                    accountCompatible(evidence, tx)
             }
 
-            // 3. Reference check (strongest identifier if available).
-            // Normalize transport-specific wrappers such as
-            // UPI/P2A/<RRN>/... before comparing.
-            val evidenceReference = TransactionReferenceNormalizer.normalize(evidence.reference)
-            val transactionReference = TransactionReferenceNormalizer.normalize(tx.refNumber)
-            if (!evidenceReference.isNullOrBlank() && !transactionReference.isNullOrBlank()) {
-                if (evidenceReference == transactionReference) {
-                    reasons.add("same reference")
+            if (referenceCandidates.size == 1) {
+                val tx = referenceCandidates.single()
+                val reasons = buildList {
+                    add("same reference")
+                    if (evidence.amountPaise == tx.amountPaise) add("amount equal")
+                    else add("amount differs; reference identity wins")
+                    if (!evidence.bankProvider.isNullOrBlank() && !tx.bank.isNullOrBlank()) add("same bank")
+                    if (!evidence.accountLastFour.isNullOrBlank() && !tx.accountLastFour.isNullOrBlank()) add("same account last four")
                 }
+                return MatchResult(MatchOutcome.MATCHED, tx.id, reasons, 0.99f)
             }
 
-            // 4. Bank compatibility check (null bank is neutral)
-            if (!isBankCompatible(evidence.bankProvider, tx.bank)) {
-                continue
-            }
-            if (!evidence.bankProvider.isNullOrBlank()) {
-                reasons.add("same bank")
-            } else {
-                reasons.add("bank unknown (neutral)")
-            }
+            if (referenceCandidates.size > 1) {
+                fun score(tx: Transaction): Int = listOf(
+                    evidence.amountPaise == tx.amountPaise,
+                    !evidence.accountLastFour.isNullOrBlank() && evidence.accountLastFour == tx.accountLastFour,
+                    normalizeBank(evidence.bankProvider) != null &&
+                        normalizeBank(evidence.bankProvider) == normalizeBank(tx.bank)
+                ).count { it }
 
-            // 5. Account last four check
-            if (!evidence.accountLastFour.isNullOrBlank() && !tx.accountLastFour.isNullOrBlank()) {
-                if (evidence.accountLastFour == tx.accountLastFour) {
-                    reasons.add("same account last four")
+                val ranked = referenceCandidates.sortedByDescending(::score)
+                val top = ranked.first()
+                if (score(top) > (ranked.getOrNull(1)?.let(::score) ?: -1)) {
+                    return MatchResult(
+                        MatchOutcome.MATCHED,
+                        top.id,
+                        listOf("same reference", "reference candidate disambiguated by account/bank/amount"),
+                        0.99f
+                    )
                 }
+                return MatchResult(
+                    MatchOutcome.AMBIGUOUS,
+                    reasons = listOf("multiple transactions share the same reference")
+                )
             }
+        }
 
-            // 6. Time proximity check
-            val timeDiff = abs(tx.timestamp - evidence.receivedAt)
-            if (timeDiff <= MAX_TIME_DIFF_MILLIS) {
-                reasons.add("event time difference ${timeDiff / 1000.0} seconds")
-            } else {
-                if (!reasons.contains("same reference")) {
-                    continue
-                }
-            }
-
-            matchingCandidates.add(Pair(tx, reasons))
+        // FALLBACK IDENTITY: only when no reference exists.
+        val matchingCandidates = transactions.filter { tx ->
+            tx.currency.equals(evidence.currency, ignoreCase = true) &&
+                tx.amountPaise == evidence.amountPaise &&
+                directionCompatible(evidence, tx) &&
+                bankCompatible(evidence, tx) &&
+                accountCompatible(evidence, tx) &&
+                abs(tx.timestamp - evidence.receivedAt) <= MAX_TIME_DIFF_MILLIS
         }
 
         return when {
-            matchingCandidates.isEmpty() -> {
-                MatchResult(MatchOutcome.UNMATCHED, reasons = listOf("no candidate found"))
-            }
+            matchingCandidates.isEmpty() ->
+                MatchResult(MatchOutcome.UNMATCHED, reasons = listOf("no reference and no amount/time candidate"))
             matchingCandidates.size == 1 -> {
-                val (tx, reasons) = matchingCandidates[0]
-                MatchResult(MatchOutcome.MATCHED, matchedTransactionId = tx.id, reasons = reasons, confidence = 0.95f)
+                val tx = matchingCandidates.single()
+                MatchResult(
+                    MatchOutcome.MATCHED,
+                    tx.id,
+                    listOf("amount equal", "direction equal or unknown", "within 120 seconds"),
+                    0.95f
+                )
             }
-            else -> {
-                val refMatches = matchingCandidates.filter { it.second.contains("same reference") }
-                if (refMatches.size == 1) {
-                    MatchResult(MatchOutcome.MATCHED, matchedTransactionId = refMatches[0].first.id, reasons = refMatches[0].second, confidence = 0.98f)
-                } else {
-                    MatchResult(MatchOutcome.AMBIGUOUS, reasons = listOf("multiple plausible candidates found (${matchingCandidates.size})"))
-                }
-            }
+            else ->
+                MatchResult(
+                    MatchOutcome.AMBIGUOUS,
+                    reasons = listOf("multiple amount/time candidates found")
+                )
         }
     }
 }
