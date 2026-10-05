@@ -3,6 +3,7 @@ package com.example.financesmstracker.gmail
 import com.example.financesmstracker.parser.AccountType
 import com.example.financesmstracker.parser.PaymentMethod
 import com.example.financesmstracker.parser.TransactionType
+import com.example.financesmstracker.util.TransactionReferenceExtractor
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -34,9 +35,6 @@ object GmailNotificationParser {
     )
     private val lastFourRegex = Regex(
         """(?i)(?:(?:account|a/c)\s*(?:ending|no\.?|number)?|(?:credit\s+)?card\s*(?:ending|no\.?|number)?)\s*[:#-]?\s*(?:x{2,}|\*{2,})?\s*(\d{4})"""
-    )
-    private val referenceRegex = Regex(
-        """(?i)(?:transaction\s+)?reference\s*(?:no\.?|number)?\s*[:#-]?\s*([A-Za-z0-9-]{6,})"""
     )
     private val vpaRegex = Regex(
         """(?i)(?:towards|to)\s+(?:VPA\s+)?([A-Za-z0-9._-]+@[A-Za-z0-9._-]+)"""
@@ -121,7 +119,12 @@ object GmailNotificationParser {
         // footer can mention another card and should not become this transaction's
         // account number.
         val accountLastFour = lastFourRegex.find(line)?.groupValues?.getOrNull(1)
-        val reference = referenceRegex.find(line)?.groupValues?.getOrNull(1)
+        // A notification may put the reference on the transaction line, title,
+        // or a separate notification field. Search the whole payload after
+        // preferring the transaction line so the stable RRN survives source
+        // formatting differences.
+        val reference = TransactionReferenceExtractor.extract(line)
+            ?: TransactionReferenceExtractor.extract(haystack)
         val vpa = vpaRegex.find(line)?.groupValues?.getOrNull(1)
 
         val merchantName = if (vpa != null) {
