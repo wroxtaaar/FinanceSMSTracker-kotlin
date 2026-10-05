@@ -230,11 +230,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
 
-        // onResume can run every time the activity is brought to the
-        // foreground. It must be read-only with respect to the Oracle ledger.
-        // Duplicate repair and notification ingestion happen in their source
-        // pipelines; doing them here can turn a simple app reopen into a
-        // financial mutation.
+        // onResume is also the recovery point for duplicate rows that were
+        // already stored before the current reference-aware matcher shipped.
+        // repairCanonicalDuplicates() is idempotent: after the first pass it
+        // has nothing left to change, while any repaired IDs are propagated
+        // to Oracle as voids.
         loadTransactions()
         updateNotificationAccessStatus()
         loadOracleSummary()
@@ -1279,6 +1279,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadTransactions() {
+        // Repair same-side duplicates that were already stored before the
+        // stronger repository matcher was deployed. The repair only changes
+        // rows proven to be duplicates (same amount/direction/account/time,
+        // with reference-aware identity), and every voided row is sent to
+        // Oracle so the remote ledger is repaired too.
+        val repairedIds = repository.repairCanonicalDuplicates()
+        repairedIds.forEach { transactionId ->
+            FinanceSyncBridge.enqueueVoidedTransaction(this, transactionId)
+        }
+
         val transactions = repository.getAllTransactions()
 
         adapter.updateData(transactions)
