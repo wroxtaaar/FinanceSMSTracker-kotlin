@@ -1,6 +1,6 @@
 package com.example.financesmstracker.parser
 
-import com.example.financesmstracker.util.TransactionReferenceNormalizer
+import com.example.financesmstracker.util.TransactionReferenceExtractor
 import java.util.regex.Pattern
 
 class HdfcSmsParser : SmsParser {
@@ -67,18 +67,7 @@ class HdfcSmsParser : SmsParser {
 
         val (merchantName, payeeId) = MerchantParser.extractMerchantAndVpa(messageBody)
 
-        // HDFC UPI alerts commonly expose the RRN as "UPI <RRN>".
-        // Also retain the labelled REF/UTR forms used by other HDFC alerts.
-        val refMatcher = Pattern.compile(
-            "(?:ref|upi ref|imps ref|utr)\\.?\\s*:?\\s*([0-9a-zA-Z]+)|UPI\\s*[:#-]?\\s*([0-9]{8,})",
-            Pattern.CASE_INSENSITIVE
-        ).matcher(messageBody)
-        val rawRefNumber = if (refMatcher.find()) {
-            refMatcher.group(1) ?: refMatcher.group(2)
-        } else {
-            null
-        }
-        val refNumber = TransactionReferenceNormalizer.normalize(rawRefNumber)
+        val refNumber = TransactionReferenceExtractor.extract(messageBody)
 
         return ParserResult(
             isTransaction = true,
