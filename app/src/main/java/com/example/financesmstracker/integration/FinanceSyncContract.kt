@@ -43,8 +43,8 @@ data class SyncTransaction(
  * from Splitwise/other income or expense calculations.
  */
 data class SyncInternalTransferCandidate(
-    val debitTransactionId: Long,
-    val creditTransactionId: Long,
+    val debitTransactionId: String,
+    val creditTransactionId: String,
     val amountMinor: Long,
     val currency: String,
     val timeDifferenceMillis: Long,
