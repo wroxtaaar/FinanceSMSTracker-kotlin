@@ -1447,24 +1447,16 @@ def rebuild_manual_splitwise_total(currency="INR"):
             if is_provisional_row(row):
                 continue
 
-            if transaction_id.startswith("gmail:"):
-                # Gmail is only authoritative when its adjustment was actually
-                # applied by gmail_sync. Do not invent a contribution merely
-                # because an ignored/duplicate Gmail row is still ACTIVE.
-                adjustment = conn.execute(
-                    """SELECT delta_minor FROM splitwise_adjustments
-                       WHERE transaction_id=?""",
-                    (transaction_id,),
-                ).fetchone()
-                if adjustment is not None:
-                    total += int(adjustment["delta_minor"])
-            else:
-                total += splitwise_delta(
-                    row["account_type"],
-                    row["type"],
-                    row["amount_minor"],
-                    row["category"],
-                )
+            # Recalculate from the transaction itself rather than from a
+            # historical splitwise_adjustments row. This is what repairs old
+            # totals created before income/TRANSFER/REFUND/SALARY exclusions
+            # were enforced. Gmail rows use the same canonical rules.
+            total += splitwise_delta(
+                row["account_type"],
+                row["type"],
+                row["amount_minor"],
+                row["category"],
+            )
 
         conn.execute(
             """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
