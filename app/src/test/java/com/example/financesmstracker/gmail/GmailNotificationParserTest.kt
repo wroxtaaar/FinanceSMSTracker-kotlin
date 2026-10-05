@@ -114,4 +114,17 @@ class GmailNotificationParserTest {
 
         assertTrue(result == null)
     }
+    @Test
+    fun parsesAxisUpiReferenceFromNotificationPayload() {
+        val result = GmailNotificationParser.parse(
+            "Axis Bank Alerts",
+            "INR 10.00 was debited from your A/c. UPI/P2A/911389419630/ABDUL WASIQ",
+            null,
+            null
+        )
+
+        assertNotNull(result)
+        assertEquals("911389419630", result!!.refNumber)
+    }
+
 }
