@@ -24,7 +24,7 @@ class TransactionRepositoryTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         context.deleteDatabase("finance_tracker.db")
         dbHelper = FinanceDatabaseHelper(context)
-        repository = TransactionRepository(dbHelper)
+        repository = TransactionRepository(dbHelper, context)
     }
 
     @After
@@ -143,6 +143,37 @@ class TransactionRepositoryTest {
 
         val deletedRows = repository.deleteTransaction(id)
         assertEquals(1, deletedRows)
+        assertNull(repository.getTransactionById(id))
+    }
+
+    @Test
+    fun voidedTransactionsAreExcludedFromSecondaryQueries() {
+        val payee = "voided@upi"
+        val tx = Transaction(
+            amountPaise = 1000L,
+            transactionType = TransactionType.DEBIT,
+            paymentMethod = PaymentMethod.UPI,
+            accountType = AccountType.BANK_ACCOUNT,
+            bank = "HDFC",
+            merchantName = "Voided",
+            payeeId = payee,
+            accountLastFour = "1234",
+            refNumber = "void-1",
+            timestamp = 2_000L,
+            smsHash = HashUtil.sha256("voided-secondary-query"),
+            category = "OTHER",
+            parserConfidence = 0.9f
+        )
+        val id = repository.insertTransaction(tx)
+        assertTrue(id > 0)
+
+        assertEquals(1, repository.getTransactionsByPayee(payee).size)
+        assertEquals(1, repository.getTransactionsByDateRange(1_000L, 3_000L).size)
+
+        assertEquals(1, repository.voidTransaction(id))
+
+        assertTrue(repository.getTransactionsByPayee(payee).isEmpty())
+        assertTrue(repository.getTransactionsByDateRange(1_000L, 3_000L).isEmpty())
         assertNull(repository.getTransactionById(id))
     }
 
