@@ -150,6 +150,46 @@ def _rows_are_duplicate(first, second):
     if not first_bank or not second_bank or first_bank != second_bank:
         return False
 
+    first_payment = str(first["payment_method"] or "").strip().upper()
+    second_payment = str(second["payment_method"] or "").strip().upper()
+    if (
+        first_payment
+        and second_payment
+        and first_payment != "UNKNOWN"
+        and second_payment != "UNKNOWN"
+        and first_payment != second_payment
+    ):
+        return False
+
+    merchant_first = str(first["merchant_or_payee"] or "").strip()
+    merchant_second = str(second["merchant_or_payee"] or "").strip()
+    if not _merchant_values_compatible(merchant_first, merchant_second):
+        return False
+
+    first_source = str(first["id"])
+    second_source = str(second["id"])
+    first_mirror = first_source.startswith("gmail:") or first_source.startswith("notification:")
+    second_mirror = second_source.startswith("gmail:") or second_source.startswith("notification:")
+    cross_source = first_mirror != second_mirror
+
+    if not cross_source:
+        if not first_last4 and not second_last4:
+            return False
+        return abs(int(first["timestamp"]) - int(second["timestamp"])) <= 120_000
+
+    if not first_last4 or not second_last4 or first_last4 != second_last4:
+        return False
+
+    if not merchant_first or merchant_first == "-" or not merchant_second or merchant_second == "-":
+        return False
+
+    if first_source.startswith("gmail:") or second_source.startswith("gmail:"):
+        max_time_diff = 24 * 60 * 60 * 1000
+    else:
+        max_time_diff = 2 * 60 * 60 * 1000
+
+    return abs(int(first["timestamp"]) - int(second["timestamp"])) <= max_time_diff
+
 
 def _duplicate_canonical_score(row):
     ref = bool(normalize_reference(row["reference"]))
