@@ -36,18 +36,19 @@ object InternalTransferCandidateDetector {
             credits
                 .asSequence()
                 .filter { credit ->
-                    credit.id != debit.id &&
-                        credit.currency.equals(debit.currency, ignoreCase = true) &&
-                        credit.amountPaise == debit.amountPaise &&
-                        !sameAccount(debit, credit) &&
-                        isReferenceMatch(debit, credit) ||
-                        (
-                            credit.id != debit.id &&
-                                credit.currency.equals(debit.currency, ignoreCase = true) &&
-                                credit.amountPaise == debit.amountPaise &&
-                                !sameAccount(debit, credit) &&
-                                abs(credit.timestamp - debit.timestamp) <= windowMillis
-                        )
+                    val sameTransferCore =
+                        credit.id != debit.id &&
+                            credit.currency.equals(debit.currency, ignoreCase = true) &&
+                            credit.amountPaise == debit.amountPaise &&
+                            !sameAccount(debit, credit)
+
+                    if (!sameTransferCore) {
+                        false
+                    } else {
+                        val referenceMatch = isReferenceMatch(debit, credit)
+                        val timeMatch = abs(credit.timestamp - debit.timestamp) <= windowMillis
+                        referenceMatch || timeMatch
+                    }
                 }
                 .map { credit ->
                     InternalTransferCandidate(
