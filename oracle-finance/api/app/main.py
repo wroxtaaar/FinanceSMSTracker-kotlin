@@ -30,6 +30,10 @@ repair_missing_balance_adjustments()
 # contribution without requiring a new bank SMS.
 repair_duplicate_transactions()
 match_internal_transfers()
+# Splitwise is a materialized view of the canonical bank/card ledger.
+# Rebuild it after startup repairs so legacy incremental drift is corrected
+# immediately and every app reopen starts from the same source of truth.
+rebuild_manual_splitwise_total()
 
 class SyncTransaction(BaseModel):
     id:str; amountMinor:int; currency:str; type:str; paymentMethod:str; accountType:str
@@ -141,6 +145,10 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
     # The server-side matcher remains authoritative for candidates discovered
     # without Android assistance (for example Gmail-only reconciliation).
     reconcile_all()
+
+    # Rebuild from final canonical bank/card movements. This is intentionally
+    # after duplicate repair and transfer matching so retries are idempotent.
+    rebuild_manual_splitwise_total()
 
     # Splitwise expense creation happens only after internal transfers have
     # been classified, so an own-account debit can never create an expense
