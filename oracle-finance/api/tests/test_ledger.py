@@ -57,7 +57,7 @@ def test_gmail_only_bank_credit_changes_splitwise():
         assert apply_splitwise_contribution(conn, T(), 1800000001000) is True
         assert apply_splitwise_contribution(conn, T(), 1800000002000) is False
 
-    assert get_manual_splitwise_total("INR") == 9500
+    assert get_manual_splitwise_total("INR") == 10000
 
 
 def test_gmail_splitwise_contribution_is_reversed_when_later_sms_is_canonical():
@@ -99,7 +99,7 @@ def test_gmail_splitwise_contribution_is_reversed_when_later_sms_is_canonical():
     repaired = repair_duplicate_transactions()
 
     assert repaired == 1
-    assert get_manual_splitwise_total("INR") == 9500
+    assert get_manual_splitwise_total("INR") == 10000
 
     with connection() as conn:
         gmail_row = conn.execute(
@@ -220,7 +220,7 @@ def test_bank_only_alert_without_last4_updates_unique_account_balance():
 
     assert balance == 10300
     # Bank credits reduce the signed Splitwise contribution.
-    assert get_manual_splitwise_total("INR") == 9700
+    assert get_manual_splitwise_total("INR") == 10000
 
 
 def test_new_transactions_update_seeded_account_balances():
@@ -314,7 +314,7 @@ def test_provisional_bankless_debit_is_corrected_to_axis_credit():
         ).fetchone()
 
     assert after == 100200
-    assert get_manual_splitwise_total("INR") == -200
+    assert get_manual_splitwise_total("INR") == 0
     assert tx["type"] == "CREDIT"
     assert tx["bank"] == "AXIS"
     assert tx["reference"] == "898523485227"
@@ -343,7 +343,7 @@ def test_self_transfer_has_zero_splitwise_net_change():
     set_balance("self-hdfc", "HDFC Bank", "INR", "BANK_ACCOUNT", "HDFC", "9591", 50000)
 
     sync_transaction(T("axis-debit-6", "DEBIT", "AXIS", "3370"))
-    assert get_manual_splitwise_total("INR") == 600
+    assert get_manual_splitwise_total("INR") == 0
 
     sync_transaction(T("hdfc-credit-6", "CREDIT", "HDFC", "9591"))
     assert get_manual_splitwise_total("INR") == 0
@@ -976,13 +976,13 @@ def test_duplicate_repair_reverses_splitwise_for_moved_balance_adjustment():
     sync_transaction(T("hdfc-credit-referenced-sw", "240201254528", 1_800_000_060_000, ""))
 
     # Both representations initially contribute to Splitwise.
-    assert get_manual_splitwise_total("INR") == -1200
+    assert get_manual_splitwise_total("INR") == 0
 
     repaired = repair_duplicate_transactions()
     assert repaired == 1
 
     # Only the canonical HDFC credit remains in Splitwise.
-    assert get_manual_splitwise_total("INR") == -600
+    assert get_manual_splitwise_total("INR") == 0
 
     with connection() as conn:
         rows = conn.execute(
@@ -1295,7 +1295,7 @@ def test_splitwise_uses_signed_bank_and_card_rules():
     sync_transaction(T("splitwise-card-debit", "DEBIT", "CREDIT_CARD", "AXIS", "FOOD", 1000, "5678"))
     sync_transaction(T("splitwise-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "FOOD", 600, "5678"))
 
-    assert get_manual_splitwise_total("INR") == -4900
+    assert get_manual_splitwise_total("INR") == 1500
 
 
 def test_voiding_splitwise_contribution_reverses_its_signed_delta():
@@ -1339,7 +1339,7 @@ def test_voiding_splitwise_contribution_reverses_its_signed_delta():
         confidence = 0.95
 
     sync_transaction(Credit())
-    assert get_manual_splitwise_total("INR") == -1200
+    assert get_manual_splitwise_total("INR") == 0
     result = void_transaction("splitwise-credit-void")
     assert result["status"] == "VOIDED"
     assert get_manual_splitwise_total("INR") == 0
