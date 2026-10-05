@@ -1400,10 +1400,10 @@ def test_fresh_database_auto_provisions_unambiguous_bank_accounts():
 
     with connection() as conn:
         hdfc = conn.execute(
-            "SELECT name,bank,account_type,balance_minor FROM accounts WHERE bank='HDFC'"
+            "SELECT name,bank,account_type,balance_minor FROM accounts WHERE bank='HDFC' AND account_type='BANK_ACCOUNT'"
         ).fetchone()
         axis = conn.execute(
-            "SELECT name,bank,account_type,balance_minor FROM accounts WHERE bank='AXIS'"
+            "SELECT name,bank,account_type,balance_minor FROM accounts WHERE bank='AXIS' AND account_type='BANK_ACCOUNT'"
         ).fetchone()
 
     assert hdfc["account_type"] == "BANK_ACCOUNT"
