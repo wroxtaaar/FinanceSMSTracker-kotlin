@@ -664,7 +664,7 @@ def test_self_transfer_cancels_splitwise_and_preserves_true_available():
     assert after["trueAvailableMinor"] == before["trueAvailableMinor"]
 
 
-def test_true_available_invariant_holds_for_bank_and_card_transactions():
+def test_true_available_reflects_signed_splitwise_and_card_movements():
     from app.ledger import sync_transaction, set_manual_splitwise_total, true_available
 
     class T:
@@ -1365,19 +1365,18 @@ def test_category_edit_updates_splitwise_contribution():
 
     set_balance("category-edit-account", "Category Edit", "INR", "BANK_ACCOUNT", "HDFC", "4321", 100000)
 
-    # Splitwise now follows the canonical bank/card movement regardless of category.
+    # Splitwise follows the canonical bank/card movement regardless of category.
     sync_transaction(T())
     assert get_manual_splitwise_total("INR") == 4200
 
-    # Changing it to any non-OTHER debit category must add its full amount.
+    # Category changes must not alter the signed ledger contribution.
     T.category = "GROCERIES"
     assert sync_transaction(T()) is False
     assert get_manual_splitwise_total("INR") == 4200
 
-    # Changing it back to OTHER must remove that contribution.
     T.category = "OTHER"
     assert sync_transaction(T()) is False
-    assert get_manual_splitwise_total("INR") == 0
+    assert get_manual_splitwise_total("INR") == 4200
 
 
 def test_manual_reconciliation_blocks_late_historical_transactions_but_allows_newer_ones():
