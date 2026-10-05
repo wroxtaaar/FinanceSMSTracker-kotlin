@@ -24,6 +24,13 @@ app=FastAPI(title="Oracle Finance API",version="1.0.0")
 init_db()
 repair_missing_balance_adjustments()
 
+# Repair the existing ledger once at startup as well as on every sync. This is
+# important for transfers that were already stored before the reference-aware
+# matcher was deployed; the first API restart should correct their Splitwise
+# contribution without requiring a new bank SMS.
+repair_duplicate_transactions()
+match_internal_transfers()
+
 class SyncTransaction(BaseModel):
     id:str; amountMinor:int; currency:str; type:str; paymentMethod:str; accountType:str
     bank:Optional[str]=None; merchantOrPayee:Optional[str]=None; accountLast4:Optional[str]=None
