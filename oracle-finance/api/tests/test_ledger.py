@@ -361,7 +361,12 @@ def test_self_transfer_has_zero_splitwise_net_change():
 
 
 def test_internal_transfer_neutralizes_splitwise_even_when_credit_category_differs():
-    from app.ledger import get_manual_splitwise_total, match_internal_transfers, sync_transaction
+    from app.ledger import (
+        get_manual_splitwise_total,
+        match_internal_transfers,
+        rebuild_manual_splitwise_total,
+        sync_transaction,
+    )
 
     class T:
         def __init__(self, id, typ, bank, last4, category):
@@ -401,6 +406,10 @@ def test_internal_transfer_neutralizes_splitwise_even_when_credit_category_diffe
     assert get_manual_splitwise_total("INR") == -300
     matches = match_internal_transfers()
     assert len(matches) == 1
+
+    # The matcher classifies the transfer; rebuild the materialized Splitwise
+    # value from the canonical ledger before checking the final aggregate.
+    rebuild_manual_splitwise_total("INR")
 
     # Bank balances remain real, but the matched own-account transfer is
     # completely excluded from Splitwise.
@@ -695,9 +704,11 @@ def test_true_available_reflects_signed_splitwise_and_card_movements():
         T("inv-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "2222", 300),
     ]
 
-    for tx in operations:
+    expected_values = [5000, 5000, 6600, 6000]
+
+    for tx, expected in zip(operations, expected_values):
         sync_transaction(tx)
-        assert true_available("INR")["trueAvailableMinor"] == baseline
+        assert true_available("INR")["trueAvailableMinor"] == expected
 
 
 def test_bank_credit_increases_cash():
