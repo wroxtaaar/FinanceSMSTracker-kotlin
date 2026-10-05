@@ -1666,3 +1666,75 @@ def test_android_internal_transfer_candidate_is_confirmed_and_neutralized():
     assert result[0]["debitTransactionId"] == "candidate-axis-debit"
     assert result[0]["creditTransactionId"] == "gmail:candidate-hdfc-credit"
     assert get_manual_splitwise_total("INR") == 0
+
+
+def test_self_transfer_sequence_with_nonzero_state_repairs_missing_leg_and_stays_neutral():
+    from app.ledger import get_manual_splitwise_total, match_internal_transfers, sync_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, last4, amount, timestamp, reference):
+            self.id = id
+            self.amountMinor = amount
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "ABDUL WASIQ"
+            self.accountLast4 = last4
+            self.reference = reference
+            self.timestamp = timestamp
+            self.category = "TRANSFER"
+            self.confidence = 1.0
+
+    set_balance("seq-axis", "Axis Bank", "INR", "BANK_ACCOUNT", "AXIS", "3370", 0)
+    set_balance("seq-hdfc", "HDFC Bank", "INR", "BANK_ACCOUNT", "HDFC", "9591", 0)
+
+    # First transfer: HDFC -> Axis ₹10.
+    sync_transaction(T("hdfc-debit-10", "DEBIT", "HDFC", "9591", 1000, 1_900_000_000_000, "528855314160"))
+    sync_transaction(T("axis-credit-10", "CREDIT", "AXIS", "3370", 1000, 1_900_000_100_000, "528855314160"))
+    match_internal_transfers()
+
+    # Do not reset anything. The second transfer is Axis -> HDFC ₹3.
+    # Simulate the real failure mode where the Axis debit row exists but its
+    # account adjustment was not applied yet; the matcher must repair that leg.
+    axis_debit = T(
+        "axis-debit-3",
+        "DEBIT",
+        "AXIS",
+        "3370",
+        300,
+        1_900_000_200_000,
+        "797836991220",
+    )
+    sync_transaction(axis_debit, apply_balance=False)
+    sync_transaction(
+        T(
+            "hdfc-credit-3",
+            "CREDIT",
+            "HDFC",
+            "9591",
+            300,
+            1_900_000_206_000,
+            "797836991220",
+        )
+    )
+
+    match_internal_transfers()
+
+    with connection() as conn:
+        axis = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='seq-axis'"
+        ).fetchone()["balance_minor"]
+        hdfc = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='seq-hdfc'"
+        ).fetchone()["balance_minor"]
+        adjustment = conn.execute(
+            "SELECT delta_minor FROM balance_adjustments WHERE transaction_id='axis-debit-3'"
+        ).fetchone()
+
+    assert axis == 700
+    assert hdfc == -700
+    assert adjustment["delta_minor"] == -300
+    assert get_manual_splitwise_total("INR") == 0
+
