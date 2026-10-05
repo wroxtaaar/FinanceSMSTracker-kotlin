@@ -1,6 +1,6 @@
 package com.example.financesmstracker.parser
 
-import com.example.financesmstracker.util.TransactionReferenceNormalizer
+import com.example.financesmstracker.util.TransactionReferenceExtractor
 import java.util.regex.Pattern
 
 class GenericSmsParser : SmsParser {
@@ -54,16 +54,7 @@ class GenericSmsParser : SmsParser {
 
         val (merchantName, payeeId) = MerchantParser.extractMerchantAndVpa(messageBody)
 
-        val refMatcher = Pattern.compile(
-            "(?:ref|utr)\\.?\\s*:?\\s*([0-9a-zA-Z]+)|UPI/[^/\\s]+/([^/\\s]+)|UPI\\s*[:#-]?\\s*([0-9]{8,})",
-            Pattern.CASE_INSENSITIVE
-        ).matcher(messageBody)
-        val rawRefNumber = if (refMatcher.find()) {
-            refMatcher.group(1) ?: refMatcher.group(2) ?: refMatcher.group(3)
-        } else {
-            null
-        }
-        val refNumber = TransactionReferenceNormalizer.normalize(rawRefNumber)
+        val refNumber = TransactionReferenceExtractor.extract(messageBody)
 
         return ParserResult(
             isTransaction = true,
