@@ -964,6 +964,42 @@ def test_gmail_sms_same_side_duplicate_with_delivery_delay_is_repaired_once():
     assert balance == 9500
 
 
+def test_generic_bank_merchant_does_not_block_same_side_duplicate_repair():
+    from app.ledger import get_manual_splitwise_total, match_internal_transfers, repair_duplicate_transactions, sync_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, last4, merchant, timestamp):
+            self.id = id
+            self.amountMinor = 300
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = merchant
+            self.accountLast4 = last4
+            self.reference = None
+            self.timestamp = timestamp
+            self.category = "TRANSFER"
+            self.confidence = 0.99
+
+    set_balance("dedupe-axis", "Axis 3370", "INR", "BANK_ACCOUNT", "AXIS", "3370", 10000)
+    set_balance("dedupe-hdfc", "HDFC 9591", "INR", "BANK_ACCOUNT", "HDFC", "9591", 20000)
+
+    # The receiving side is represented twice: one source has the real
+    # counterparty, while the notification parser may expose the bank name.
+    sync_transaction(T("axis-debit", "DEBIT", "AXIS", "3370", "ABDUL WASIQ", 1800000000000))
+    sync_transaction(T("hdfc-credit-sms", "CREDIT", "HDFC", "9591", "ABDUL WASIQ", 1800000000000))
+    sync_transaction(T("notification:hdfc-credit", "CREDIT", "HDFC", "9591", "HDFC Bank", 1800000005000))
+
+    repaired = repair_duplicate_transactions()
+    assert repaired == 1
+
+    # Only one HDFC credit remains, then the AXIS debit + HDFC credit pair is
+    # treated as the user's own transfer and removed from Splitwise.
+    assert match_internal_transfers()
+    assert get_manual_splitwise_total("INR") == 0
+
 def test_gmail_notification_same_side_duplicate_with_delay_is_repaired_once():
     from app.ledger import repair_duplicate_transactions, sync_transaction
 
