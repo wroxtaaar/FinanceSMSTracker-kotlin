@@ -1374,3 +1374,39 @@ def test_axis_bank_alias_and_late_transaction_update_balance():
         ).fetchone()["balance_minor"]
 
     assert balance == 100300
+
+
+def test_fresh_database_auto_provisions_unambiguous_bank_accounts():
+    from app.ledger import sync_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, amount):
+            self.id = id
+            self.amountMinor = amount
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = "UNKNOWN"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = "SELF"
+            self.accountLast4 = None
+            self.reference = None
+            self.timestamp = 1800000000000
+            self.category = "TRANSFER"
+            self.confidence = 0.99
+
+    sync_transaction(T("hdfc-debit-fresh", "DEBIT", "HDFC", 300))
+    sync_transaction(T("axis-credit-fresh", "CREDIT", "AXIS", 300))
+
+    with connection() as conn:
+        hdfc = conn.execute(
+            "SELECT name,bank,account_type,balance_minor FROM accounts WHERE bank='HDFC'"
+        ).fetchone()
+        axis = conn.execute(
+            "SELECT name,bank,account_type,balance_minor FROM accounts WHERE bank='AXIS'"
+        ).fetchone()
+
+    assert hdfc["account_type"] == "BANK_ACCOUNT"
+    assert hdfc["balance_minor"] == -300
+    assert axis["account_type"] == "BANK_ACCOUNT"
+    assert axis["balance_minor"] == 300
