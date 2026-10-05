@@ -1288,14 +1288,14 @@ def test_splitwise_uses_signed_bank_and_card_rules():
             self.category = category
             self.confidence = 0.95
 
-    # Bank debit +2500, bank credit -7000, card debit -1000, card credit +600.
+    # Bank debit +2500, bank credit -7000, card debit +1000, card credit -600.
     sync_transaction(T("splitwise-bank-debit", "DEBIT", "BANK_ACCOUNT", "HDFC", "FOOD", 2500, "1234"))
     sync_transaction(T("splitwise-other", "DEBIT", "BANK_ACCOUNT", "HDFC", "OTHER", 9000, "1234"))
     sync_transaction(T("splitwise-bank-credit", "CREDIT", "BANK_ACCOUNT", "HDFC", "FOOD", 7000, "1234"))
     sync_transaction(T("splitwise-card-debit", "DEBIT", "CREDIT_CARD", "AXIS", "FOOD", 1000, "5678"))
     sync_transaction(T("splitwise-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "FOOD", 600, "5678"))
 
-    assert get_manual_splitwise_total("INR") == -4900
+    assert get_manual_splitwise_total("INR") == 4900
 
 
 def test_voiding_splitwise_contribution_reverses_its_signed_delta():
@@ -1365,9 +1365,9 @@ def test_category_edit_updates_splitwise_contribution():
 
     set_balance("category-edit-account", "Category Edit", "INR", "BANK_ACCOUNT", "HDFC", "4321", 100000)
 
-    # Original transaction is explicitly excluded from Splitwise.
+    # Splitwise now follows the canonical bank/card movement regardless of category.
     sync_transaction(T())
-    assert get_manual_splitwise_total("INR") is None
+    assert get_manual_splitwise_total("INR") == 4200
 
     # Changing it to any non-OTHER debit category must add its full amount.
     T.category = "GROCERIES"
