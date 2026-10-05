@@ -1668,6 +1668,19 @@ def list_transfers():
     with connection() as conn:
         return [dict(r) for r in conn.execute("SELECT * FROM internal_transfers ORDER BY created_at DESC").fetchall()]
 
+def is_internal_transfer_transaction(transaction_id):
+    """Return True when a canonical transaction is one leg of a matched own-account transfer."""
+    with connection() as conn:
+        row = conn.execute(
+            """SELECT 1 FROM internal_transfers
+               WHERE status='MATCHED'
+                 AND (debit_transaction_id=? OR credit_transaction_id=?)
+               LIMIT 1""",
+            (str(transaction_id), str(transaction_id)),
+        ).fetchone()
+        return row is not None
+
+
 def upsert_splitwise_rule(item):
     with connection() as conn:
         conn.execute("""INSERT INTO splitwise_rules(id,merchant_pattern,group_id,split_mode,user_shares_json,enabled,created_at)
