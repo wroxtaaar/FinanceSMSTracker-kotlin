@@ -183,9 +183,9 @@ class MainActivity : AppCompatActivity() {
             showOracleSettingsDialog()
         }
 
-        buttonGmailSync.setOnClickListener {
-            triggerManualGmailSync()
-        }
+        // Gmail is intentionally disabled while SMS/notification ingestion is being tested.
+        buttonGmailSync.isEnabled = false
+        buttonGmailSync.text = "Gmail Disabled"
 
         buttonReviewReconcile.setOnClickListener {
             startActivity(Intent(this, ReviewActivity::class.java))
@@ -238,7 +238,6 @@ class MainActivity : AppCompatActivity() {
         loadTransactions()
         updateNotificationAccessStatus()
         loadOracleSummary()
-        syncOracleGmailTransactions()
     }
 
     private fun showClearLocalHistoryDialog() {
@@ -263,12 +262,9 @@ class MainActivity : AppCompatActivity() {
             // clear. Timestamp cutoffs are useful, but an imported email can
             // carry a bad/future event timestamp. Exact tombstones make the
             // clear operation durable across app restarts and re-syncs.
-            val remoteIds = runCatching {
-                FinanceSyncClient(this@MainActivity).fetchGmailTransactions()
-                    .getOrDefault(emptyList())
-                    .map { it.id.toString() }
-                    .toSet()
-            }.getOrDefault(emptySet())
+            // Gmail is disabled during SMS/notification testing. Do not contact
+            // any Gmail endpoint even when clearing local history.
+            val remoteIds = emptySet<String>()
 
             val existingLocalHashes = repository.getAllTransactions()
                 .mapNotNull { it.smsHash.takeIf(String::isNotBlank) }
@@ -840,46 +836,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun triggerManualGmailSync() {
-        buttonGmailSync.isEnabled = false
-        buttonGmailSync.text = "Checking Gmail..."
-
-        oracleExecutor.execute {
-            val result = FinanceSyncClient(this@MainActivity).triggerGmailSync()
-
-            runOnUiThread {
-                buttonGmailSync.isEnabled = true
-                buttonGmailSync.text = "Check Gmail"
-
-                result.onSuccess { sync ->
-                    loadOracleSummary()
-                    syncOracleGmailTransactions()
-
-                    val message = buildString {
-                        append("Gmail checked\n\n")
-                        append("Messages scanned: ${sync.messagesScanned}\n")
-                        append("New transaction emails: ${sync.parsedTransactions}\n")
-                        append("Axis credits found: ${sync.axisCredits}\n")
-                        append("Already processed: ${sync.alreadyProcessed}\n")
-                        append("Corrected old Gmail transactions: ${sync.repairedTransactions}\n")
-                        append("Duplicates skipped: ${sync.duplicateTransactions}\n")
-                        append("Needs review: ${sync.reviewCount}\n")
-                        append("Ignored: ${sync.ignoredCount}")
-                    }
-
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Gmail Sync")
-                        .setMessage(message)
-                        .setPositiveButton("OK", null)
-                        .show()
-                }.onFailure { error ->
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Gmail check failed: " + (error.message ?: "Unavailable"),
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
+        // Defense-in-depth: the button is disabled and the Oracle API also
+        // rejects Gmail sync while Gmail is disabled.
+        Toast.makeText(this, "Gmail is disabled", Toast.LENGTH_SHORT).show()
     }
 
     private fun updateReviewCount() {
