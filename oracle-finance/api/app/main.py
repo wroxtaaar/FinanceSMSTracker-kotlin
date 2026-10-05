@@ -22,6 +22,7 @@ from .gmail_auth import (
 
 app=FastAPI(title="Oracle Finance API",version="1.0.0")
 init_db()
+repair_missing_balance_adjustments()
 
 class SyncTransaction(BaseModel):
     id:str; amountMinor:int; currency:str; type:str; paymentMethod:str; accountType:str
