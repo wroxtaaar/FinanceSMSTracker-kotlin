@@ -12,7 +12,6 @@ from .ledger import (
     sync_card_bill,
     void_transaction,
     match_internal_transfers,
-    rebuild_manual_splitwise_total,
 )
 from .main_models import SyncTransactionModel,SyncEvidenceModel
 from .statement_sync import process_statement_attachments
@@ -1590,10 +1589,6 @@ def ingest_messages(service,query="newer_than:30d"):
     # internal transfers here too.
     stats["internalTransfersMatched"] = match_internal_transfers()
 
-    # Gmail ingestion can run independently of the Android sync endpoint.
-    # Rebuild here as well so scheduled Gmail syncs cannot reintroduce a stale
-    # materialized Splitwise total.
-    rebuild_manual_splitwise_total()
 
     return stats
 
