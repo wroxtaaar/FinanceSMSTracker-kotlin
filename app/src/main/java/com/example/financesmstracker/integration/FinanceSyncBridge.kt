@@ -1,7 +1,11 @@
 package com.example.financesmstracker.integration
 
 import android.content.Context
+import com.example.financesmstracker.data.FinanceDatabaseHelper
 import com.example.financesmstracker.data.Transaction
+import com.example.financesmstracker.data.TransactionRepository
+import com.example.financesmstracker.transfer.InternalTransferCandidateDetector
+import com.example.financesmstracker.util.TransactionReferenceNormalizer
 import com.example.financesmstracker.evidence.SourceEvidence
 import java.util.concurrent.Executors
 
@@ -52,7 +56,11 @@ object FinanceSyncBridge {
                 val service = FinanceSyncService(appContext)
                 service.enqueue(
                     transactions = listOf(FinanceSyncMapper.toSyncTransaction(transaction)),
-                    evidence = emptyList()
+                    evidence = emptyList(),
+                    internalTransferCandidates = detectInternalTransferCandidates(
+                        appContext,
+                        transaction
+                    )
                 )
                 service.flush()
             }
@@ -114,12 +122,68 @@ object FinanceSyncBridge {
         executor.execute {
             runCatching {
                 val service = FinanceSyncService(appContext)
+                val candidates = transactions
+                    .flatMap { detectInternalTransferCandidates(appContext, it) }
+                    .distinctBy { candidate ->
+                        "${candidate.debitTransactionId}:${candidate.creditTransactionId}"
+                    }
+
                 service.enqueue(
                     transactions = transactions.map(FinanceSyncMapper::toSyncTransaction),
-                    evidence = evidence.map(FinanceSyncMapper::toSyncEvidence)
+                    evidence = evidence.map(FinanceSyncMapper::toSyncEvidence),
+                    internalTransferCandidates = candidates
                 )
                 service.flush()
             }
         }
+    }
+
+    private fun detectInternalTransferCandidates(
+        context: Context,
+        transaction: Transaction
+    ): List<SyncInternalTransferCandidate> {
+        if (transaction.accountType != com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT) {
+            return emptyList()
+        }
+
+        // Search a bounded local window. The detector itself only uses the wider
+        // window for reference/UTR matches; amount-only matches still require
+        // the strict ten-minute transfer window.
+        val repository = TransactionRepository(
+            FinanceDatabaseHelper(context),
+            context
+        )
+        val searchRadius = 48L * 60L * 60L * 1000L
+        val candidates = InternalTransferCandidateDetector.findCandidates(
+            repository.getTransactionsByDateRange(
+                transaction.timestamp - searchRadius,
+                transaction.timestamp + searchRadius
+            )
+        )
+
+        return candidates
+            .filter { it.debit.id == transaction.id || it.credit.id == transaction.id }
+            .map { candidate ->
+                val debitReference = TransactionReferenceNormalizer.normalize(candidate.debit.refNumber)
+                val creditReference = TransactionReferenceNormalizer.normalize(candidate.credit.refNumber)
+                val matchType =
+                    if (
+                        !debitReference.isNullOrBlank() &&
+                        debitReference.equals(creditReference, ignoreCase = true)
+                    ) {
+                        InternalTransferMatchType.REFERENCE
+                    } else {
+                        InternalTransferMatchType.AMOUNT_TIME
+                    }
+
+                SyncInternalTransferCandidate(
+                    debitTransactionId = candidate.debit.id,
+                    creditTransactionId = candidate.credit.id,
+                    amountMinor = candidate.debit.amountPaise,
+                    currency = candidate.debit.currency,
+                    timeDifferenceMillis = candidate.timeDifferenceMillis,
+                    matchType = matchType
+                )
+            }
     }
 }
