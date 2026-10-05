@@ -797,11 +797,16 @@ def _auto_provision_bank_account(conn, t, bank, last4, now_ms):
         if bank_rows:
             return None
 
-    # Without a last-four, a bank transaction can only be auto-provisioned if
-    # this bank has no configured account at all. This prevents two accounts at
-    # the same bank from being merged accidentally.
+    # Without a last-four, do not guess for a transaction that already has
+    # a concrete payment method. The legacy balance-matching path only allowed
+    # this fallback for UNKNOWN notification rows. Keep that boundary here too:
+    # a known UPI/card transaction without a last-four must wait for a stronger
+    # account identity rather than applying a second balance adjustment.
     if bank_rows:
-        if len(bank_rows) == 1:
+        if (
+            len(bank_rows) == 1
+            and str(getattr(t, "paymentMethod", "") or "").strip().upper() == "UNKNOWN"
+        ):
             return bank_rows[0]
         return None
 
