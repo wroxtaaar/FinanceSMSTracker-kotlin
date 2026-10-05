@@ -1547,6 +1547,64 @@ def test_fresh_database_auto_provisions_unambiguous_bank_accounts():
     assert axis["account_type"] == "BANK_ACCOUNT"
     assert axis["balance_minor"] == 300
 
+def test_referenced_mirror_with_missing_merchant_is_collapsed_and_splitwise_reversed():
+    from app.ledger import get_manual_splitwise_total, repair_duplicate_transactions, sync_transaction
+
+    class T:
+        def __init__(self, id, typ, bank, last4, reference, merchant, payment):
+            self.id = id
+            self.amountMinor = 600
+            self.currency = "INR"
+            self.type = typ
+            self.paymentMethod = payment
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = bank
+            self.merchantOrPayee = merchant
+            self.accountLast4 = last4
+            self.reference = reference
+            self.timestamp = 1_950_000_000_000
+            self.category = "GROCERIES"
+            self.confidence = 1.0
+
+    set_balance("mirror-axis", "Axis Bank", "INR", "BANK_ACCOUNT", "AXIS", "3370", 0)
+
+    sync_transaction(
+        T("axis-local-6", "DEBIT", "AXIS", "3370", None, "-", "UNKNOWN")
+    )
+    sync_transaction(
+        T(
+            "notification:axis-detailed-6",
+            "DEBIT",
+            "AXIS",
+            "3370",
+            "299284702774",
+            "ABDUL WASIQ",
+            "UPI",
+        )
+    )
+
+    assert get_manual_splitwise_total("INR") == 600
+
+    repaired = repair_duplicate_transactions()
+
+    with connection() as conn:
+        active = conn.execute(
+            "SELECT id,reference,merchant_or_payee,status,duplicate_of "
+            "FROM transactions WHERE status='ACTIVE' ORDER BY id"
+        ).fetchall()
+        voided = conn.execute(
+            "SELECT id,duplicate_of,status FROM transactions WHERE status='VOIDED'"
+        ).fetchall()
+
+    assert repaired == 1
+    assert len(active) == 1
+    assert active[0]["reference"] == "299284702774"
+    assert active[0]["merchant_or_payee"] == "ABDUL WASIQ"
+    assert len(voided) == 1
+    assert voided[0]["duplicate_of"] == active[0]["id"]
+    assert get_manual_splitwise_total("INR") == 0
+
+
 def test_gmail_credit_and_sms_debit_self_transfer_neutralizes_splitwise():
     from app.ledger import get_manual_splitwise_total, match_internal_transfers, sync_transaction
 
