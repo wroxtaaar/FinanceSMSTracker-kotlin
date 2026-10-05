@@ -437,7 +437,16 @@ def _repair_legacy_gmail_account_classifications():
                 gm.id AS gmail_id,
                 gm.sender,
                 gm.subject,
-                a.id AS target_account_id,
+                (
+                    SELECT a.id
+                    FROM accounts a
+                    WHERE a.account_type = 'BANK_ACCOUNT'
+                      AND a.currency = t.currency
+                      AND UPPER(TRIM(COALESCE(a.bank,''))) = 'AXIS'
+                      AND TRIM(COALESCE(a.last4,'')) = TRIM(COALESCE(t.account_last4,''))
+                    ORDER BY a.updated_at DESC
+                    LIMIT 1
+                ) AS target_account_id,
                 ba.account_id AS adjustment_account_id,
                 ba.delta_minor AS adjustment_delta
             FROM transactions t
@@ -449,11 +458,6 @@ def _repair_legacy_gmail_account_classifications():
                    gm.id = e.source_id
                    OR e.source_id LIKE 'imap:%:' || gm.id
                  )
-            JOIN accounts a
-              ON a.account_type = 'BANK_ACCOUNT'
-             AND a.currency = t.currency
-             AND UPPER(TRIM(COALESCE(a.bank,''))) = 'AXIS'
-             AND TRIM(COALESCE(a.last4,'')) = TRIM(COALESCE(t.account_last4,''))
             LEFT JOIN balance_adjustments ba
               ON ba.transaction_id = t.id
             WHERE t.id LIKE 'gmail:%'
