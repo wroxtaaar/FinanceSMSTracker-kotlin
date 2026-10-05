@@ -15,8 +15,16 @@ class CrossSourceMatchCoordinator(
             return
         }
 
-        val candidateTransactions = if (!evidence.reference.isNullOrBlank()) {
+        // Reference is the first lookup. If the canonical transaction has not
+        // received the reference yet, fall back to amount candidates so the
+        // arriving reference can enrich that canonical row.
+        val referenceCandidates = if (!evidence.reference.isNullOrBlank()) {
             repository.getTransactionsByReference(evidence.reference)
+        } else {
+            emptyList()
+        }
+        val candidateTransactions = if (referenceCandidates.isNotEmpty()) {
+            referenceCandidates
         } else {
             repository.getTransactionsByAmount(evidence.amountPaise)
         }
@@ -40,8 +48,13 @@ class CrossSourceMatchCoordinator(
                 continue
             }
 
-            val candidateTransactions = if (!evidence.reference.isNullOrBlank()) {
+            val referenceCandidates = if (!evidence.reference.isNullOrBlank()) {
                 repository.getTransactionsByReference(evidence.reference)
+            } else {
+                emptyList()
+            }
+            val candidateTransactions = if (referenceCandidates.isNotEmpty()) {
+                referenceCandidates
             } else {
                 repository.getTransactionsByAmount(evidence.amountPaise)
             }
