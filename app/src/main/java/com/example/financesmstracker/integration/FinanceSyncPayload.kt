@@ -11,6 +11,7 @@ object FinanceSyncPayload {
     fun build(
         transactions: List<SyncTransaction>,
         evidence: List<SyncEvidence>,
+        internalTransferCandidates: List<SyncInternalTransferCandidate> = emptyList(),
         voidedTransactionIds: List<Long> = emptyList(),
         cardBills: List<SyncCardBill> = emptyList()
     ): String {
@@ -59,6 +60,20 @@ object FinanceSyncPayload {
             appendNullableString(out, "contentHash", e.contentHash)
             require(e.confidence.isFinite()) { "evidence confidence must be finite" }
             out.append(",\"confidence\":").append(e.confidence)
+            out.append("}")
+        }
+        out.append("]")
+
+        out.append(",\"internalTransferCandidates\":[")
+        internalTransferCandidates.forEachIndexed { index, candidate ->
+            if (index > 0) out.append(",")
+            out.append("{")
+            out.append("\"debitTransactionId\":").append(jsonString(candidate.debitTransactionId.toString()))
+            out.append(",\"creditTransactionId\":").append(jsonString(candidate.creditTransactionId.toString()))
+            out.append(",\"amountMinor\":").append(candidate.amountMinor)
+            out.append(",\"currency\":").append(jsonString(candidate.currency))
+            out.append(",\"timeDifferenceMillis\":").append(candidate.timeDifferenceMillis)
+            out.append(",\"matchType\":").append(jsonString(candidate.matchType.name))
             out.append("}")
         }
         out.append("]")
