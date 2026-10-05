@@ -1,6 +1,6 @@
 import json, os, urllib.error, urllib.parse, urllib.request
 from decimal import Decimal, ROUND_HALF_UP
-from .ledger import get_splitwise_rule_for, record_splitwise_expense, splitwise_expense_for
+from .ledger import get_splitwise_rule_for, record_splitwise_expense, splitwise_expense_for, is_internal_transfer_transaction
 
 BASE_URL="https://secure.splitwise.com/api/v3.0"
 
@@ -38,6 +38,13 @@ def create_for_transaction(tx):
     existing=splitwise_expense_for(tx["id"])
     if existing and existing["status"]=="CREATED":
         return existing
+
+    # Own-account transfers are ledger movements, not shared expenses. The
+    # ledger classifies them before this function is called; never create a
+    # Splitwise expense for either leg.
+    if is_internal_transfer_transaction(tx["id"]):
+        return None
+
     rule=get_splitwise_rule_for(tx.get("merchant_or_payee"))
     if not rule or tx["type"]!="DEBIT" or not enabled():
         return None
