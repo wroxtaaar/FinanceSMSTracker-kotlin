@@ -6,6 +6,14 @@ class SyncTransactionModel(BaseModel):
     bank: Optional[str]=None; merchantOrPayee: Optional[str]=None; accountLast4: Optional[str]=None
     reference: Optional[str]=None; timestamp: int; category: str="OTHER"; confidence: float=0.0
 
+class SyncInternalTransferCandidateModel(BaseModel):
+    debitTransactionId: str
+    creditTransactionId: str
+    amountMinor: int
+    currency: str = "INR"
+    timeDifferenceMillis: int = 0
+    matchType: str = "AMOUNT_TIME"
+
 class SyncEvidenceModel(BaseModel):
     id: str; sourceType: str; sourceId: str; status: str; observedAt: int
     transactionId: Optional[str]=None; matchedTransactionId: Optional[str]=None
