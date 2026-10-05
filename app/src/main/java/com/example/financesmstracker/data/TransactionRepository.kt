@@ -163,19 +163,37 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                         // If Gmail sync ran before the SMS arrived, reuse that canonical
                         // row instead of creating a second SMS transaction.
                         val values = ContentValues().apply {
+                            // New evidence enriches the canonical row; it must never
+                            // erase a reference/details captured by an earlier source.
                             put(FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE, transaction.amountPaise)
                             put(FinanceDatabaseHelper.COLUMN_CURRENCY, transaction.currency)
                             put(FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE, transaction.transactionType.name)
-                            put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod.name)
-                            put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType.name)
-                            put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
-                            put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantName)
-                            put(FinanceDatabaseHelper.COLUMN_PAYEE_ID, transaction.payeeId)
-                            put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLastFour)
-                            put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, transaction.refNumber)
+                            if (transaction.paymentMethod != PaymentMethod.UNKNOWN) {
+                                put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, transaction.paymentMethod.name)
+                            }
+                            if (transaction.accountType != AccountType.UNKNOWN) {
+                                put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, transaction.accountType.name)
+                            }
+                            if (!transaction.bank.isNullOrBlank()) {
+                                put(FinanceDatabaseHelper.COLUMN_BANK, transaction.bank)
+                            }
+                            if (!transaction.merchantName.isNullOrBlank() && transaction.merchantName != "-") {
+                                put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantName)
+                            }
+                            if (!transaction.payeeId.isNullOrBlank()) {
+                                put(FinanceDatabaseHelper.COLUMN_PAYEE_ID, transaction.payeeId)
+                            }
+                            if (!transaction.accountLastFour.isNullOrBlank()) {
+                                put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, transaction.accountLastFour)
+                            }
+                            TransactionReferenceNormalizer.normalize(transaction.refNumber)?.let {
+                                put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, it)
+                            }
                             put(FinanceDatabaseHelper.COLUMN_TIMESTAMP, transaction.timestamp)
                             put(FinanceDatabaseHelper.COLUMN_SMS_HASH, transaction.smsHash)
-                            put(FinanceDatabaseHelper.COLUMN_CATEGORY, transaction.category)
+                            if (!transaction.category.isNullOrBlank()) {
+                                put(FinanceDatabaseHelper.COLUMN_CATEGORY, transaction.category)
+                            }
                             put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, transaction.parserConfidence)
                         }
                         db.update(
@@ -642,6 +660,10 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                 MatchOutcome.MATCHED -> {
                     if (result.matchedTransactionId != null) {
                         updateSourceEvidenceMatchInternal(db, evidenceId, result.matchedTransactionId, EvidenceStatus.MATCHED)
+                        val matchedEvidence = cursorToEvidenceForWrite(db, evidenceId)
+                        if (matchedEvidence != null) {
+                            enrichTransactionFromEvidenceInternal(db, result.matchedTransactionId, matchedEvidence)
+                        }
                         Log.d("FinanceSource", "CROSS_SOURCE_MATCH -> evidenceId: $evidenceId, transactionId: ${result.matchedTransactionId}, result: MATCHED, reasons: ${result.reasons}")
                     }
                 }
@@ -660,6 +682,59 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         }
     }
 
+    private fun cursorToEvidenceForWrite(db: SQLiteDatabase, id: Long): SourceEvidence? {
+        db.query(
+            FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE,
+            null,
+            FinanceDatabaseHelper.COLUMN_EVIDENCE_ID + " = ?",
+            arrayOf(id.toString()),
+            null, null, null
+        ).use { cursor ->
+            if (cursor.moveToFirst()) return cursorToEvidence(cursor)
+        }
+        return null
+    }
+
+    private fun enrichTransactionFromEvidenceInternal(
+        db: SQLiteDatabase,
+        transactionId: Long,
+        evidence: SourceEvidence
+    ) {
+        val current = db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            null,
+            FinanceDatabaseHelper.COLUMN_ID + " = ?",
+            arrayOf(transactionId.toString()),
+            null, null, null
+        ).use { cursor ->
+            if (cursor.moveToFirst()) cursorToTransaction(cursor) else null
+        } ?: return
+
+        val values = ContentValues()
+        if (TransactionReferenceNormalizer.normalize(current.refNumber) == null) {
+            TransactionReferenceNormalizer.normalize(evidence.reference)?.let {
+                values.put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, it)
+            }
+        }
+        if (current.bank.isNullOrBlank() && !evidence.bankProvider.isNullOrBlank()) {
+            values.put(FinanceDatabaseHelper.COLUMN_BANK, evidence.bankProvider)
+        }
+        if (current.accountLastFour.isNullOrBlank() && !evidence.accountLastFour.isNullOrBlank()) {
+            values.put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, evidence.accountLastFour)
+        }
+        if (evidence.confidence > current.parserConfidence) {
+            values.put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, evidence.confidence)
+        }
+        if (values.size() > 0) {
+            db.update(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                values,
+                FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                arrayOf(transactionId.toString())
+            )
+            Log.d("FinanceSource", "TRANSACTION_ENRICHED_FROM_EVIDENCE -> transactionId=$transactionId, reference=${evidence.reference}")
+        }
+    }
     fun getUnresolvedEvidence(): List<SourceEvidence> {
         val list = mutableListOf<SourceEvidence>()
         val db = dbHelper.readableDatabase
