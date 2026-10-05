@@ -230,18 +230,13 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
 
-        // Clean up any same-side duplicates that may have been created by
-        // separate SMS/notification delivery before the latest reconciliation
-        // rules were installed. Legitimate opposite-side transfers are kept.
-        repository.repairCanonicalDuplicates().forEach { duplicateId ->
-            FinanceSyncBridge.enqueueVoidedTransaction(this, duplicateId)
-        }
-
+        // onResume can run every time the activity is brought to the
+        // foreground. It must be read-only with respect to the Oracle ledger.
+        // Duplicate repair and notification ingestion happen in their source
+        // pipelines; doing them here can turn a simple app reopen into a
+        // financial mutation.
         loadTransactions()
         updateNotificationAccessStatus()
-        if (NotificationAccessHelper.isNotificationAccessGranted(this)) {
-            NotificationAccessHelper.requestRebind(this)
-        }
         loadOracleSummary()
         syncOracleGmailTransactions()
     }
@@ -944,21 +939,14 @@ class MainActivity : AppCompatActivity() {
                         if (rowId != 0L) {
                             changed++
 
-                            // A transaction created from Oracle's Gmail ledger is
-                            // a local mirror, not new financial evidence. Never
-                            // send that mirror back to Oracle or it can be treated
-                            // as a new transaction and apply the bank/card balance
-                            // again. If Gmail instead enriched an existing SMS or
-                            // notification row, that canonical local row is safe
-                            // to push back.
-                            repository.getTransactionById(rowId)?.let { local ->
-                                if (!local.smsHash.startsWith("oracle:gmail:")) {
-                                    FinanceSyncBridge.enqueueCanonical(
-                                        this@MainActivity,
-                                        local
-                                    )
-                                }
-                            }
+                            // Pulling an Oracle Gmail row is a read/rehydration
+                            // operation. Do not enqueue the resolved local row back
+                            // to Oracle merely because the app was reopened.
+                            // Re-sending here can replay metadata/category changes
+                            // and make the mutable Splitwise aggregate drift on
+                            // every startup. User edits and new local evidence have
+                            // their own explicit sync paths.
+                            Unit
                         }
                     }
 
