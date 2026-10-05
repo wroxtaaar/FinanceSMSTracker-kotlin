@@ -30,7 +30,6 @@ repair_missing_balance_adjustments()
 # contribution without requiring a new bank SMS.
 repair_duplicate_transactions()
 match_internal_transfers()
-rebuild_manual_splitwise_total()
 
 class SyncTransaction(BaseModel):
     id:str; amountMinor:int; currency:str; type:str; paymentMethod:str; accountType:str
@@ -150,11 +149,6 @@ def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
         row=next((x for x in list_transactions(1000) if x["id"]==t.id),None)
         if row and not row.get("duplicate_of"): create_for_transaction(row)
 
-    # Rebuild the materialized Splitwise total from the canonical ledger after
-    # all duplicate/transfer reconciliation. This makes repeated app-open
-    # syncs idempotent and repairs totals left behind by older incremental
-    # accounting bugs.
-    rebuild_manual_splitwise_total()
     return {"acceptedTransactions":new_t,"acceptedEvidence":new_e,
             "duplicateTransactions":len(payload.transactions)-new_t,
             "duplicateEvidence":len(payload.evidence)-new_e,
