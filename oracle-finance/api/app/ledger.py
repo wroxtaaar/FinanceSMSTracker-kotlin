@@ -363,6 +363,10 @@ def repair_duplicate_transactions():
             ).fetchone()
 
             if canonical_adjustment is None and duplicate_adjustment is not None:
+                # Move the already-applied bank adjustment to the canonical row,
+                # but still reverse any Splitwise contribution belonging to the
+                # duplicate. The old fast path marked the duplicate VOIDED
+                # directly, which left its Splitwise delta behind.
                 conn.execute(
                     "DELETE FROM balance_adjustments WHERE transaction_id=?",
                     (duplicate["id"],),
@@ -377,6 +381,49 @@ def repair_duplicate_transactions():
                         duplicate_adjustment["applied_at"],
                     ),
                 )
+
+                duplicate_tx = conn.execute(
+                    "SELECT id,account_type,type,amount_minor,category,currency FROM transactions WHERE id=?",
+                    (duplicate["id"],),
+                ).fetchone()
+                duplicate_splitwise_adjustment = conn.execute(
+                    "SELECT currency,delta_minor FROM splitwise_adjustments WHERE transaction_id=?",
+                    (duplicate["id"],),
+                ).fetchone()
+                if duplicate_splitwise_adjustment:
+                    splitwise_delta_to_reverse = int(duplicate_splitwise_adjustment["delta_minor"])
+                    splitwise_currency = duplicate_splitwise_adjustment["currency"]
+                    conn.execute(
+                        """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
+                           VALUES(?,?,?)
+                           ON CONFLICT(currency) DO UPDATE SET
+                               amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
+                               updated_at=excluded.updated_at""",
+                        (splitwise_currency, -splitwise_delta_to_reverse, now_ms()),
+                    )
+                    conn.execute(
+                        "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
+                        (duplicate["id"],),
+                    )
+                elif duplicate_tx and not str(duplicate_tx["id"]).startswith("gmail:"):
+                    splitwise_delta_to_reverse = splitwise_delta(
+                        duplicate_tx["account_type"],
+                        duplicate_tx["type"],
+                        duplicate_tx["amount_minor"],
+                        duplicate_tx["category"],
+                    )
+                    if splitwise_delta_to_reverse:
+                        conn.execute(
+                            """UPDATE manual_splitwise_total
+                               SET amount_minor=amount_minor-?, updated_at=?
+                               WHERE currency=?""",
+                            (
+                                splitwise_delta_to_reverse,
+                                now_ms(),
+                                duplicate_tx["currency"],
+                            ),
+                        )
+
                 conn.execute(
                     "UPDATE transactions SET status='VOIDED', duplicate_of=? WHERE id=?",
                     (canonical["id"], duplicate["id"]),
@@ -1672,4 +1719,3 @@ def reconcile_duplicate_transaction(transaction_id):
                 "enriched":bool(enrichment),
             }
     return None
-
