@@ -260,4 +260,67 @@ class CrossSourceMatcherTest {
     }
 
 
+    @Test
+    fun referenceBearingEvidenceCannotMatchDifferentBankWhenCandidateReferenceIsMissing() {
+        val axisDebitWithoutReference = createDummyTx(
+            id = 14L,
+            amountPaise = 1000L,
+            type = TransactionType.DEBIT,
+            bank = "AXIS",
+            ref = null,
+            timestamp = 2_000_000L,
+            lastFour = "3370"
+        )
+        val hdfcCreditEvidence = SourceEvidence(
+            sourceType = SourceType.GMAIL_NOTIFICATION,
+            sourceKey = "hdfc-credit",
+            receivedAt = 2_000_500L,
+            amountPaise = 1000L,
+            direction = "DEBIT",
+            bankProvider = "HDFC",
+            accountLastFour = "9591",
+            reference = "466331770891",
+            contentHash = "hdfc-credit"
+        )
+
+        val result = CrossSourceMatcher.match(
+            hdfcCreditEvidence,
+            listOf(axisDebitWithoutReference)
+        )
+
+        assertEquals(MatchOutcome.UNMATCHED, result.outcome)
+    }
+
+    @Test
+    fun referenceBearingEvidenceCanEnrichSameAccountWhenCandidateReferenceIsMissing() {
+        val hdfcDebitWithoutReference = createDummyTx(
+            id = 15L,
+            amountPaise = 1000L,
+            type = TransactionType.DEBIT,
+            bank = "HDFC",
+            ref = null,
+            timestamp = 3_000_000L,
+            lastFour = "9591"
+        )
+        val hdfcEvidence = SourceEvidence(
+            sourceType = SourceType.GMAIL_NOTIFICATION,
+            sourceKey = "hdfc-debit",
+            receivedAt = 3_000_500L,
+            amountPaise = 1000L,
+            direction = "DEBIT",
+            bankProvider = "HDFC",
+            accountLastFour = "9591",
+            reference = "466331770891",
+            contentHash = "hdfc-debit"
+        )
+
+        val result = CrossSourceMatcher.match(
+            hdfcEvidence,
+            listOf(hdfcDebitWithoutReference)
+        )
+
+        assertEquals(MatchOutcome.MATCHED, result.outcome)
+        assertEquals(15L, result.matchedTransactionId)
+    }
+
 }
