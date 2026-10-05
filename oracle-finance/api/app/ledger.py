@@ -88,6 +88,23 @@ def _merchant_values_compatible(first, second):
     b = str(second or "").strip().upper()
     if not a or not b or a == "-" or b == "-":
         return True
+
+    # Bank-generated notifications sometimes use the issuer name itself as
+    # the payee/merchant (for example "HDFC Bank"), while the SMS/email side
+    # contains the actual counterparty ("ABDUL WASIQ"). That label is not
+    # transaction identity and must not prevent same-side duplicate collapse.
+    generic_merchant_labels = {
+        "HDFC BANK",
+        "AXIS BANK",
+        "ICICI BANK",
+        "SBI BANK",
+        "STATE BANK OF INDIA",
+        "HSBC BANK",
+        "INDUSIND BANK",
+    }
+    if a in generic_merchant_labels or b in generic_merchant_labels:
+        return True
+
     return a == b or a in b or b in a
 
 
