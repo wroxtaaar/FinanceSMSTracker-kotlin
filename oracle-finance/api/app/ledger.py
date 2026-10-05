@@ -728,6 +728,17 @@ def sync_transaction(t, apply_balance=True):
                     (t.currency, delta, created_at),
                 )
 
+            # A category edit can change the signed Splitwise contribution of
+            # an already-matched internal-transfer leg. Allow the idempotent
+            # neutralizer to recompute the pair from the new contribution.
+            conn.execute(
+                """UPDATE internal_transfers
+                   SET splitwise_neutralized=0
+                   WHERE status='MATCHED'
+                     AND (debit_transaction_id=? OR credit_transaction_id=?)""",
+                (t.id, t.id),
+            )
+
         return before is None
 
 def _normalize_account_bank(value):
