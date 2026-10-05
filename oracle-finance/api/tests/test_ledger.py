@@ -114,6 +114,43 @@ def test_gmail_splitwise_contribution_is_reversed_when_later_sms_is_canonical():
     assert gmail_row["duplicate_of"] == sms.id
     assert sms_row["status"] == "ACTIVE"
 
+def test_exact_reference_is_primary_duplicate_identity():
+    from app.ledger import repair_duplicate_transactions, sync_transaction
+
+    class T:
+        def __init__(self, id, amount, reference):
+            self.id = id
+            self.amountMinor = amount
+            self.currency = "INR"
+            self.type = "DEBIT"
+            self.paymentMethod = "UPI"
+            self.accountType = "BANK_ACCOUNT"
+            self.bank = "AXIS"
+            self.merchantOrPayee = "ABDUL WASIQ"
+            self.accountLast4 = "3370"
+            self.reference = reference
+            self.timestamp = 1800000000000
+            self.category = "GROCERIES"
+            self.confidence = 0.95
+
+    sync_transaction(T("sms-reference-first", 1000, "911389419630"))
+    sync_transaction(T("gmail-reference-later", 1200, "911389419630"))
+
+    repaired = repair_duplicate_transactions()
+    assert repaired == 1
+
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT id,status,duplicate_of FROM transactions ORDER BY id"
+        ).fetchall()
+
+    active = [row for row in rows if row["status"] == "ACTIVE"]
+    voided = [row for row in rows if row["status"] == "VOIDED"]
+
+    assert len(active) == 1
+    assert len(voided) == 1
+    assert voided[0]["duplicate_of"] == active[0]["id"]
+
 def test_internal_transfer_match():
     from app.ledger import sync_transaction, match_internal_transfers
 
