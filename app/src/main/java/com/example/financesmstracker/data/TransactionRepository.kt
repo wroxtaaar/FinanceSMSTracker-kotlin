@@ -951,8 +951,9 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         val cursor = db.query(
             FinanceDatabaseHelper.TABLE_TRANSACTIONS,
             null,
-            "${FinanceDatabaseHelper.COLUMN_ID} = ?",
-            arrayOf(id.toString()),
+            "${FinanceDatabaseHelper.COLUMN_ID} = ? AND " +
+                "${FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS} = ?",
+            arrayOf(id.toString(), "ACTIVE"),
             null,
             null,
             null
@@ -1469,36 +1470,78 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
     /** Finds likely notification/SMS duplicates that deserve human review. */
     fun getPotentialTransactionConflicts(): List<TransactionConflict> {
         val transactions = getAllTransactions()
+        if (transactions.size < 2) return emptyList()
+
+        data class ConflictKey(
+            val amountPaise: Long,
+            val currency: String,
+            val transactionType: TransactionType
+        )
+
+        val grouped = transactions.groupBy {
+            ConflictKey(it.amountPaise, it.currency.uppercase(), it.transactionType)
+        }
+
         val conflicts = mutableListOf<TransactionConflict>()
-        for (i in transactions.indices) {
-            val first = transactions[i]
-            for (j in i + 1 until transactions.size) {
-                val second = transactions[j]
-                val firstNotification = first.smsHash.startsWith("notification:")
-                val secondNotification = second.smsHash.startsWith("notification:")
-                if (firstNotification == secondNotification) continue
-                if (first.amountPaise != second.amountPaise) continue
-                if (!first.currency.equals(second.currency, ignoreCase = true)) continue
-                if (first.transactionType != second.transactionType) continue
-                if (kotlin.math.abs(first.timestamp - second.timestamp) > 2L * 60L * 1000L) continue
 
-                val bankConflict = !first.bank.isNullOrBlank() && !second.bank.isNullOrBlank() &&
-                    !first.bank.equals(second.bank, ignoreCase = true)
-                val accountConflict = !first.accountLastFour.isNullOrBlank() &&
-                    !second.accountLastFour.isNullOrBlank() && first.accountLastFour != second.accountLastFour
-                val referenceConflict = !first.refNumber.isNullOrBlank() &&
-                    !second.refNumber.isNullOrBlank() && !first.refNumber.equals(second.refNumber, ignoreCase = true)
+        for (group in grouped.values) {
+            val notifications = group
+                .filter { it.smsHash.startsWith("notification:") }
+                .sortedBy { it.timestamp }
 
-                if (bankConflict || accountConflict || referenceConflict) {
-                    val reasons = buildList {
-                        if (bankConflict) add("different banks: " + first.bank + " vs " + second.bank)
-                        if (accountConflict) add("different accounts: " + first.accountLastFour + " vs " + second.accountLastFour)
-                        if (referenceConflict) add("different references")
+            val canonical = group
+                .filterNot { it.smsHash.startsWith("notification:") }
+                .sortedBy { it.timestamp }
+
+            var canonicalStart = 0
+            for (notification in notifications) {
+                while (
+                    canonicalStart < canonical.size &&
+                    canonical[canonicalStart].timestamp < notification.timestamp - 2L * 60L * 1000L
+                ) {
+                    canonicalStart++
+                }
+
+                var index = canonicalStart
+                while (
+                    index < canonical.size &&
+                    canonical[index].timestamp <= notification.timestamp + 2L * 60L * 1000L
+                ) {
+                    val other = canonical[index]
+
+                    val bankConflict =
+                        !notification.bank.isNullOrBlank() &&
+                            !other.bank.isNullOrBlank() &&
+                            !notification.bank.equals(other.bank, ignoreCase = true)
+
+                    val accountConflict =
+                        !notification.accountLastFour.isNullOrBlank() &&
+                            !other.accountLastFour.isNullOrBlank() &&
+                            notification.accountLastFour != other.accountLastFour
+
+                    val referenceConflict =
+                        !notification.refNumber.isNullOrBlank() &&
+                            !other.refNumber.isNullOrBlank() &&
+                            !notification.refNumber.equals(other.refNumber, ignoreCase = true)
+
+                    if (bankConflict || accountConflict || referenceConflict) {
+                        val reasons = buildList {
+                            if (bankConflict) {
+                                add("different banks: ${notification.bank} vs ${other.bank}")
+                            }
+                            if (accountConflict) {
+                                add("different accounts: ${notification.accountLastFour} vs ${other.accountLastFour}")
+                            }
+                            if (referenceConflict) add("different references")
+                        }
+                        conflicts += TransactionConflict(notification, other, reasons.joinToString(", "))
                     }
-                    conflicts += TransactionConflict(first, second, reasons.joinToString(", "))
+
+                    index++
                 }
             }
         }
+
         return conflicts
     }
 
@@ -1677,8 +1720,9 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         val cursor = db.query(
             FinanceDatabaseHelper.TABLE_TRANSACTIONS,
             null,
-            "LOWER(TRIM(${FinanceDatabaseHelper.COLUMN_PAYEE_ID})) = ?",
-            arrayOf(normalizedPayee),
+            "LOWER(TRIM(${FinanceDatabaseHelper.COLUMN_PAYEE_ID})) = ? AND " +
+                "${FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS} = ?",
+            arrayOf(normalizedPayee, "ACTIVE"),
             null,
             null,
             "${FinanceDatabaseHelper.COLUMN_TIMESTAMP} DESC"
@@ -1700,8 +1744,9 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         val cursor = db.query(
             FinanceDatabaseHelper.TABLE_TRANSACTIONS,
             null,
-            "${FinanceDatabaseHelper.COLUMN_TIMESTAMP} BETWEEN ? AND ?",
-            arrayOf(startTime.toString(), endTime.toString()),
+            "${FinanceDatabaseHelper.COLUMN_TIMESTAMP} BETWEEN ? AND ? AND " +
+                "${FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS} = ?",
+            arrayOf(startTime.toString(), endTime.toString(), "ACTIVE"),
             null,
             null,
             "${FinanceDatabaseHelper.COLUMN_TIMESTAMP} DESC"
