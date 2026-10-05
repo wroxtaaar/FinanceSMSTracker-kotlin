@@ -24,8 +24,8 @@ class FinanceSyncPayloadTest {
     @Test
     fun internalTransferCandidateIsSerialized() {
         val candidate = SyncInternalTransferCandidate(
-            debitTransactionId = 479L,
-            creditTransactionId = 480L,
+            debitTransactionId = "479",
+            creditTransactionId = "480",
             amountMinor = 1000L,
             currency = "INR",
             timeDifferenceMillis = 8_000L,
