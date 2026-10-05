@@ -1,5 +1,6 @@
 package com.example.financesmstracker.parser
 
+import com.example.financesmstracker.util.TransactionReferenceNormalizer
 import java.util.regex.Pattern
 
 class HdfcSmsParser : SmsParser {
@@ -18,12 +19,12 @@ class HdfcSmsParser : SmsParser {
         val amountPaise = AmountParser.parseAmountToPaise(messageBody)
             ?: return ParserResult(isTransaction = false)
 
-        val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") || 
-                       lowerBody.contains("added") || lowerBody.contains("refund") || 
+        val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") ||
+                       lowerBody.contains("added") || lowerBody.contains("refund") ||
                        lowerBody.contains("reversal") || lowerBody.contains("cr")
-        val isDebit = lowerBody.contains("debited") || lowerBody.contains("deducted") || 
-                      lowerBody.contains("spent") || lowerBody.contains("paid") || 
-                      lowerBody.contains("charged") || lowerBody.contains("sent") || 
+        val isDebit = lowerBody.contains("debited") || lowerBody.contains("deducted") ||
+                      lowerBody.contains("spent") || lowerBody.contains("paid") ||
+                      lowerBody.contains("charged") || lowerBody.contains("sent") ||
                       lowerBody.contains("dr") || lowerBody.contains("used for") ||
                       lowerBody.contains("atm wdl") || lowerBody.contains("withdrawn") ||
                       lowerBody.contains("transferred") || lowerBody.contains("transfer")
@@ -66,8 +67,18 @@ class HdfcSmsParser : SmsParser {
 
         val (merchantName, payeeId) = MerchantParser.extractMerchantAndVpa(messageBody)
 
-        val refMatcher = Pattern.compile("(?:ref|upi ref|imps ref|utr)\\.?\\s*:?\\s*([0-9a-zA-Z]+)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
-        val refNumber = if (refMatcher.find()) refMatcher.group(1) else null
+        // HDFC UPI alerts commonly expose the RRN as "UPI <RRN>".
+        // Also retain the labelled REF/UTR forms used by other HDFC alerts.
+        val refMatcher = Pattern.compile(
+            "(?:ref|upi ref|imps ref|utr)\\.?\\s*:?\\s*([0-9a-zA-Z]+)|UPI\\s*[:#-]?\\s*([0-9]{8,})",
+            Pattern.CASE_INSENSITIVE
+        ).matcher(messageBody)
+        val rawRefNumber = if (refMatcher.find()) {
+            refMatcher.group(1) ?: refMatcher.group(2)
+        } else {
+            null
+        }
+        val refNumber = TransactionReferenceNormalizer.normalize(rawRefNumber)
 
         return ParserResult(
             isTransaction = true,
