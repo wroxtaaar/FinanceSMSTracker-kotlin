@@ -11,6 +11,37 @@ import org.junit.Test
 class InternalTransferCandidateDetectorTest {
 
     @Test
+    fun detectsOppositeBankAccountsWithSameReferenceEvenOutsideTimeWindow() {
+        val debit = transaction(
+            id = 1L,
+            amountPaise = 300L,
+            type = TransactionType.DEBIT,
+            bank = "AXIS",
+            lastFour = "3370",
+            timestamp = 1_000L,
+            ref = "UPI/P2A/185534369134/ABDUL WASIQ"
+        )
+        val credit = transaction(
+            id = 2L,
+            amountPaise = 300L,
+            type = TransactionType.CREDIT,
+            bank = "HDFC",
+            lastFour = "9591",
+            timestamp = 60_000L,
+            ref = "185534369134"
+        )
+
+        val candidates = InternalTransferCandidateDetector.findCandidates(
+            listOf(debit, credit),
+            windowMillis = 1_000L
+        )
+
+        assertEquals(1, candidates.size)
+        assertEquals(1L, candidates.single().debit.id)
+        assertEquals(2L, candidates.single().credit.id)
+    }
+
+    @Test
     fun detectsOppositeBankAccountsWithSameAmountAndCurrencyWithinWindow() {
         val debit = transaction(
             id = 1L,
@@ -67,7 +98,7 @@ class InternalTransferCandidateDetectorTest {
     }
 
     @Test
-    fun rejectsTransactionsOutsideWindow() {
+    fun rejectsTransactionsOutsideWindowWhenReferenceIsMissing() {
         val debit = transaction(
             id = 1L,
             amountPaise = 200L,
@@ -150,7 +181,8 @@ class InternalTransferCandidateDetectorTest {
         lastFour: String,
         timestamp: Long,
         currency: String = "INR",
-        accountType: AccountType = AccountType.BANK_ACCOUNT
+        accountType: AccountType = AccountType.BANK_ACCOUNT,
+        ref: String? = null
     ) = Transaction(
         id = id,
         amountPaise = amountPaise,
@@ -162,7 +194,7 @@ class InternalTransferCandidateDetectorTest {
         merchantName = null,
         payeeId = null,
         accountLastFour = lastFour,
-        refNumber = null,
+        refNumber = ref,
         timestamp = timestamp,
         smsHash = "hash-$id",
         category = null,
