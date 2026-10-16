@@ -232,3 +232,74 @@ def test_example_second_same_amount_payment_to_a_stranger_is_not_swallowed():
     ingest_sms(stranger)
     assert len(L.list_transactions(100)) == 3
     assert len(L.list_transfers()) == 1
+
+
+# --- Provisional debit (Gmail notification: last-four only, no bank/reference, UNKNOWN method) ---
+# Real report: after resetting balances and Splitwise to 0, a INR 3 Axis -> HDFC transfer left
+# bank balances right (-3 / +3) but Splitwise at -3, because only the credit ever contributed.
+def _provisional_debit(bank=""):
+    return Tx(id="notification:debit", amountMinor=300, type="DEBIT", paymentMethod="UNKNOWN", bank=bank,
+              accountLast4="3370", timestamp=T0, category="GROCERIES")
+
+
+def _credit_sms():
+    return Tx(id="sms:credit", amountMinor=300, type="CREDIT", bank="HDFC", accountLast4="9591",
+              reference=UPI_REF, timestamp=T0 + 30_000)
+
+
+def _sync_like_endpoint(*txs, rebuild):
+    for t in txs:
+        L.sync_transaction(t)
+    for t in txs:
+        L.reconcile_duplicate_transaction(t.id)
+    L.repair_duplicate_transactions()
+    L.match_internal_transfers()
+    if rebuild:
+        L.rebuild_manual_splitwise_total()
+
+
+def _provisional_setup():
+    _example_accounts()
+    L.set_balance("axis3370", "Axis 3370", "INR", "BANK_ACCOUNT", "AXIS", "3370", 0)
+    L.set_balance("hdfc9591", "HDFC 9591", "INR", "BANK_ACCOUNT", "HDFC", "9591", 0)
+    L.set_manual_splitwise_total("INR", 0)
+
+
+def _assert_provisional_transfer_neutral():
+    with connection() as conn:
+        bal = {r["id"]: r["balance_minor"] for r in conn.execute(
+            "SELECT id,balance_minor FROM accounts WHERE id IN ('axis3370','hdfc9591')")}
+    assert bal == {"axis3370": -300, "hdfc9591": 300}
+    assert len(L.list_transfers()) == 1
+    assert L.get_manual_splitwise_total("INR") == 0
+
+
+def test_provisional_debit_then_credit_keeps_splitwise_neutral():
+    _provisional_setup()
+    _sync_like_endpoint(_provisional_debit(), rebuild=False)
+    _sync_like_endpoint(_credit_sms(), rebuild=False)
+    _assert_provisional_transfer_neutral()
+
+
+def test_credit_then_provisional_debit_keeps_splitwise_neutral():
+    _provisional_setup()
+    _sync_like_endpoint(_credit_sms(), rebuild=False)
+    _sync_like_endpoint(_provisional_debit(), rebuild=False)
+    _assert_provisional_transfer_neutral()
+
+
+def test_provisional_debit_splitwise_stays_neutral_after_rebuild():
+    _provisional_setup()
+    _sync_like_endpoint(_provisional_debit(), rebuild=True)
+    _sync_like_endpoint(_credit_sms(), rebuild=True)
+    _assert_provisional_transfer_neutral()
+
+
+def test_provisional_debit_later_enriched_does_not_reintroduce_splitwise_amount():
+    _provisional_setup()
+    _sync_like_endpoint(_provisional_debit(), rebuild=False)
+    _sync_like_endpoint(_credit_sms(), rebuild=False)
+    enriched = Tx(id="notification:debit", amountMinor=300, type="DEBIT", paymentMethod="UPI", bank="AXIS",
+                  accountLast4="3370", reference=UPI_REF, timestamp=T0, category="TRANSFER")
+    _sync_like_endpoint(enriched, rebuild=False)
+    _assert_provisional_transfer_neutral()

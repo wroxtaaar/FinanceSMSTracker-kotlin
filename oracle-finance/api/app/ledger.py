@@ -658,7 +658,14 @@ def sync_transaction(t, apply_balance=True):
                         conn, t, created_at, transaction_created_at=created_at
                     )
 
-                if old_delta != new_delta and not str(t.id).startswith("gmail:"):
+                is_transfer_leg = conn.execute(
+                    """SELECT 1 FROM internal_transfers
+                       WHERE status='MATCHED'
+                         AND (debit_transaction_id=? OR credit_transaction_id=?)
+                       LIMIT 1""",
+                    (t.id, t.id),
+                ).fetchone() is not None
+                if old_delta != new_delta and not str(t.id).startswith("gmail:") and not is_transfer_leg:
                     splitwise_change = new_delta - old_delta
                     conn.execute(
                         """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
@@ -731,8 +738,20 @@ def sync_transaction(t, apply_balance=True):
                 (t.category, t.id),
             )
 
+            # A leg of a matched own-account transfer is already neutralized
+            # as a pair. Its category never changes the pair's net Splitwise
+            # effect, and re-running the neutralizer would reverse the partner
+            # leg a second time, so only the category itself is updated.
+            is_transfer_leg = conn.execute(
+                """SELECT 1 FROM internal_transfers
+                   WHERE status='MATCHED'
+                     AND (debit_transaction_id=? OR credit_transaction_id=?)
+                   LIMIT 1""",
+                (t.id, t.id),
+            ).fetchone() is not None
+
             delta = new_delta - old_delta
-            if delta:
+            if delta and not is_transfer_leg:
                 conn.execute(
                     """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
                        VALUES(?,?,?)
@@ -741,17 +760,6 @@ def sync_transaction(t, apply_balance=True):
                            updated_at=excluded.updated_at""",
                     (t.currency, delta, created_at),
                 )
-
-            # A category edit can change the signed Splitwise contribution of
-            # an already-matched internal-transfer leg. Allow the idempotent
-            # neutralizer to recompute the pair from the new contribution.
-            conn.execute(
-                """UPDATE internal_transfers
-                   SET splitwise_neutralized=0
-                   WHERE status='MATCHED'
-                     AND (debit_transaction_id=? OR credit_transaction_id=?)""",
-                (t.id, t.id),
-            )
 
         return before is None
 
@@ -1426,7 +1434,7 @@ def rebuild_manual_splitwise_total(currency=None):
 
         for cur in currencies:
             rows = conn.execute(
-                """SELECT amount_minor,currency,type,account_type,payment_method,
+                """SELECT id,amount_minor,currency,type,account_type,payment_method,
                           bank,merchant_or_payee,account_last4,reference,
                           timestamp,category,confidence
                    FROM transactions
@@ -1437,8 +1445,23 @@ def rebuild_manual_splitwise_total(currency=None):
                 (cur,),
             ).fetchall()
 
+            # Both legs of a matched own-account transfer cancel by definition.
+            # Excluding them as a pair keeps a provisional leg (which is
+            # skipped below) from leaving its partner's contribution behind.
+            transfer_leg_ids = set()
+            for transfer in conn.execute(
+                """SELECT debit_transaction_id,credit_transaction_id
+                   FROM internal_transfers WHERE status='MATCHED'"""
+            ).fetchall():
+                for leg in (transfer["debit_transaction_id"], transfer["credit_transaction_id"]):
+                    resolved = _resolve_transaction_row(conn, leg)
+                    if resolved is not None:
+                        transfer_leg_ids.add(str(resolved["id"]))
+
             total = 0
             for row in rows:
+                if str(row["id"]) in transfer_leg_ids:
+                    continue
                 if is_provisional_row(row):
                     continue
                 total += splitwise_delta(
@@ -1535,8 +1558,11 @@ def _neutralize_internal_transfer_splitwise(conn, transfer_id, debit_id, credit_
                 "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
                 (transaction_id,),
             )
-        elif not str(transaction_id).startswith("gmail:"):
-            # Local/SMS rows use the signed Splitwise delta directly.
+        elif not str(transaction_id).startswith("gmail:") and not is_provisional_row(tx):
+            # Local/SMS rows use the signed Splitwise delta directly. A
+            # provisional notification row never contributed to Splitwise (see
+            # sync_transaction), so there is nothing to reverse; reversing it
+            # anyway would leave the other leg's contribution uncancelled.
             delta = splitwise_delta(
                 tx["account_type"], tx["type"], tx["amount_minor"], tx["category"]
             )
