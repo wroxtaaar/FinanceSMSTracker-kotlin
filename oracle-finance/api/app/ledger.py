@@ -1758,9 +1758,20 @@ def match_internal_transfers():
                WHERE status='MATCHED'"""
         ).fetchall()
 
+        # A transfer recorded while its legs were still e-mail rows keeps
+        # pointing at those rows after they are collapsed into the SMS rows.
+        # Remember the canonical legs it resolves to so the same real-world
+        # transfer is not recorded a second time under the canonical ids.
+        resolved_debit_ids = set()
+        resolved_credit_ids = set()
+
         for transfer in existing_matches:
             debit_row = _resolve_transaction_row(conn, transfer["debit_transaction_id"])
             credit_row = _resolve_transaction_row(conn, transfer["credit_transaction_id"])
+            if debit_row:
+                resolved_debit_ids.add(str(debit_row["id"]))
+            if credit_row:
+                resolved_credit_ids.add(str(credit_row["id"]))
             if debit_row:
                 _ensure_internal_transfer_balance_adjustment(conn, debit_row)
             if credit_row:
@@ -1800,6 +1811,8 @@ def match_internal_transfers():
                     (debit["id"], credit["id"]),
                 ).fetchone()
                 if exists:
+                    continue
+                if str(debit["id"]) in resolved_debit_ids or str(credit["id"]) in resolved_credit_ids:
                     continue
 
                 _ensure_internal_transfer_balance_adjustment(conn, debit)
