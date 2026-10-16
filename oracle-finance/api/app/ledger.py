@@ -1858,6 +1858,34 @@ def splitwise_expense_for(transaction_id):
         row=conn.execute("SELECT * FROM splitwise_expenses WHERE transaction_id=?",(transaction_id,)).fetchone()
         return dict(row) if row else None
 
+def _identity_enrichment(canonical, duplicate):
+    """Bank/account identity a duplicate can supply to a canonical row lacking it."""
+    updates = {}
+    if not str(canonical["bank"] or "").strip() and str(duplicate["bank"] or "").strip():
+        updates["bank"] = duplicate["bank"]
+    if not str(canonical["account_last4"] or "").strip() and str(duplicate["account_last4"] or "").strip():
+        updates["account_last4"] = duplicate["account_last4"]
+    return updates
+
+
+def _apply_balance_after_identity_enrichment(conn, canonical_id, was_provisional, enrichment):
+    """Apply a bank/card balance effect that was impossible before enrichment.
+
+    A canonical SMS row may know the bank but not the account last-four, so
+    apply_transaction_to_account could not resolve its account when it was first
+    stored. When a duplicate email supplies that identity, the canonical row
+    must receive its one balance adjustment; otherwise the duplicate is hidden
+    and the money movement is never applied (for a self-transfer this creates
+    money on the credited account). Provisional rows keep waiting for their
+    normal authoritative path, and an existing adjustment is never replayed.
+    """
+    if was_provisional or not ({"bank", "account_last4"} & set(enrichment)):
+        return
+    row = conn.execute("SELECT * FROM transactions WHERE id=?", (canonical_id,)).fetchone()
+    if row is not None:
+        _ensure_internal_transfer_balance_adjustment(conn, row)
+
+
 def reconcile_duplicate_transaction(transaction_id):
     with connection() as conn:
         tx=conn.execute("SELECT * FROM transactions WHERE id=?",(transaction_id,)).fetchone()
@@ -1918,7 +1946,8 @@ def reconcile_duplicate_transaction(transaction_id):
                     # created the canonical ledger row. Preserve the stronger
                     # Gmail transaction identity on that canonical row instead
                     # of leaving the RRN stranded on the duplicate Gmail row.
-                    enrichment = {}
+                    was_provisional = is_provisional_row(canonical)
+                    enrichment = _identity_enrichment(canonical, tx)
                     if not canonical["reference"] and tx["reference"]:
                         enrichment["reference"] = normalize_reference(tx["reference"])
                     if (
@@ -1935,6 +1964,9 @@ def reconcile_duplicate_transaction(transaction_id):
                         conn.execute(
                             f"UPDATE transactions SET {assignments} WHERE id=?",
                             values,
+                        )
+                        _apply_balance_after_identity_enrichment(
+                            conn, canonical["id"], was_provisional, enrichment
                         )
 
                     conn.execute(
@@ -1986,7 +2018,8 @@ def reconcile_duplicate_transaction(transaction_id):
             # the canonical ledger row. Preserve the stronger Gmail
             # transaction identity on that canonical row instead of leaving
             # the RRN stranded on the duplicate Gmail row.
-            enrichment = {}
+            was_provisional = is_provisional_row(canonical)
+            enrichment = _identity_enrichment(canonical, tx)
             if not canonical["reference"] and tx["reference"]:
                 enrichment["reference"] = normalize_reference(tx["reference"])
             if (
@@ -2002,6 +2035,9 @@ def reconcile_duplicate_transaction(transaction_id):
                 conn.execute(
                     f"UPDATE transactions SET {assignments} WHERE id=?",
                     values,
+                )
+                _apply_balance_after_identity_enrichment(
+                    conn, canonical["id"], was_provisional, enrichment
                 )
 
             conn.execute("UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",(canonical["id"],tx["id"]))
