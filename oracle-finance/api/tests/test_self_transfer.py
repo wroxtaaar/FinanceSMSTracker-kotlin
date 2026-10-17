@@ -466,26 +466,37 @@ def test_two_distinct_axis_credits_with_different_references_are_kept():
     assert len(active_ids()) == 2
 
 
-# --- The stored Splitwise total must not stay drifted after Gmail ingestion -----
+# --- A drifted stored cache must never be shown, and is repaired after ingestion ---
+
+def _stored_cache():
+    with connection() as conn:
+        return conn.execute("SELECT amount_minor FROM manual_splitwise_total WHERE currency='INR'").fetchone()[0]
+
 
 def _drift_total(delta):
     with connection() as conn:
         conn.execute("UPDATE manual_splitwise_total SET amount_minor=amount_minor+? WHERE currency='INR'", (delta,))
 
 
-def test_gmail_ingestion_rebuilds_a_drifted_splitwise_total():
+def test_drifted_cache_is_never_shown():
+    ingest_sms(sms_debit(bank="AXIS", last4="1111", amount=700, id="sms:g0"))
+    _drift_total(-300)                       # what an incremental e-mail merge left behind
+    assert _stored_cache() == 400
+    assert _splitwise() == 700               # the displayed value ignores the cache
+
+
+def test_gmail_ingestion_rebuilds_a_drifted_splitwise_cache():
     from app import gmail_sync
     ingest_sms(sms_debit(bank="AXIS", last4="1111", amount=700, id="sms:g1"))
-    assert _splitwise() == 700
-    _drift_total(-300)                       # what an incremental e-mail merge left behind
-    assert _splitwise() == 400
+    _drift_total(-300)
+    assert _stored_cache() == 400
     original = gmail_sync._ingest_messages
     gmail_sync._ingest_messages = lambda service, query="": {"ok": True}
     try:
         assert gmail_sync.ingest_messages(object()) == {"ok": True}
     finally:
         gmail_sync._ingest_messages = original
-    assert _splitwise() == 700
+    assert _stored_cache() == 700 and _splitwise() == 700
 
 
 def test_gmail_ingestion_rebuilds_even_when_it_fails():
@@ -506,12 +517,12 @@ def test_gmail_ingestion_rebuilds_even_when_it_fails():
             pass
     finally:
         gmail_sync._ingest_messages = original
-    assert _splitwise() == 700
+    assert _stored_cache() == 700
 
 
-def test_reconcile_all_rebuilds_splitwise_total():
+def test_reconcile_all_rebuilds_splitwise_cache():
     from app import reconcile
     ingest_sms(sms_debit(bank="AXIS", last4="1111", amount=700, id="sms:g3"))
     _drift_total(-300)
     reconcile.reconcile_all()
-    assert _splitwise() == 700
+    assert _stored_cache() == 700

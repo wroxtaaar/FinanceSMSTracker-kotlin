@@ -304,43 +304,12 @@ def _void_transaction_in_connection(conn, transaction_id, duplicate_of=None):
             (transaction_id,),
         )
 
-    # Reverse any explicitly tracked Splitwise contribution. Gmail rows
-    # can be authoritative and therefore may have contributed before a later
-    # SMS/notification row proves them to be duplicates.
-    splitwise_adjustment = conn.execute(
-        "SELECT currency,delta_minor FROM splitwise_adjustments WHERE transaction_id=?",
+    # The Splitwise value is derived from the ledger (voided rows drop out of
+    # it), so only the per-row adjustment record needs cleaning up here.
+    conn.execute(
+        "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
         (transaction_id,),
-    ).fetchone()
-    if splitwise_adjustment:
-        conn.execute(
-            """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-               VALUES(?,?,?)
-               ON CONFLICT(currency) DO UPDATE SET
-                   amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                   updated_at=excluded.updated_at""",
-            (
-                splitwise_adjustment["currency"],
-                -int(splitwise_adjustment["delta_minor"]),
-                now_ms(),
-            ),
-        )
-        conn.execute(
-            "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
-            (transaction_id,),
-        )
-    elif not str(tx["id"]).startswith("gmail:"):
-        # Legacy/local transactions predate splitwise_adjustments, so preserve
-        # the existing reversal behavior for those rows.
-        delta = splitwise_delta(
-            tx["account_type"], tx["type"], tx["amount_minor"], tx["category"]
-        )
-        if delta:
-            conn.execute(
-                """UPDATE manual_splitwise_total
-                   SET amount_minor=amount_minor-?, updated_at=?
-                   WHERE currency=?""",
-                (delta, now_ms(), tx["currency"]),
-            )
+    )
 
     conn.execute(
         "UPDATE transactions SET status='VOIDED', duplicate_of=? WHERE id=?",
@@ -434,47 +403,12 @@ def repair_duplicate_transactions():
                     ),
                 )
 
-                duplicate_tx = conn.execute(
-                    "SELECT id,account_type,type,amount_minor,category,currency FROM transactions WHERE id=?",
+                # The Splitwise value is derived from the ledger, and the
+                # duplicate drops out of it once voided below.
+                conn.execute(
+                    "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
                     (duplicate["id"],),
-                ).fetchone()
-                duplicate_splitwise_adjustment = conn.execute(
-                    "SELECT currency,delta_minor FROM splitwise_adjustments WHERE transaction_id=?",
-                    (duplicate["id"],),
-                ).fetchone()
-                if duplicate_splitwise_adjustment:
-                    splitwise_delta_to_reverse = int(duplicate_splitwise_adjustment["delta_minor"])
-                    splitwise_currency = duplicate_splitwise_adjustment["currency"]
-                    conn.execute(
-                        """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
-                           VALUES(?,?,?)
-                           ON CONFLICT(currency) DO UPDATE SET
-                               amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                               updated_at=excluded.updated_at""",
-                        (splitwise_currency, -splitwise_delta_to_reverse, now_ms()),
-                    )
-                    conn.execute(
-                        "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
-                        (duplicate["id"],),
-                    )
-                elif duplicate_tx and not str(duplicate_tx["id"]).startswith("gmail:"):
-                    splitwise_delta_to_reverse = splitwise_delta(
-                        duplicate_tx["account_type"],
-                        duplicate_tx["type"],
-                        duplicate_tx["amount_minor"],
-                        duplicate_tx["category"],
-                    )
-                    if splitwise_delta_to_reverse:
-                        conn.execute(
-                            """UPDATE manual_splitwise_total
-                               SET amount_minor=amount_minor-?, updated_at=?
-                               WHERE currency=?""",
-                            (
-                                splitwise_delta_to_reverse,
-                                now_ms(),
-                                duplicate_tx["currency"],
-                            ),
-                        )
+                )
 
                 conn.execute(
                     "UPDATE transactions SET status='VOIDED', duplicate_of=? WHERE id=?",
@@ -644,13 +578,8 @@ def sync_transaction(t, apply_balance=True):
         if before is not None and before["status"] == "ACTIVE":
             # An Android notification can be synced before Gmail/IMAP clarifies
             # it. When the same canonical ID is later enriched, update the
-            # existing ledger row and repair any balance/Splitwise contribution
+            # existing ledger row and repair any balance contribution
             # that was based on the provisional direction/account identity.
-            old_delta = 0 if is_provisional_row(before) else splitwise_delta(
-                before["account_type"], before["type"], before["amount_minor"], before["category"]
-            )
-            new_delta = splitwise_delta_for_transaction(t)
-
             balance_adjustment = conn.execute(
                 "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
                 (t.id,),
@@ -696,24 +625,6 @@ def sync_transaction(t, apply_balance=True):
                         conn, t, created_at, transaction_created_at=created_at
                     )
 
-                is_transfer_leg = conn.execute(
-                    """SELECT 1 FROM internal_transfers
-                       WHERE status='MATCHED'
-                         AND (debit_transaction_id=? OR credit_transaction_id=?)
-                       LIMIT 1""",
-                    (t.id, t.id),
-                ).fetchone() is not None
-                if old_delta != new_delta and not str(t.id).startswith("gmail:") and not is_transfer_leg:
-                    splitwise_change = new_delta - old_delta
-                    conn.execute(
-                        """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-                           VALUES(?,?,?)
-                           ON CONFLICT(currency) DO UPDATE SET
-                               amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                               updated_at=excluded.updated_at""",
-                        (t.currency, splitwise_change, created_at),
-                    )
-
         # A transaction can have been stored before its bank account existed
         # (for example after a fresh database reset). On a later sync, repair the
         # missing balance adjustment exactly once. Manual reconciliation timestamps
@@ -734,32 +645,10 @@ def sync_transaction(t, apply_balance=True):
                     conn, t, created_at, transaction_created_at=created_at
                 )
 
-        # Splitwise is a signed ledger component. Bank debits increase the
-        # amount owed to the user, bank credits decrease it, card debits
-        # decrease it, and card credits increase it. Gmail rows are never
-        # allowed to create a Splitwise contribution until reconciliation makes
-        # the canonical non-Gmail transaction authoritative.
-        if (
-            before is None
-            and apply_balance
-            and not str(t.id).startswith("gmail:")
-            and not provisional
-        ):
-            delta = splitwise_delta_for_transaction(t)
-            if delta:
-                conn.execute(
-                    """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-                       VALUES(?,?,?)
-                       ON CONFLICT(currency) DO UPDATE SET
-                           amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                           updated_at=excluded.updated_at""",
-                    (t.currency, delta, created_at),
-                )
-
-        # Category edits are sent as the same transaction ID. They must update
-        # the ledger metadata and Splitwise contribution without reapplying the
-        # bank/card balance. OTHER is the explicit Splitwise opt-out; every
-        # other debit category contributes its full amount.
+        # Category edits are sent as the same transaction ID. They update the
+        # ledger metadata only: the Splitwise value is derived from the ledger
+        # (amount, direction and account type), so a category never shifts it,
+        # and the bank/card balance is not reapplied.
         if (
             before is not None
             and before["status"] == "ACTIVE"
@@ -767,37 +656,10 @@ def sync_transaction(t, apply_balance=True):
             and str(before["category"] or "").strip().upper()
                 != str(t.category or "").strip().upper()
         ):
-            old_delta = 0 if is_provisional_row(before) else splitwise_delta(
-                before["account_type"], before["type"], before["amount_minor"], before["category"]
-            )
-            new_delta = splitwise_delta_for_transaction(t)
             conn.execute(
                 "UPDATE transactions SET category=? WHERE id=?",
                 (t.category, t.id),
             )
-
-            # A leg of a matched own-account transfer is already neutralized
-            # as a pair. Its category never changes the pair's net Splitwise
-            # effect, and re-running the neutralizer would reverse the partner
-            # leg a second time, so only the category itself is updated.
-            is_transfer_leg = conn.execute(
-                """SELECT 1 FROM internal_transfers
-                   WHERE status='MATCHED'
-                     AND (debit_transaction_id=? OR credit_transaction_id=?)
-                   LIMIT 1""",
-                (t.id, t.id),
-            ).fetchone() is not None
-
-            delta = new_delta - old_delta
-            if delta and not is_transfer_leg:
-                conn.execute(
-                    """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-                       VALUES(?,?,?)
-                       ON CONFLICT(currency) DO UPDATE SET
-                           amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                           updated_at=excluded.updated_at""",
-                    (t.currency, delta, created_at),
-                )
 
         return before is None
 
@@ -1322,21 +1184,7 @@ def void_transaction(transaction_id):
                 (transaction_id,)
             )
 
-        # Reverse the exact signed Splitwise contribution that this
-        # transaction created. Do not clamp the aggregate: the ledger may need
-        # to move through zero when credits/card activity are reversed.
-        if not str(tx["id"]).startswith("gmail:"):
-            delta = splitwise_delta(
-                tx["account_type"], tx["type"], tx["amount_minor"], tx["category"]
-            )
-            if delta:
-                conn.execute(
-                    """UPDATE manual_splitwise_total
-                       SET amount_minor=amount_minor-?, updated_at=?
-                       WHERE currency=?""",
-                    (delta, now_ms(), tx["currency"]),
-                )
-
+        # The Splitwise value is derived from the ledger; the voided row drops out of it.
         conn.execute(
             "UPDATE transactions SET status='VOIDED' WHERE id=?",
             (transaction_id,)
@@ -1444,18 +1292,8 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
            VALUES(?,?,?,?)""",
         (transaction_id, t.currency, delta, applied_at),
     )
-    if not inserted.rowcount:
-        return False
-
-    conn.execute(
-        """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-           VALUES(?,?,?)
-           ON CONFLICT(currency) DO UPDATE SET
-               amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-               updated_at=excluded.updated_at""",
-        (t.currency, delta, applied_at),
-    )
-    return True
+    # Only the reversible record is kept; the shown total is derived from the ledger.
+    return bool(inserted.rowcount)
 
 def _ledger_splitwise_total(conn, cur):
     """Ledger-wide Splitwise sum of the canonical bank/card movements.
@@ -1558,9 +1396,30 @@ def rebuild_manual_splitwise_total(currency=None):
 
 
 def get_manual_splitwise_total(currency="INR"):
+    """The Splitwise value shown to the user.
+
+    Derived on every read: the manual baseline plus the change in the ledger's
+    Splitwise sum since that baseline was set. The stored amount_minor is only
+    a cache (and the fallback for legacy rows that have no baseline yet), so a
+    stale incremental update can never be what the user sees.
+    """
     with connection() as conn:
-        row=conn.execute("SELECT amount_minor FROM manual_splitwise_total WHERE currency=?",(currency,)).fetchone()
-        return int(row["amount_minor"]) if row else None
+        row=conn.execute(
+            """SELECT amount_minor,baseline_amount_minor,baseline_ledger_minor
+               FROM manual_splitwise_total WHERE currency=?""",
+            (currency,),
+        ).fetchone()
+        if row is None:
+            # No manual total was ever set: the ledger is the whole story, but
+            # with no transactions at all there is nothing to show yet.
+            has_rows = conn.execute(
+                "SELECT 1 FROM transactions WHERE currency=? LIMIT 1", (currency,)
+            ).fetchone()
+            return _ledger_splitwise_total(conn, currency) if has_rows else None
+        if row["baseline_amount_minor"] is None or row["baseline_ledger_minor"] is None:
+            return int(row["amount_minor"])
+        ledger = _ledger_splitwise_total(conn, currency)
+        return int(row["baseline_amount_minor"]) + ledger - int(row["baseline_ledger_minor"])
 
 def true_available(currency="INR"):
     with connection() as conn:
@@ -1616,39 +1475,13 @@ def _neutralize_internal_transfer_splitwise(conn, transfer_id, debit_id, credit_
             (transaction_id,),
         ).fetchone()
 
+        # Matched transfer legs are excluded from the derived Splitwise total as
+        # a pair; only the per-row adjustment record needs to be cleaned up.
         if adjustment is not None:
-            # Gmail-derived rows keep an exact Splitwise adjustment record.
-            delta = int(adjustment["delta_minor"])
-            currency = adjustment["currency"]
-            conn.execute(
-                """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
-                   VALUES(?,?,?)
-                   ON CONFLICT(currency) DO UPDATE SET
-                       amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                       updated_at=excluded.updated_at""",
-                (currency, -delta, now_ms()),
-            )
             conn.execute(
                 "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
                 (transaction_id,),
             )
-        elif not str(transaction_id).startswith("gmail:") and not is_provisional_row(tx):
-            # Local/SMS rows use the signed Splitwise delta directly. A
-            # provisional notification row never contributed to Splitwise (see
-            # sync_transaction), so there is nothing to reverse; reversing it
-            # anyway would leave the other leg's contribution uncancelled.
-            delta = splitwise_delta(
-                tx["account_type"], tx["type"], tx["amount_minor"], tx["category"]
-            )
-            if delta:
-                conn.execute(
-                    """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
-                       VALUES(?,?,?)
-                       ON CONFLICT(currency) DO UPDATE SET
-                           amount_minor=manual_splitwise_total.amount_minor + excluded.amount_minor,
-                           updated_at=excluded.updated_at""",
-                    (tx["currency"], -delta, now_ms()),
-                )
 
     conn.execute(
         "UPDATE internal_transfers SET splitwise_neutralized=1 WHERE id=?",

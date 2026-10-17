@@ -51,7 +51,9 @@ def test_gmail_only_bank_credit_changes_splitwise():
     set_manual_splitwise_total("INR", 10000)
 
     sync_transaction(T())
-    assert get_manual_splitwise_total("INR") == 10000
+    # The Splitwise value is derived from the ledger, so a canonical Gmail-only
+    # credit counts as soon as it is stored.
+    assert get_manual_splitwise_total("INR") == 9500
 
     with connection() as conn:
         assert apply_splitwise_contribution(conn, T(), 1800000001000) is True
@@ -300,7 +302,8 @@ def test_provisional_bankless_debit_is_corrected_to_axis_credit():
             "SELECT balance_minor FROM accounts WHERE id='axis-provisional-account'"
         ).fetchone()["balance_minor"]
     assert before == 100000
-    assert get_manual_splitwise_total("INR") is None
+    # A provisional notification row never contributes to Splitwise.
+    assert get_manual_splitwise_total("INR") == 0
 
     # Gmail is authoritative and clarifies this as an Axis credit.
     sync_transaction(T("CREDIT", "AXIS", "GROCERIES"))
@@ -406,7 +409,9 @@ def test_internal_transfer_neutralizes_splitwise_even_when_credit_category_diffe
                    baseline_ledger_minor=excluded.baseline_ledger_minor"""
         )
 
-    assert get_manual_splitwise_total("INR") == -300
+    # The shown value is derived from the ledger, so the stale -300 cache above
+    # can never be displayed: the unmatched legs already net to zero.
+    assert get_manual_splitwise_total("INR") == 0
     matches = match_internal_transfers()
     assert len(matches) == 1
 
@@ -1662,7 +1667,9 @@ def test_gmail_credit_and_sms_debit_self_transfer_neutralizes_splitwise():
     sync_transaction(T("gmail:axis-credit-500", "CREDIT", "AXIS", None, None))
     sync_transaction(T("hdfc-debit-500", "DEBIT", "HDFC", "9591", "228327297579"))
 
-    assert get_manual_splitwise_total("INR") == 500
+    # The shown value is derived from the ledger, so both unmatched legs count
+    # (+500 debit, -500 credit) and the pair already nets to zero.
+    assert get_manual_splitwise_total("INR") == 0
 
     matches = match_internal_transfers()
 
@@ -1737,7 +1744,7 @@ def test_android_internal_transfer_candidate_is_confirmed_and_neutralized():
     sync_transaction(T("candidate-axis-debit", "DEBIT", "AXIS", "3370"))
     sync_transaction(T("gmail:candidate-hdfc-credit", "CREDIT", "HDFC", "9591"))
 
-    assert get_manual_splitwise_total("INR") == 1000
+    assert get_manual_splitwise_total("INR") == 0
 
     result = apply_internal_transfer_candidates([
         {
