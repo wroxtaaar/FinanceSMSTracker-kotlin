@@ -121,6 +121,15 @@ def _merchant_values_compatible(first, second):
 
 
 
+def _mirror_kind(source_id):
+    source_id = str(source_id)
+    if source_id.startswith("notification:"):
+        return "notification"
+    if source_id.startswith("gmail:") or source_id.startswith("oracle:gmail:"):
+        return "gmail"
+    return "other"
+
+
 def _rows_are_duplicate(first, second):
     """Return True only for the same ledger-side transaction represented twice.
 
@@ -192,6 +201,18 @@ def _rows_are_duplicate(first, second):
 
     if not cross_source:
         if not first_last4 and not second_last4:
+            # An Axis-style credit has no SMS and often no last-4: the bank
+            # e-mail carries the reference, the instant notification does not.
+            # That e-mail + notification pair (and only that pair, with the
+            # reference on exactly one side and the same bank) is one event.
+            kinds = {_mirror_kind(first_source), _mirror_kind(second_source)}
+            if (
+                kinds == {"gmail", "notification"}
+                and (first_ref is None) != (second_ref is None)
+                and first_bank
+                and second_bank
+            ):
+                return abs(int(first["timestamp"]) - int(second["timestamp"])) <= 15 * 60 * 1000
             return False
         return abs(int(first["timestamp"]) - int(second["timestamp"])) <= 120_000
 

@@ -423,3 +423,44 @@ def test_notification_reference_with_sentence_residue_matches_sms_reference():
             "SELECT COALESCE(SUM(delta_minor),0) FROM balance_adjustments WHERE account_id='hdfc9591'"
         ).fetchone()[0]
     assert moved == -30_000
+
+
+# --- HDFC -> Axis INR 5: Axis sends no SMS; e-mail (ref) + notification (no ref, no last-4) both credit Axis ---
+
+def _axis_credit_pair(gmail_first):
+    ref = "715732131571"
+    hdfc_sms = Tx(id="sms:hdfc5", amountMinor=500, type="DEBIT", bank="HDFC", accountLast4="2222",
+                  reference=ref, timestamp=T0, merchantOrPayee="ABDUL WASIQ")
+    email = Tx(id="gmail:axis5", amountMinor=500, type="CREDIT", bank="AXIS", accountLast4=None,
+               reference=ref, timestamp=T0 + 120_000, paymentMethod="UNKNOWN", merchantOrPayee=None)
+    notif = Tx(id="notification:axis5", amountMinor=500, type="CREDIT", bank="AXIS", accountLast4=None,
+               reference=None, timestamp=T0 + 60_000, paymentMethod="UNKNOWN", merchantOrPayee=None)
+    ingest_sms(hdfc_sms)
+    first, second = (email, notif) if gmail_first else (notif, email)
+    for tx in (first, second):
+        (ingest_gmail if tx.id.startswith("gmail:") else ingest_sms)(tx)
+
+
+def test_axis_credit_notification_then_email_is_counted_once():
+    _assert_axis_credit_once(gmail_first=False)
+
+
+def test_axis_credit_email_then_notification_is_counted_once():
+    _assert_axis_credit_once(gmail_first=True)
+
+
+def _assert_axis_credit_once(gmail_first):
+    _axis_credit_pair(gmail_first)
+    credits = [i for i in active_ids() if i != "sms:hdfc5"]
+    assert len(credits) == 1
+    b = balances()
+    assert b["axis"] == 1_000_000 + 500
+    assert b["hdfc"] == 500_000 - 500
+    assert _splitwise() == 0
+
+
+def test_two_distinct_axis_credits_with_different_references_are_kept():
+    for n, ref in enumerate(("111111111111", "222222222222")):
+        ingest_gmail(Tx(id=f"gmail:c{n}", amountMinor=500, type="CREDIT", bank="AXIS", accountLast4=None,
+                        reference=ref, timestamp=T0 + n * 60_000, paymentMethod="UNKNOWN"))
+    assert len(active_ids()) == 2
