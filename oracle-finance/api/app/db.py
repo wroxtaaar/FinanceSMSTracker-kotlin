@@ -129,6 +129,18 @@ def init_db():
                 "ALTER TABLE internal_transfers ADD COLUMN splitwise_neutralized INTEGER NOT NULL DEFAULT 0"
             )
 
+        splitwise_total_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(manual_splitwise_total)").fetchall()
+        }
+        # A manual Splitwise total is a baseline: the amount the user set and
+        # the ledger-wide Splitwise sum at that moment. Rebuilds then only add
+        # what changed in the ledger afterwards instead of overwriting the
+        # user's value with the whole history.
+        if "baseline_amount_minor" not in splitwise_total_columns:
+            conn.execute("ALTER TABLE manual_splitwise_total ADD COLUMN baseline_amount_minor INTEGER")
+        if "baseline_ledger_minor" not in splitwise_total_columns:
+            conn.execute("ALTER TABLE manual_splitwise_total ADD COLUMN baseline_ledger_minor INTEGER")
+
         account_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()
         }

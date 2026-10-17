@@ -1368,13 +1368,19 @@ def add_receivable(item):
 
 def set_manual_splitwise_total(currency, amount_minor):
     with connection() as conn:
+        # Record the ledger-wide sum at this moment so later rebuilds only add
+        # what changes after the user's reset.
+        ledger = _ledger_splitwise_total(conn, currency)
         conn.execute(
-            """INSERT INTO manual_splitwise_total(currency, amount_minor, updated_at)
-               VALUES(?,?,?)
+            """INSERT INTO manual_splitwise_total
+                   (currency, amount_minor, updated_at, baseline_amount_minor, baseline_ledger_minor)
+               VALUES(?,?,?,?,?)
                ON CONFLICT(currency) DO UPDATE SET
                  amount_minor=excluded.amount_minor,
-                 updated_at=excluded.updated_at""",
-            (currency, int(amount_minor), now_ms())
+                 updated_at=excluded.updated_at,
+                 baseline_amount_minor=excluded.baseline_amount_minor,
+                 baseline_ledger_minor=excluded.baseline_ledger_minor""",
+            (currency, int(amount_minor), now_ms(), int(amount_minor), ledger)
         )
 
 def apply_splitwise_contribution(conn, t, applied_at=None):
@@ -1413,16 +1419,62 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
     )
     return True
 
+def _ledger_splitwise_total(conn, cur):
+    """Ledger-wide Splitwise sum of the canonical bank/card movements.
+
+    Only active, canonical transactions that actually affect a bank/card
+    balance are included. A bank/card transfer naturally cancels because its
+    two ledger effects have opposite signs; no category or Splitwise adjustment
+    history is consulted.
+    """
+    rows = conn.execute(
+        """SELECT id,amount_minor,currency,type,account_type,payment_method,
+                  bank,merchant_or_payee,account_last4,reference,
+                  timestamp,category,confidence
+           FROM transactions
+           WHERE status='ACTIVE'
+             AND duplicate_of IS NULL
+             AND currency=?
+             AND account_type IN ('BANK_ACCOUNT','CREDIT_CARD')""",
+        (cur,),
+    ).fetchall()
+
+    # Both legs of a matched own-account transfer cancel by definition.
+    # Excluding them as a pair keeps a provisional leg (which is skipped
+    # below) from leaving its partner's contribution behind.
+    transfer_leg_ids = set()
+    for transfer in conn.execute(
+        """SELECT debit_transaction_id,credit_transaction_id
+           FROM internal_transfers WHERE status='MATCHED'"""
+    ).fetchall():
+        for leg in (transfer["debit_transaction_id"], transfer["credit_transaction_id"]):
+            resolved = _resolve_transaction_row(conn, leg)
+            if resolved is not None:
+                transfer_leg_ids.add(str(resolved["id"]))
+
+    total = 0
+    for row in rows:
+        if str(row["id"]) in transfer_leg_ids:
+            continue
+        if is_provisional_row(row):
+            continue
+        total += splitwise_delta(
+            row["account_type"],
+            row["type"],
+            row["amount_minor"],
+            row["category"],
+        )
+    return total
+
+
 def rebuild_manual_splitwise_total(currency=None):
     """Rebuild the materialized Splitwise total from the canonical ledger.
 
-    The transactions table is the source of truth. Only active, canonical
-    transactions that actually affect a bank/card balance are included.
-    Rebuilding is idempotent, so opening the app, retrying sync, duplicate
-    repair, or a late transfer match cannot make Splitwise drift.
-
-    A bank/card transfer naturally cancels because its two ledger effects have
-    opposite signs. No category or Splitwise adjustment history is consulted.
+    The transactions table is the source of truth for *changes*; the user's
+    manual total is the baseline. The total is the manual amount plus whatever
+    the ledger-wide Splitwise sum has changed by since that amount was set, so
+    opening the app, retrying sync, restarting the API, duplicate repair or a
+    late transfer match cannot make Splitwise drift or overwrite a reset.
     """
     with connection() as conn:
         currencies = [currency] if currency else [
@@ -1433,51 +1485,35 @@ def rebuild_manual_splitwise_total(currency=None):
         ]
 
         for cur in currencies:
-            rows = conn.execute(
-                """SELECT id,amount_minor,currency,type,account_type,payment_method,
-                          bank,merchant_or_payee,account_last4,reference,
-                          timestamp,category,confidence
-                   FROM transactions
-                   WHERE status='ACTIVE'
-                     AND duplicate_of IS NULL
-                     AND currency=?
-                     AND account_type IN ('BANK_ACCOUNT','CREDIT_CARD')""",
+            ledger = _ledger_splitwise_total(conn, cur)
+            row = conn.execute(
+                """SELECT amount_minor,baseline_amount_minor,baseline_ledger_minor
+                   FROM manual_splitwise_total WHERE currency=?""",
                 (cur,),
-            ).fetchall()
+            ).fetchone()
 
-            # Both legs of a matched own-account transfer cancel by definition.
-            # Excluding them as a pair keeps a provisional leg (which is
-            # skipped below) from leaving its partner's contribution behind.
-            transfer_leg_ids = set()
-            for transfer in conn.execute(
-                """SELECT debit_transaction_id,credit_transaction_id
-                   FROM internal_transfers WHERE status='MATCHED'"""
-            ).fetchall():
-                for leg in (transfer["debit_transaction_id"], transfer["credit_transaction_id"]):
-                    resolved = _resolve_transaction_row(conn, leg)
-                    if resolved is not None:
-                        transfer_leg_ids.add(str(resolved["id"]))
+            if row is None:
+                # No manual total was ever set: the ledger is the whole story.
+                baseline_amount, baseline_ledger = 0, 0
+            elif row["baseline_amount_minor"] is None or row["baseline_ledger_minor"] is None:
+                # Value stored before baselines existed (possibly a manual
+                # reset). Keep it and track changes from now on.
+                baseline_amount, baseline_ledger = int(row["amount_minor"]), ledger
+            else:
+                baseline_amount = int(row["baseline_amount_minor"])
+                baseline_ledger = int(row["baseline_ledger_minor"])
 
-            total = 0
-            for row in rows:
-                if str(row["id"]) in transfer_leg_ids:
-                    continue
-                if is_provisional_row(row):
-                    continue
-                total += splitwise_delta(
-                    row["account_type"],
-                    row["type"],
-                    row["amount_minor"],
-                    row["category"],
-                )
-
+            total = baseline_amount + ledger - baseline_ledger
             conn.execute(
-                """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
-                   VALUES(?,?,?)
+                """INSERT INTO manual_splitwise_total
+                       (currency,amount_minor,updated_at,baseline_amount_minor,baseline_ledger_minor)
+                   VALUES(?,?,?,?,?)
                    ON CONFLICT(currency) DO UPDATE SET
                        amount_minor=excluded.amount_minor,
-                       updated_at=excluded.updated_at""",
-                (cur, total, now_ms()),
+                       updated_at=excluded.updated_at,
+                       baseline_amount_minor=excluded.baseline_amount_minor,
+                       baseline_ledger_minor=excluded.baseline_ledger_minor""",
+                (cur, total, now_ms(), baseline_amount, baseline_ledger),
             )
 
     return get_manual_splitwise_total(currency or "INR")

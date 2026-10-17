@@ -303,3 +303,47 @@ def test_provisional_debit_later_enriched_does_not_reintroduce_splitwise_amount(
                   accountLast4="3370", reference=UPI_REF, timestamp=T0, category="TRANSFER")
     _sync_like_endpoint(enriched, rebuild=False)
     _assert_provisional_transfer_neutral()
+
+
+# --- Splitwise manual reset is a baseline, not overwritten by rebuild ---------
+
+def _splitwise():
+    from app.ledger import get_manual_splitwise_total
+    return get_manual_splitwise_total("INR")
+
+
+def test_manual_splitwise_reset_survives_rebuild_and_tracks_new_transactions():
+    from app.ledger import rebuild_manual_splitwise_total, set_manual_splitwise_total
+    ingest_sms(sms_debit(bank="AXIS", last4="3370", amount=50000, id="sms:hist1"))   # history before the reset
+    set_manual_splitwise_total("INR", 0)
+    rebuild_manual_splitwise_total()
+    assert _splitwise() == 0
+    ingest_sms(sms_debit(bank="AXIS", last4="3370", amount=500, id="sms:after1", ts=T0 + 3_600_000))
+    rebuild_manual_splitwise_total()
+    assert _splitwise() == 500
+    rebuild_manual_splitwise_total()                         # idempotent
+    assert _splitwise() == 500
+
+
+def test_manual_splitwise_reset_then_self_transfer_stays_neutral():
+    from app.ledger import rebuild_manual_splitwise_total, set_manual_splitwise_total
+    ingest_sms(sms_debit(bank="HDFC", last4="9591", amount=12345, id="sms:hist2"))
+    set_manual_splitwise_total("INR", 0)
+    ingest_sms(sms_debit(ref="401032212433", bank="AXIS", last4="3370", amount=300, id="sms:xd", ts=T0 + 7_200_000))
+    ingest_gmail(gmail_credit(ref="401032212433", bank="HDFC", last4="9591", amount=300, ts=T0 + 7_260_000))
+    rebuild_manual_splitwise_total()
+    assert _splitwise() == 0
+
+
+def test_legacy_splitwise_total_without_baseline_is_kept():
+    from app.db import connection
+    from app.ledger import rebuild_manual_splitwise_total
+    ingest_sms(sms_debit(bank="AXIS", last4="3370", amount=700, id="sms:hist3"))
+    with connection() as conn:
+        conn.execute("DELETE FROM manual_splitwise_total")
+        conn.execute("INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at) VALUES('INR',4200,1)")
+    rebuild_manual_splitwise_total()
+    assert _splitwise() == 4200
+    ingest_sms(sms_debit(bank="AXIS", last4="3370", amount=100, id="sms:after3", ts=T0 + 3_600_000))
+    rebuild_manual_splitwise_total()
+    assert _splitwise() == 4300

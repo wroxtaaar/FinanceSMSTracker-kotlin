@@ -396,11 +396,14 @@ def test_internal_transfer_neutralizes_splitwise_even_when_credit_category_diffe
     # has affected the Splitwise aggregate.
     with connection() as conn:
         conn.execute(
-            """INSERT INTO manual_splitwise_total(currency,amount_minor,updated_at)
-               VALUES('INR',-300,4200000001000)
+            """INSERT INTO manual_splitwise_total
+                   (currency,amount_minor,updated_at,baseline_amount_minor,baseline_ledger_minor)
+               VALUES('INR',-300,4200000001000,0,0)
                ON CONFLICT(currency) DO UPDATE SET
                    amount_minor=excluded.amount_minor,
-                   updated_at=excluded.updated_at"""
+                   updated_at=excluded.updated_at,
+                   baseline_amount_minor=excluded.baseline_amount_minor,
+                   baseline_ledger_minor=excluded.baseline_ledger_minor"""
         )
 
     assert get_manual_splitwise_total("INR") == -300
@@ -1893,7 +1896,16 @@ def test_splitwise_is_rebuilt_from_final_bank_and_card_ledger_movements():
     rebuild_manual_splitwise_total()
     assert get_manual_splitwise_total("INR") == 11500
 
-    # Even a stale/corrupt materialized value is repaired from the ledger.
-    set_manual_splitwise_total("INR", 999999)
+    # A drifted materialized value is repaired from baseline + ledger change.
+    with connection() as conn:
+        conn.execute("UPDATE manual_splitwise_total SET amount_minor=999999")
     rebuild_manual_splitwise_total()
     assert get_manual_splitwise_total("INR") == 11500
+
+    # A manual reset is a baseline: rebuilds keep it and add only later changes.
+    set_manual_splitwise_total("INR", 0)
+    rebuild_manual_splitwise_total()
+    assert get_manual_splitwise_total("INR") == 0
+    sync_transaction(T("sw-after-reset", "DEBIT", "BANK_ACCOUNT", "AXIS", "3370", 500))
+    rebuild_manual_splitwise_total()
+    assert get_manual_splitwise_total("INR") == 500
