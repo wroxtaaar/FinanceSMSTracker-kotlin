@@ -526,3 +526,14 @@ def test_reconcile_all_rebuilds_splitwise_cache():
     _drift_total(-300)
     reconcile.reconcile_all()
     assert _stored_cache() == 700
+
+
+def test_configured_credit_roster_is_complete_and_not_duplicated():
+    db.init_db(); db.init_db()
+    with connection() as conn:
+        rows = conn.execute("SELECT bank,last4 FROM accounts WHERE account_type='CREDIT_CARD'").fetchall()
+    got = sorted((r["bank"], r["last4"]) for r in rows)
+    expected = [("ICICI", x) for x in ("1012", "8001", "0005", "6002", "9001")] + [
+        ("ACE", "1175"), ("AIRTEL", "9206"), ("HDFC", "5304"), ("SBI", "0065"),
+        ("SBI", "7345"), ("INDUSIND", "3526"), ("HSBC", "5145")]
+    assert got == sorted(expected)

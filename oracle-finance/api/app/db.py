@@ -180,6 +180,15 @@ def init_db():
             ("hdfc-card-5304", "HDFC Credit Card ...5304", "INR", "CREDIT_CARD", "HDFC", "5304"),
             ("sbi-card-7345", "SBI Credit Card ...7345", "INR", "CREDIT_CARD", "SBI", "7345"),
         ]
+        for bank, last4 in (
+            ("ICICI", "1012"), ("ICICI", "0005"), ("ICICI", "6002"), ("ICICI", "9001"),
+            ("ACE", "1175"), ("AIRTEL", "9206"), ("SBI", "0065"),
+            ("INDUSIND", "3526"), ("HSBC", "5145"),
+        ):
+            configured_cards.append((
+                f"{bank.lower()}-card-{last4}", f"{bank.title()} Credit Card ...{last4}",
+                "INR", "CREDIT_CARD", bank, last4,
+            ))
         now = __import__("time").time()
         now_ms = int(now * 1000)
         for account_id, name, currency, account_type, bank, last4 in configured_cards:
