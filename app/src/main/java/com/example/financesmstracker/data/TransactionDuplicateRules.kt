@@ -120,13 +120,18 @@ object TransactionDuplicateRules {
             return firstLast4.isNotEmpty() && firstLast4 == secondLast4
         }
 
-        // E-mail row vs. notification row (e.g. an Axis credit: no SMS, no
-        // last-4). The e-mail has the reference, the notification does not.
-        if (
-            setOf(firstKind, secondKind) == setOf(Kind.NOTIFICATION, Kind.ORACLE_GMAIL) &&
-            (firstRef == null) != (secondRef == null) &&
-            firstBank != null && firstBank == secondBank
-        ) return true
+        // Two non-SMS rows for one event (e.g. an Axis credit, which has no
+        // SMS and no last-4). Gmail posts a child and a group-summary
+        // notification for the same e-mail, and the server e-mail later adds the
+        // reference to only one of the rows.
+        if (firstKind != Kind.REAL && secondKind != Kind.REAL && firstBank != null && firstBank == secondBank) {
+            val gap = abs(first.timestamp - second.timestamp)
+            // Reference on exactly one side: the e-mail enriched one row.
+            if ((firstRef == null) != (secondRef == null)) return true
+            // Neither has a reference: only the near-simultaneous twins
+            // (child + summary notification), never two separate payments.
+            if (firstRef == null && secondRef == null) return gap <= STRICT_WINDOW_MILLIS
+        }
 
         return false
     }

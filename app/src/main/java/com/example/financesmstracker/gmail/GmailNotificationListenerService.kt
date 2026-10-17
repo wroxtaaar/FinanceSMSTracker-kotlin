@@ -125,6 +125,15 @@ class GmailNotificationListenerService : NotificationListenerService() {
             return
         }
 
+        // Gmail posts every new e-mail twice: the e-mail itself and a group
+        // summary that repeats the same text. Processing both created two
+        // rows for one transaction whenever no SMS existed (e.g. Axis credits).
+        // The child notification carries the e-mail, so the summary is ignored.
+        if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+            Log.d(TAG, "Ignoring Gmail group summary notification")
+            return
+        }
+
         Log.d(
             TAG,
             "Gmail notification posted: title=" +

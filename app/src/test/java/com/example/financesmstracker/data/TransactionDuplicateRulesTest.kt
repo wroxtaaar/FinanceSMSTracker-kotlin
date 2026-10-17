@@ -145,4 +145,22 @@ class TransactionDuplicateRulesTest {
         assertFalse(TransactionDuplicateRules.safeDuplicates(hdfcDebit, axisCredit))
         assertTrue(TransactionDuplicateRules.selectLoosePairs(listOf(hdfcDebit, axisCredit)).isEmpty())
     }
+
+    @Test
+    fun twoNotificationRowsForOneAxisCreditArePaired() {
+        // Gmail posts a child and a summary notification; the e-mail reference landed on one row only.
+        val enriched = axisCredit(1, "notification:child", "715732131571", t0)
+        val twin = axisCredit(2, "notification:summary", null, t0 + 1_000L)
+        assertEquals(1, TransactionDuplicateRules.selectLoosePairs(listOf(enriched, twin)).size)
+    }
+
+    @Test
+    fun twoReferenceLessNotificationTwinsArePairedOnlyWhenNearSimultaneous() {
+        val a = axisCredit(1, "notification:a", null, t0)
+        val b = axisCredit(2, "notification:b", null, t0 + 1_000L)
+        assertEquals(1, TransactionDuplicateRules.selectLoosePairs(listOf(a, b)).size)
+
+        val later = axisCredit(3, "notification:c", null, t0 + 5 * minute)
+        assertTrue(TransactionDuplicateRules.selectLoosePairs(listOf(a, later)).isEmpty())
+    }
 }
