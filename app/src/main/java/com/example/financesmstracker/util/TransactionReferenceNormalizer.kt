@@ -15,6 +15,8 @@ object TransactionReferenceNormalizer {
         """(?i)^\s*UPI/[^/\s]+/([^/\s]+)"""
     )
 
+    private val gluedSentenceResidueRegex = Regex("""^([0-9]{8,})\.[A-Za-z]+$""")
+
     fun normalize(value: String?): String? {
         val raw = value
             ?.trim()
@@ -28,9 +30,16 @@ object TransactionReferenceNormalizer {
         val core = axisTransactionInfoRegex.find(withoutLabel)?.groupValues?.getOrNull(1)
             ?: withoutLabel
 
-        return core
+        val trimmed = core
             .trim()
             .trim('.', ',', ';', ':', ')', ']')
+
+        // Bank e-mails run the reference into the next sentence
+        // ("...601.FOR any queries"); a long numeric reference followed by a dot
+        // and letters is the reference plus sentence residue.
+        val glued = gluedSentenceResidueRegex.matchEntire(trimmed)?.groupValues?.getOrNull(1)
+
+        return (glued ?: trimmed)
             .takeIf { it.isNotBlank() }
             ?.uppercase()
     }

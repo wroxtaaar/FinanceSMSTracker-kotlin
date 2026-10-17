@@ -294,46 +294,8 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         return a == b || a.contains(b) || b.contains(a)
     }
 
-    private fun transactionsAreSafeDuplicates(first: Transaction, second: Transaction): Boolean {
-        if (first.amountPaise != second.amountPaise) return false
-        if (!first.currency.equals(second.currency, ignoreCase = true)) return false
-        if (first.transactionType != second.transactionType) return false
-        if (first.accountType != second.accountType) return false
-
-        val firstBank = normalizedBank(first.bank)
-        val secondBank = normalizedBank(second.bank)
-        if (firstBank != null && secondBank != null && firstBank != secondBank) return false
-
-        val firstLast4 = first.accountLastFour?.trim().orEmpty()
-        val secondLast4 = second.accountLastFour?.trim().orEmpty()
-        if (firstLast4.isNotEmpty() && secondLast4.isNotEmpty() && firstLast4 != secondLast4) return false
-
-        val firstRef = TransactionReferenceNormalizer.normalize(first.refNumber)
-        val secondRef = TransactionReferenceNormalizer.normalize(second.refNumber)
-
-        if (firstRef != null && secondRef != null) {
-            return firstRef == secondRef
-        }
-
-        // One source may expose the RRN while another does not. Only merge
-        // that case when the complete same-side account identity is known and
-        // the events are very close together.
-        if ((firstRef == null) == (secondRef == null)) return false
-        if (firstBank == null || secondBank == null || firstBank != secondBank) return false
-        if (firstLast4.isNotEmpty() && secondLast4.isNotEmpty() && firstLast4 != secondLast4) return false
-        if (firstLast4.isEmpty() && secondLast4.isEmpty()) return false
-
-        val firstPayment = first.paymentMethod
-        val secondPayment = second.paymentMethod
-        if (
-            firstPayment != PaymentMethod.UNKNOWN &&
-            secondPayment != PaymentMethod.UNKNOWN &&
-            firstPayment != secondPayment
-        ) return false
-
-        if (kotlin.math.abs(first.timestamp - second.timestamp) > 2L * 60L * 1000L) return false
-        return merchantsCompatible(first.merchantName, second.merchantName)
-    }
+    private fun transactionsAreSafeDuplicates(first: Transaction, second: Transaction): Boolean =
+        TransactionDuplicateRules.safeDuplicates(first, second)
 
     private fun findCanonicalDuplicate(
         db: SQLiteDatabase,
@@ -458,6 +420,18 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                 }
 
                 duplicateToCanonical[duplicate.id] = canonical.id
+            }
+        }
+
+        // Second pass: an instant notification and the SMS / e-mail for the
+        // same event can arrive minutes apart without a shared reference. Only
+        // unambiguous one-to-one pairs are merged.
+        val handledIds = duplicateToCanonical.keys + duplicateToCanonical.values
+        for ((first, second) in TransactionDuplicateRules.selectLoosePairs(rows, handledIds)) {
+            if (canonicalScore(first) >= canonicalScore(second)) {
+                duplicateToCanonical[second.id] = first.id
+            } else {
+                duplicateToCanonical[first.id] = second.id
             }
         }
 
