@@ -15,6 +15,12 @@ def normalize_reference(value):
     if match:
         raw = match.group(1)
     raw = raw.strip(".,;:)]").strip()
+    # Bank e-mails run the reference into the next sentence ("...601.FOR any
+    # queries"). A long numeric reference followed by a dot and letters is the
+    # reference plus sentence residue, not a different reference.
+    glued = re.match(r"^([0-9]{8,})\.[A-Za-z]+$", raw)
+    if glued:
+        raw = glued.group(1)
     return raw.upper() or None
 
 def splitwise_delta(account_type, transaction_type, amount_minor, category=None):
@@ -153,7 +159,19 @@ def _rows_are_duplicate(first, second):
     if str(first["account_type"]).strip().upper() != str(second["account_type"]).strip().upper():
         return False
 
-    if not first_bank or not second_bank or first_bank != second_bank:
+    first_source = str(first["id"])
+    second_source = str(second["id"])
+    first_mirror = first_source.startswith("gmail:") or first_source.startswith("notification:")
+    second_mirror = second_source.startswith("gmail:") or second_source.startswith("notification:")
+    cross_source = first_mirror != second_mirror
+
+    if first_bank and second_bank:
+        if first_bank != second_bank:
+            return False
+    elif not (cross_source and first_last4 and first_last4 == second_last4):
+        # A fast notification row may not know the bank yet. That is only
+        # tolerated between a notification/e-mail mirror and a real row that
+        # share the same account last-4.
         return False
 
     first_payment = str(first["payment_method"] or "").strip().upper()
@@ -171,12 +189,6 @@ def _rows_are_duplicate(first, second):
     merchant_second = str(second["merchant_or_payee"] or "").strip()
     if not _merchant_values_compatible(merchant_first, merchant_second):
         return False
-
-    first_source = str(first["id"])
-    second_source = str(second["id"])
-    first_mirror = first_source.startswith("gmail:") or first_source.startswith("notification:")
-    second_mirror = second_source.startswith("gmail:") or second_source.startswith("notification:")
-    cross_source = first_mirror != second_mirror
 
     if not cross_source:
         if not first_last4 and not second_last4:
@@ -201,7 +213,12 @@ def _rows_are_duplicate(first, second):
         # an important extra guard.
         one_reference_missing = (first_ref is None) != (second_ref is None)
         if not one_reference_missing:
-            return False
+            # Neither side has a reference or merchant (typical card spend:
+            # the SMS and the notification both carry only amount + last-4).
+            # Accept a notification/SMS pair only inside a short window.
+            # repair_duplicate_transactions additionally requires exactly one
+            # candidate, so two real same-amount purchases are never merged.
+            return abs(int(first["timestamp"]) - int(second["timestamp"])) <= 15 * 60 * 1000
 
     if first_source.startswith("gmail:") or second_source.startswith("gmail:"):
         max_time_diff = 24 * 60 * 60 * 1000

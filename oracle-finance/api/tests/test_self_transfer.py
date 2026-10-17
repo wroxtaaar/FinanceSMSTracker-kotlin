@@ -347,3 +347,79 @@ def test_legacy_splitwise_total_without_baseline_is_kept():
     ingest_sms(sms_debit(bank="AXIS", last4="3370", amount=100, id="sms:after3", ts=T0 + 3_600_000))
     rebuild_manual_splitwise_total()
     assert _splitwise() == 4300
+
+
+# --- Duplicate rows seen on the device: notification + SMS for one payment ----
+
+def _card():
+    L.set_balance("card9206", "Axis Card", "INR", "CREDIT_CARD", "AXIS", "9206", 0)
+
+
+def _card_sms(ts, id="sms:card", amount=182_000, merchant="RAJ"):
+    return Tx(id=id, amountMinor=amount, type="DEBIT", bank="AXIS", accountLast4="9206", accountType="CREDIT_CARD",
+              category="GROCERIES", merchantOrPayee=merchant, timestamp=ts)
+
+
+def _card_notification(ts, id="notification:card", amount=182_000):
+    return Tx(id=id, amountMinor=amount, type="DEBIT", bank=None, accountLast4="9206", accountType="CREDIT_CARD",
+              paymentMethod="UNKNOWN", category="GROCERIES", merchantOrPayee=None, timestamp=ts)
+
+
+def _card_outstanding():
+    with connection() as conn:
+        # Outstanding grows by the amount spent; adjustments are stored with
+        # the opposite sign.
+        return -conn.execute(
+            "SELECT COALESCE(SUM(delta_minor),0) FROM balance_adjustments WHERE account_id='card9206'"
+        ).fetchone()[0]
+
+
+def test_card_spend_sms_then_late_notification_is_one_transaction():
+    _card()
+    ingest_sms(_card_sms(T0))
+    ingest_sms(_card_notification(T0 + 7 * 60_000))          # 7 minutes later, no ref, no merchant
+    assert len(active_ids()) == 1
+    assert _card_outstanding() == 182_000
+    assert _splitwise() == 182_000
+
+
+def test_card_spend_notification_then_late_sms_is_one_transaction():
+    _card()
+    ingest_sms(_card_notification(T0))
+    ingest_sms(_card_sms(T0 + 7 * 60_000))
+    assert len(active_ids()) == 1
+    assert _card_outstanding() == 182_000
+    assert _splitwise() == 182_000
+
+
+def test_two_real_same_amount_card_spends_are_not_merged():
+    _card()
+    ingest_sms(_card_sms(T0, id="sms:a"))
+    ingest_sms(_card_sms(T0 + 5 * 60_000, id="sms:b"))
+    assert sorted(active_ids()) == ["sms:a", "sms:b"]
+    assert _card_outstanding() == 364_000
+
+
+def test_ambiguous_notification_is_left_alone_rather_than_guessed():
+    _card()
+    ingest_sms(_card_sms(T0, id="sms:a"))
+    ingest_sms(_card_sms(T0 + 2 * 60_000, id="sms:b"))
+    ingest_sms(_card_notification(T0 + 3 * 60_000))
+    assert {"sms:a", "sms:b"} <= set(active_ids())            # never drops a real SMS row
+
+
+def test_notification_reference_with_sentence_residue_matches_sms_reference():
+    assert L.normalize_reference("665513407363.FOR") == "665513407363"
+    assert L.normalize_reference("270905172601.FOR") == "270905172601"
+    assert L.normalize_reference("AXIS.BANK") == "AXIS.BANK"  # not a numeric reference
+    L.set_balance("hdfc9591", "HDFC 9591", "INR", "BANK_ACCOUNT", "HDFC", "9591", 100_000)
+    ingest_sms(Tx(id="notification:upi", amountMinor=30_000, type="DEBIT", bank="HDFC", accountLast4="9591",
+                  reference="665513407363.FOR", timestamp=T0, merchantOrPayee="SOMEONE"))
+    ingest_sms(Tx(id="sms:upi", amountMinor=30_000, type="DEBIT", bank="HDFC", accountLast4="9591",
+                  reference="665513407363", timestamp=T0 + 60_000, merchantOrPayee="SOMEONE"))
+    assert len(active_ids()) == 1
+    with connection() as conn:
+        moved = conn.execute(
+            "SELECT COALESCE(SUM(delta_minor),0) FROM balance_adjustments WHERE account_id='hdfc9591'"
+        ).fetchone()[0]
+    assert moved == -30_000
