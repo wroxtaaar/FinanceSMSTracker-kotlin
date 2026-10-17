@@ -12,6 +12,7 @@ from .ledger import (
     sync_card_bill,
     void_transaction,
     match_internal_transfers,
+    rebuild_manual_splitwise_total,
 )
 from .main_models import SyncTransactionModel,SyncEvidenceModel
 from .statement_sync import process_statement_attachments
@@ -1272,6 +1273,21 @@ def _run_legacy_repairs_once(service):
 
 
 def ingest_messages(service,query="newer_than:30d"):
+    """Run the Gmail ingestion, then settle the materialized Splitwise total.
+
+    The ingestion path adjusts the Splitwise total incrementally while it
+    stores, merges and neutralizes rows. Callers such as the background worker
+    never rebuilt afterwards, so the stored total could stay off by the
+    contribution of a merged e-mail row until the next phone sync. Rebuilding
+    here makes the total a pure function of baseline + ledger for every caller.
+    """
+    try:
+        return _ingest_messages(service, query)
+    finally:
+        rebuild_manual_splitwise_total()
+
+
+def _ingest_messages(service,query="newer_than:30d"):
     stats={
         "messagesScanned":0,
         "alreadyProcessed":0,

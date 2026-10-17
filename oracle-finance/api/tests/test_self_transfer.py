@@ -464,3 +464,54 @@ def test_two_distinct_axis_credits_with_different_references_are_kept():
         ingest_gmail(Tx(id=f"gmail:c{n}", amountMinor=500, type="CREDIT", bank="AXIS", accountLast4=None,
                         reference=ref, timestamp=T0 + n * 60_000, paymentMethod="UNKNOWN"))
     assert len(active_ids()) == 2
+
+
+# --- The stored Splitwise total must not stay drifted after Gmail ingestion -----
+
+def _drift_total(delta):
+    with connection() as conn:
+        conn.execute("UPDATE manual_splitwise_total SET amount_minor=amount_minor+? WHERE currency='INR'", (delta,))
+
+
+def test_gmail_ingestion_rebuilds_a_drifted_splitwise_total():
+    from app import gmail_sync
+    ingest_sms(sms_debit(bank="AXIS", last4="1111", amount=700, id="sms:g1"))
+    assert _splitwise() == 700
+    _drift_total(-300)                       # what an incremental e-mail merge left behind
+    assert _splitwise() == 400
+    original = gmail_sync._ingest_messages
+    gmail_sync._ingest_messages = lambda service, query="": {"ok": True}
+    try:
+        assert gmail_sync.ingest_messages(object()) == {"ok": True}
+    finally:
+        gmail_sync._ingest_messages = original
+    assert _splitwise() == 700
+
+
+def test_gmail_ingestion_rebuilds_even_when_it_fails():
+    from app import gmail_sync
+    ingest_sms(sms_debit(bank="AXIS", last4="1111", amount=700, id="sms:g2"))
+    _drift_total(-300)
+    original = gmail_sync._ingest_messages
+
+    def boom(service, query=""):
+        raise RuntimeError("imap failed")
+
+    gmail_sync._ingest_messages = boom
+    try:
+        try:
+            gmail_sync.ingest_messages(object())
+            assert False, "expected the error to propagate"
+        except RuntimeError:
+            pass
+    finally:
+        gmail_sync._ingest_messages = original
+    assert _splitwise() == 700
+
+
+def test_reconcile_all_rebuilds_splitwise_total():
+    from app import reconcile
+    ingest_sms(sms_debit(bank="AXIS", last4="1111", amount=700, id="sms:g3"))
+    _drift_total(-300)
+    reconcile.reconcile_all()
+    assert _splitwise() == 700

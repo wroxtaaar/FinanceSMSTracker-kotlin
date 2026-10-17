@@ -21,6 +21,8 @@ def reconcile_all():
     transfers=match_internal_transfers()
     with connection() as conn:
         ids=[r["id"] for r in conn.execute("SELECT id FROM transactions").fetchall()]
+    from .ledger import rebuild_manual_splitwise_total
+    rebuild_manual_splitwise_total()
     reviews=[]
     for tx_id in ids:
         if reconcile_transaction(tx_id)["status"]=="REVIEW": reviews.append(tx_id)
