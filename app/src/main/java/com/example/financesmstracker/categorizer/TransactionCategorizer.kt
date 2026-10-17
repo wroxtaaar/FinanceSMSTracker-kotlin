@@ -17,6 +17,12 @@ object TransactionCategorizer {
         val payee = (parserResult.payeeId ?: "").lowercase()
         val combined = "$lowerBody $merchant $payee"
 
+        // Keywords must match whole words: plain substring checks made
+        // "ola" match "Kolar", "cab" match "cabinet", etc., so unrelated
+        // merchants (e.g. a medical store) ended up as TRAVEL.
+        fun has(keyword: String): Boolean =
+            Regex("(?<![a-z0-9])" + Regex.escape(keyword) + "s?(?![a-z0-9])").containsMatchIn(combined)
+
         /*
          * CREDIT transactions have a deliberately restricted
          * category set:
@@ -30,13 +36,13 @@ object TransactionCategorizer {
         if (parserResult.transactionType == TransactionType.CREDIT) {
 
             return when {
-                combined.contains("refund") ||
-                combined.contains("reversal") ||
-                combined.contains("reversed") -> "REFUND"
+                has("refund") ||
+                has("reversal") ||
+                has("reversed") -> "REFUND"
 
-                combined.contains("salary") ||
-                combined.contains("payroll") ||
-                combined.contains("stipend") -> "SALARY"
+                has("salary") ||
+                has("payroll") ||
+                has("stipend") -> "SALARY"
 
                 else -> "TRANSFER"
             }
@@ -50,70 +56,70 @@ object TransactionCategorizer {
         }
 
         return when {
-            combined.contains("salary") ||
-            combined.contains("payroll") ||
-            combined.contains("stipend") -> "SALARY"
+            has("salary") ||
+            has("payroll") ||
+            has("stipend") -> "SALARY"
 
-            combined.contains("refund") ||
-            combined.contains("reversal") ||
-            combined.contains("reversed") -> "REFUND"
+            has("refund") ||
+            has("reversal") ||
+            has("reversed") -> "REFUND"
 
-            combined.contains("atm") ||
-            combined.contains("cash withdrawal") ||
+            has("atm") ||
+            has("cash withdrawal") ||
             parserResult.paymentMethod == PaymentMethod.ATM -> "ATM"
 
-            combined.contains("netflix") ||
-            combined.contains("spotify") ||
-            combined.contains("prime") ||
-            combined.contains("subscription") ||
-            combined.contains("hotstar") ||
-            combined.contains("google play") ||
-            combined.contains("apple") -> "SUBSCRIPTION"
+            has("netflix") ||
+            has("spotify") ||
+            has("prime") ||
+            has("subscription") ||
+            has("hotstar") ||
+            has("google play") ||
+            has("apple") -> "SUBSCRIPTION"
 
-            combined.contains("electricity") ||
-            combined.contains("broadband") ||
-            combined.contains("recharge") ||
-            combined.contains("bill") ||
-            combined.contains("utility") ||
-            combined.contains("water") ||
-            combined.contains("gas bill") -> "BILLS"
+            has("electricity") ||
+            has("broadband") ||
+            has("recharge") ||
+            has("bill") ||
+            has("utility") ||
+            has("water") ||
+            has("gas bill") -> "BILLS"
 
-            combined.contains("iocl") ||
-            combined.contains("bpcl") ||
-            combined.contains("hpcl") ||
-            combined.contains("petrol") ||
-            combined.contains("fuel") ||
-            combined.contains("diesel") ||
-            combined.contains("gas station") -> "FUEL"
+            has("iocl") ||
+            has("bpcl") ||
+            has("hpcl") ||
+            has("petrol") ||
+            has("fuel") ||
+            has("diesel") ||
+            has("gas station") -> "FUEL"
 
-            combined.contains("uber") ||
-            combined.contains("ola") ||
-            combined.contains("irctc") ||
-            combined.contains("airline") ||
-            combined.contains("flight") ||
-            combined.contains("train") ||
-            combined.contains("metro") ||
-            combined.contains("cab") -> "TRAVEL"
+            has("uber") ||
+            has("ola") ||
+            has("irctc") ||
+            has("airline") ||
+            has("flight") ||
+            has("train") ||
+            has("metro") ||
+            has("cab") -> "TRAVEL"
 
-            combined.contains("swiggy") ||
-            combined.contains("zomato") ||
-            combined.contains("restaurant") ||
-            combined.contains("cafe") ||
-            combined.contains("food") ||
-            combined.contains("dining") -> "FOOD"
+            has("swiggy") ||
+            has("zomato") ||
+            has("restaurant") ||
+            has("cafe") ||
+            has("food") ||
+            has("dining") -> "FOOD"
 
-            combined.contains("amazon") ||
-            combined.contains("flipkart") ||
-            combined.contains("myntra") ||
-            combined.contains("shopping") ||
-            combined.contains("store") ||
-            combined.contains("mall") -> "SHOPPING"
+            has("amazon") ||
+            has("flipkart") ||
+            has("myntra") ||
+            has("shopping") ||
+            has("store") ||
+            has("mall") -> "SHOPPING"
 
-            combined.contains("neft") ||
-            combined.contains("imps") ||
-            combined.contains("rtgs") ||
-            combined.contains("bank transfer") ||
-            combined.contains("fund transfer") ||
+            has("neft") ||
+            has("imps") ||
+            has("rtgs") ||
+            has("bank transfer") ||
+            has("fund transfer") ||
             parserResult.paymentMethod == PaymentMethod.NEFT ||
             parserResult.paymentMethod == PaymentMethod.IMPS ||
             parserResult.paymentMethod == PaymentMethod.RTGS ||

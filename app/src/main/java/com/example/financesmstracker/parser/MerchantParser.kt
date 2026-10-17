@@ -83,7 +83,7 @@ object MerchantParser {
 
         // 4. Merchant name after "to", "paid to", "sent to", "towards", "at"
         if (merchant == null) {
-            val merchantMatcher = Pattern.compile("(?:to|paid\\s+to|sent\\s+to|towards|at)\\s+([a-zA-Z0-9\\s._-]+?)(?:\\s+(?:Ref|UPI|A/C|a/c|on|at|via|IMPS|NEFT|card|ending|\\*|\\d{2}-)|$)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
+            val merchantMatcher = Pattern.compile("(?:to|paid\\s+to|sent\\s+to|towards|at)\\s+([a-zA-Z0-9\\s._-]+?)(?:\\s+(?:Ref\\b|UPI\\b|A/C\\b|on\\b|at\\b|via\\b|IMPS\\b|NEFT\\b|card\\b|ending\\b|\\*|\\d{2}-)|\\s*[\\r\\n]|$)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
             if (merchantMatcher.find()) {
                 val rawMerchant = merchantMatcher.group(1)?.trim()
                 if (!rawMerchant.isNullOrBlank() && !rawMerchant.equals("UPI", ignoreCase = true) && !rawMerchant.equals("P2A", ignoreCase = true)) {
