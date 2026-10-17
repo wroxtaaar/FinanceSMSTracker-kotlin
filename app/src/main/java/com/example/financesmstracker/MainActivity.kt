@@ -349,6 +349,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Account names from the server may carry the last four digits ("... 1175")
+     * and inconsistent bank casing. The last four are shown separately, so strip
+     * them here and keep well-known bank acronyms in capitals.
+     */
+    private fun displayAccountName(rawName: String): String {
+        val withoutDigits = rawName.replace(Regex("""\s*\.{3}\s*\d{4}\s*$"""), "").trim()
+        return withoutDigits.replace(
+            Regex("""\b(icici|sbi|hdfc|hsbc)\b""", RegexOption.IGNORE_CASE)
+        ) { it.value.uppercase() }
+    }
+
     private fun showManualAccountsDialog(
         accounts: List<OracleAccount>,
         accountType: String
@@ -401,7 +413,7 @@ class MainActivity : AppCompatActivity() {
 
                 val label = TextView(this).apply {
                     text = buildString {
-                        append(account.name)
+                        append(displayAccountName(account.name))
                         account.last4?.let { append(" ••••").append(it) }
                         if (isCreditBalance) {
                             append("\nCredit balance: ")
@@ -511,13 +523,6 @@ class MainActivity : AppCompatActivity() {
 
             val dialog = AlertDialog.Builder(this)
                 .setTitle(title)
-                .setMessage(
-                    "These values reconcile the current card balance. Bill is the statement amount remaining; " +
-                        "Active Spend is new spend after the bill. A negative card balance is treated as a credit " +
-                        "balance and is shown safely without forcing it into the non-negative Bill/Active buckets. " +
-                        "Historical transactions already discovered will not change this reconciled balance. New " +
-                        "transactions after the save continue to update it."
-                )
                 .setView(scrollView)
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Save", null)
@@ -599,7 +604,7 @@ class MainActivity : AppCompatActivity() {
         val accountInputs = accounts.map { account ->
             val label = TextView(this).apply {
                 text = buildString {
-                    append(account.name)
+                    append(displayAccountName(account.name))
                     account.last4?.let { append(" ••••").append(it) }
                 }
                 textSize = 14f
@@ -739,7 +744,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 "Balance"
             }
-            append(account.name)
+            append(displayAccountName(account.name))
                 .append(suffix)
                 .append("\n  ")
                 .append(amountLabel)

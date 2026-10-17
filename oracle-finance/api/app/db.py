@@ -108,6 +108,10 @@ def connection():
     finally:
         conn.close()
 
+def _card_bank_label(bank):
+    return {"ICICI": "ICICI", "SBI": "SBI", "HDFC": "HDFC", "HSBC": "HSBC",
+            "INDUSIND": "IndusInd"}.get(bank, bank.title())
+
 def init_db():
     with connection() as conn:
         conn.executescript(SCHEMA)
@@ -176,9 +180,9 @@ def init_db():
         # before the user enters the opening/outstanding balance. INSERT OR
         # IGNORE makes this safe on every startup and preserves existing values.
         configured_cards = [
-            ("icici-card-8001", "ICICI Credit Card ...8001", "INR", "CREDIT_CARD", "ICICI", "8001"),
-            ("hdfc-card-5304", "HDFC Credit Card ...5304", "INR", "CREDIT_CARD", "HDFC", "5304"),
-            ("sbi-card-7345", "SBI Credit Card ...7345", "INR", "CREDIT_CARD", "SBI", "7345"),
+            ("icici-card-8001", "ICICI Credit Card", "INR", "CREDIT_CARD", "ICICI", "8001"),
+            ("hdfc-card-5304", "HDFC Credit Card", "INR", "CREDIT_CARD", "HDFC", "5304"),
+            ("sbi-card-7345", "SBI Credit Card", "INR", "CREDIT_CARD", "SBI", "7345"),
         ]
         for bank, last4 in (
             ("ICICI", "1012"), ("ICICI", "0005"), ("ICICI", "6002"), ("ICICI", "9001"),
@@ -186,7 +190,7 @@ def init_db():
             ("INDUSIND", "3526"), ("HSBC", "5145"),
         ):
             configured_cards.append((
-                f"{bank.lower()}-card-{last4}", f"{bank.title()} Credit Card ...{last4}",
+                f"{bank.lower()}-card-{last4}", f"{_card_bank_label(bank)} Credit Card",
                 "INR", "CREDIT_CARD", bank, last4,
             ))
         now = __import__("time").time()
@@ -199,6 +203,8 @@ def init_db():
                 ) VALUES(?,?,?,?,?,?,0,0,0,0,?)""",
                 (account_id, name, currency, account_type, bank, last4, now_ms),
             )
+            # Names no longer embed the last four (the app shows them separately).
+            conn.execute("UPDATE accounts SET name=? WHERE id=?", (name, account_id))
 
 
         evidence_columns = {
