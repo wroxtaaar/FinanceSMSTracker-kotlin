@@ -3,7 +3,7 @@
 Lightweight finance backend for the Android finance collector. It runs on the Oracle VPS with one FastAPI container and one SQLite database file. No separate database server is required.
 
 ## What it does
-- Receives verified Android SMS/Truecaller evidence.
+- Receives verified Android SMS and Gmail-notification evidence.
 - Stores canonical transactions and source evidence idempotently.
 - Detects conservative internal bank transfers.
 - Tracks bank balances and credit-card outstanding balances.
@@ -81,7 +81,7 @@ GMAIL_REDIRECT_URI=http://localhost:8090/api/v1/gmail/callback
 
 OAuth requires a Google Cloud OAuth client and the Gmail read-only scope. It is not required for the free IMAP setup.
 
-Gmail transactions are reconciled against existing SMS/Truecaller transactions before their balance adjustment is applied, so one real-world payment cannot be counted twice.
+Gmail transactions are reconciled against existing SMS and notification transactions before their balance adjustment is applied, so one real-world payment cannot be counted twice.
 
 ## Telegram
 Enable with:

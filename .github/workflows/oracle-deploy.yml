@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    # The server image is built from oracle-finance/ only, so app-only commits
+    # (Kotlin, Gradle, Sheets script) must not restart the backend.
+    paths:
+      - "oracle-finance/**"
+      - ".github/workflows/oracle-deploy.yml"
   workflow_dispatch:
 
 # Only the newest Oracle deployment should remain active.

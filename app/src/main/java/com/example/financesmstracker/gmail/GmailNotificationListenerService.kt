@@ -20,6 +20,7 @@ import com.example.financesmstracker.integration.SyncCardBill
 import com.example.financesmstracker.parser.ParserResult
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.util.HashUtil
+import com.example.financesmstracker.util.NotificationLogRedactor
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -117,9 +118,9 @@ class GmailNotificationListenerService : NotificationListenerService() {
             Log.d(
                 TAG,
                 "CRED notification posted: title=" +
-                    sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE) +
+                    NotificationLogRedactor.redact(sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)) +
                     " text=" +
-                    sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT)
+                    NotificationLogRedactor.redact(sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT))
             )
             processCardBillNotificationSafely(sbn)
             return
@@ -137,9 +138,9 @@ class GmailNotificationListenerService : NotificationListenerService() {
         Log.d(
             TAG,
             "Gmail notification posted: title=" +
-                sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE) +
+                NotificationLogRedactor.redact(sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)) +
                 " text=" +
-                sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT)
+                NotificationLogRedactor.redact(sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT))
         )
 
         val extras = sbn.notification.extras
@@ -153,7 +154,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
             ?.joinToString("\n") { it.toString() }
 
         NotificationAccessHelper.recordGmailNotification(applicationContext, title, text ?: bigText ?: textLines)
-        Log.i(TAG, "Gmail notification received: title=" + title + " text=" + (text ?: bigText ?: textLines))
+        Log.i(TAG, "Gmail notification received: title=" + NotificationLogRedactor.redact(title) + " text=" + NotificationLogRedactor.redact(text ?: bigText ?: textLines))
 
         val payloadText = listOfNotNull(title, titleBig, text, bigText, subText, summary, textLines)
             .joinToString("\n")

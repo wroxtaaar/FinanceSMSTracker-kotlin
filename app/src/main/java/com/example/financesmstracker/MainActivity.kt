@@ -945,8 +945,10 @@ class MainActivity : AppCompatActivity() {
                     val dialog = AlertDialog.Builder(this@MainActivity)
                         .setTitle("Splitwise Owed")
                         .setMessage(
-                            "This amount increases automatically for every DEBIT transaction, " +
-                                "except transactions categorized as OTHER. Credits do not change it."
+                            "This is the amount you set. It then changes automatically with every " +
+                                "transaction: money leaving a bank account or a card spend adds to it, " +
+                                "money coming in subtracts from it, and transfers between your own " +
+                                "accounts cancel out. Categories do not change it."
                         )
                         .setView(container)
                         .setNegativeButton("Cancel", null)
