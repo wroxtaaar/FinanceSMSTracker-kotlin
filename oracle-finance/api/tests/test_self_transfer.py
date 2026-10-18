@@ -577,3 +577,24 @@ def test_card_sign_migration_fixes_only_wrong_adjustments():
     db.init_db()
     with connection() as conn:
         assert conn.execute("SELECT balance_minor FROM accounts WHERE id='mig-card'").fetchone()[0] == 10_600
+
+
+def test_other_optout_migration_keeps_displayed_splitwise_value():
+    from app.ledger import sync_transaction, get_manual_splitwise_total
+    # Legacy rows carry OTHER as a default and used to count toward Splitwise.
+    for tid, amount, cat in (("o1", 5_000, "OTHER"), ("o2", 7_000, "OTHER"), ("g1", 1_000, "GROCERIES")):
+        sync_transaction(Tx(id=tid, amountMinor=amount, type="DEBIT", bank="AXIS", accountLast4="1111",
+                            timestamp=T0 + 10**9, category=cat, accountType="BANK_ACCOUNT"))
+    with connection() as conn:
+        conn.execute("DELETE FROM applied_migrations WHERE name='splitwise_other_optout'")
+        # Simulate the pre-change baseline: ledger counted every row.
+        old = L._ledger_splitwise_total(conn, "INR", honor_other=False)
+        conn.execute("UPDATE manual_splitwise_total SET baseline_amount_minor=100000, baseline_ledger_minor=? WHERE currency='INR'", (old,))
+    before = 100_000
+    assert L.migrate_splitwise_other_optout() is True
+    assert get_manual_splitwise_total("INR") == before
+    # A later explicit opt-out then moves it as expected.
+    sync_transaction(Tx(id="g1", amountMinor=1_000, type="DEBIT", bank="AXIS", accountLast4="1111",
+                        timestamp=T0 + 10**9, category="OTHER", accountType="BANK_ACCOUNT"))
+    assert get_manual_splitwise_total("INR") == before - 1_000
+    assert L.migrate_splitwise_other_optout() is False

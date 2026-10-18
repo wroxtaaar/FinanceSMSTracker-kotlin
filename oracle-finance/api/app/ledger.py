@@ -1300,7 +1300,7 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
     # Only the reversible record is kept; the shown total is derived from the ledger.
     return bool(inserted.rowcount)
 
-def _ledger_splitwise_total(conn, cur):
+def _ledger_splitwise_total(conn, cur, honor_other=True):
     """Ledger-wide Splitwise sum of the canonical bank/card movements.
 
     Only active, canonical transactions that actually affect a bank/card
@@ -1343,9 +1343,37 @@ def _ledger_splitwise_total(conn, cur):
             row["account_type"],
             row["type"],
             row["amount_minor"],
-            row["category"],
+            row["category"] if honor_other else None,
         )
     return total
+
+
+def migrate_splitwise_other_optout():
+    """One-time: keep the Splitwise value steady when OTHER became an opt-out.
+
+    Before, every row counted toward Splitwise whatever its category; many
+    older rows carry OTHER only as a default. Treating OTHER as an opt-out
+    would silently subtract all of them. Shift the baseline by the difference
+    so the shown value is unchanged; only later category edits move it.
+    """
+    with connection() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS applied_migrations (name TEXT PRIMARY KEY)")
+        if conn.execute(
+            "SELECT 1 FROM applied_migrations WHERE name='splitwise_other_optout'"
+        ).fetchone():
+            return False
+        for row in conn.execute(
+            """SELECT currency,baseline_ledger_minor FROM manual_splitwise_total
+               WHERE baseline_amount_minor IS NOT NULL AND baseline_ledger_minor IS NOT NULL"""
+        ).fetchall():
+            cur = row["currency"]
+            shift = _ledger_splitwise_total(conn, cur) - _ledger_splitwise_total(conn, cur, honor_other=False)
+            conn.execute(
+                "UPDATE manual_splitwise_total SET baseline_ledger_minor=? WHERE currency=?",
+                (int(row["baseline_ledger_minor"]) + shift, cur),
+            )
+        conn.execute("INSERT INTO applied_migrations(name) VALUES('splitwise_other_optout')")
+        return True
 
 
 def rebuild_manual_splitwise_total(currency=None):
