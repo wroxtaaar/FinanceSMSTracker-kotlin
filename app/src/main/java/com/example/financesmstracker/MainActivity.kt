@@ -184,9 +184,11 @@ class MainActivity : AppCompatActivity() {
             showOracleSettingsDialog()
         }
 
-        // Gmail is intentionally disabled while SMS/notification ingestion is being tested.
-        buttonGmailSync.isEnabled = false
-        buttonGmailSync.text = "Gmail Disabled"
+        buttonGmailSync.isEnabled = true
+        buttonGmailSync.text = "Sync Gmail"
+        buttonGmailSync.setOnClickListener {
+            triggerManualGmailSync()
+        }
 
         buttonReviewReconcile.setOnClickListener {
             startActivity(Intent(this, ReviewActivity::class.java))
@@ -842,9 +844,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun triggerManualGmailSync() {
-        // Defense-in-depth: the button is disabled and the Oracle API also
-        // rejects Gmail sync while Gmail is disabled.
-        Toast.makeText(this, "Gmail is disabled", Toast.LENGTH_SHORT).show()
+        buttonGmailSync.isEnabled = false
+        buttonGmailSync.text = "Syncing Gmail..."
+
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).triggerGmailSync()
+
+            runOnUiThread {
+                buttonGmailSync.isEnabled = true
+                buttonGmailSync.text = "Sync Gmail"
+
+                result.onSuccess { summary ->
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Gmail: scanned ${summary.messagesScanned}, new transactions " +
+                            "${summary.parsedTransactions}, duplicates ${summary.duplicateTransactions}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    syncOracleGmailTransactions()
+                    loadOracleSummary()
+                    loadTransactions()
+                }.onFailure { error ->
+                    // A 403 here means Gmail is switched off on the Oracle server
+                    // (GMAIL_ENABLED in its .env).
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Gmail sync failed: " + (error.message ?: "Unavailable"),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun updateReviewCount() {
