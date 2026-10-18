@@ -261,7 +261,7 @@ def test_new_transactions_update_seeded_account_balances():
         ).fetchone()["balance_minor"]
 
     assert bank_balance == 98500
-    assert card_balance == 44200
+    assert card_balance == 55800
 
 
 def test_provisional_bankless_debit_is_corrected_to_axis_credit():
@@ -486,7 +486,7 @@ def test_card_direction_rules_match_bank_sign_convention():
             "SELECT balance_minor FROM accounts WHERE id='direction-card'"
         ).fetchone()["balance_minor"]
 
-    assert balance == 44200
+    assert balance == 55800
 
 
 def test_card_bill_and_active_spend_are_separate():
@@ -528,7 +528,7 @@ def test_card_bill_and_active_spend_are_separate():
             "SELECT balance_minor, bill_balance_minor FROM accounts WHERE id='bill-card'"
         ).fetchone()
 
-    assert row["balance_minor"] == 43000
+    assert row["balance_minor"] == 57000
     assert row["bill_balance_minor"] == 50000
 
     # Paying the bill reduces the bill bucket while leaving the active spend.
@@ -539,7 +539,7 @@ def test_card_bill_and_active_spend_are_separate():
             "SELECT balance_minor, bill_balance_minor FROM accounts WHERE id='bill-card'"
         ).fetchone()
 
-    assert row["balance_minor"] == 93000
+    assert row["balance_minor"] == 7000
     assert row["bill_balance_minor"] == 0
 
 
@@ -591,7 +591,7 @@ def test_card_bill_evidence_updates_bill_without_touching_active_spend():
             "SELECT balance_minor,bill_balance_minor FROM accounts WHERE id='bill-axis-9206'"
         ).fetchone()
 
-    assert row["balance_minor"] == 4336906
+    assert row["balance_minor"] == 6290306  # bill 5313606 + active spend 976700
     assert row["bill_balance_minor"] == 5313606
 
 
@@ -712,7 +712,8 @@ def test_true_available_reflects_signed_splitwise_and_card_movements():
         T("inv-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "2222", 300),
     ]
 
-    expected_values = [5000, 5000, 6600, 6000]
+    # A spend or payment only moves money between buckets, so true available stays put.
+    expected_values = [5000, 5000, 5000, 5000]
 
     for tx, expected in zip(operations, expected_values):
         sync_transaction(tx)

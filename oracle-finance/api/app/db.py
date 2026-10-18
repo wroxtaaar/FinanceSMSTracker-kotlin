@@ -176,6 +176,34 @@ def init_db():
              WHERE opening_balance_minor IS NULL"""
         )
 
+        # One-time repair: the live ledger used to store card spends with the
+        # bank sign (lowering the amount owed) while statement imports used the
+        # card sign. Fix only the adjustments whose sign disagrees with their
+        # transaction, and move the card balance by the same difference.
+        conn.execute("CREATE TABLE IF NOT EXISTS applied_migrations (name TEXT PRIMARY KEY)")
+        if not conn.execute("SELECT 1 FROM applied_migrations WHERE name='card_adjustment_sign'").fetchone():
+            wrong = conn.execute(
+                """SELECT ba.transaction_id AS tid, ba.account_id AS aid, ba.delta_minor AS delta,
+                          t.amount_minor AS amount, t.type AS type
+                   FROM balance_adjustments ba
+                   JOIN accounts a ON a.id = ba.account_id AND a.account_type='CREDIT_CARD'
+                   JOIN transactions t ON t.id = ba.transaction_id
+                   WHERE t.type IN ('DEBIT','CREDIT')"""
+            ).fetchall()
+            for row in wrong:
+                expected = row["amount"] if row["type"] == "DEBIT" else -row["amount"]
+                if row["delta"] == expected:
+                    continue
+                conn.execute(
+                    "UPDATE balance_adjustments SET delta_minor=? WHERE transaction_id=?",
+                    (expected, row["tid"]),
+                )
+                conn.execute(
+                    "UPDATE accounts SET balance_minor = balance_minor + ? WHERE id=?",
+                    (expected - row["delta"], row["aid"]),
+                )
+            conn.execute("INSERT INTO applied_migrations(name) VALUES('card_adjustment_sign')")
+
         # Keep the configured credit-card roster available in the ledger even
         # before the user enters the opening/outstanding balance. INSERT OR
         # IGNORE makes this safe on every startup and preserves existing values.

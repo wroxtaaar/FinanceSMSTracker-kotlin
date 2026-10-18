@@ -367,9 +367,8 @@ def _card_notification(ts, id="notification:card", amount=182_000):
 
 def _card_outstanding():
     with connection() as conn:
-        # Outstanding grows by the amount spent; adjustments are stored with
-        # the opposite sign.
-        return -conn.execute(
+        # Outstanding grows by the amount spent.
+        return conn.execute(
             "SELECT COALESCE(SUM(delta_minor),0) FROM balance_adjustments WHERE account_id='card9206'"
         ).fetchone()[0]
 
@@ -537,3 +536,44 @@ def test_configured_credit_roster_is_complete_and_not_duplicated():
         ("ACE", "1175"), ("AIRTEL", "9206"), ("HDFC", "5304"), ("SBI", "0065"),
         ("SBI", "7345"), ("INDUSIND", "3526"), ("HSBC", "5145")]
     assert got == sorted(expected)
+
+
+def test_card_spend_raises_outstanding_and_splitwise_bank_debit_raises_splitwise():
+    L.set_balance("c1", "ICICI Credit Card", "INR", "CREDIT_CARD", "ICICI", "8001", 0)
+    L.set_manual_splitwise_total("INR", 0)
+    card = Tx(id="card:spend", amountMinor=10_000, type="DEBIT", bank="ICICI", accountLast4="8001",
+              accountType="CREDIT_CARD", paymentMethod="CARD", reference="CARDREF0001", timestamp=T0 + 10)
+    ingest_sms(card)
+    with connection() as conn:
+        bal = conn.execute("SELECT balance_minor FROM accounts WHERE id='c1'").fetchone()["balance_minor"]
+    assert bal == 10_000
+    assert L.get_manual_splitwise_total("INR") == 10_000
+    bank = sms_debit(ref="BANKREF0002", ts=T0 + 20, amount=4_000, id="sms:bank-spend")
+    bank.paymentMethod = "UPI"; bank.category = "GROCERIES"
+    ingest_sms(bank)
+    assert L.get_manual_splitwise_total("INR") == 14_000
+
+
+def test_card_sign_migration_fixes_only_wrong_adjustments():
+    L.set_balance("mig-card", "Card", "INR", "CREDIT_CARD", "AXIS", "7777", 10_000)
+    with connection() as conn:
+        for tid, typ, delta in (("m1", "DEBIT", -500), ("m2", "DEBIT", 300), ("m3", "CREDIT", 200)):
+            conn.execute(
+                """INSERT INTO transactions(id,amount_minor,currency,type,payment_method,account_type,
+                   bank,account_last4,timestamp,category,confidence,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (tid, abs(delta), "INR", typ, "CARD", "CREDIT_CARD", "AXIS", "7777", T0, "FOOD", 0.9, T0))
+            conn.execute("INSERT INTO balance_adjustments(transaction_id,account_id,delta_minor,applied_at) VALUES(?,?,?,?)",
+                         (tid, "mig-card", delta, T0))
+        conn.execute("UPDATE accounts SET balance_minor=10000-500+300+200 WHERE id='mig-card'")
+        conn.execute("DELETE FROM applied_migrations WHERE name='card_adjustment_sign'")
+    db.init_db()
+    with connection() as conn:
+        deltas = {r["transaction_id"]: r["delta_minor"] for r in conn.execute(
+            "SELECT transaction_id,delta_minor FROM balance_adjustments WHERE account_id='mig-card'")}
+        balance = conn.execute("SELECT balance_minor FROM accounts WHERE id='mig-card'").fetchone()[0]
+    assert deltas == {"m1": 500, "m2": 300, "m3": -200}
+    assert balance == 10_000 + 500 + 300 - 200
+    db.init_db()
+    with connection() as conn:
+        assert conn.execute("SELECT balance_minor FROM accounts WHERE id='mig-card'").fetchone()[0] == 10_600

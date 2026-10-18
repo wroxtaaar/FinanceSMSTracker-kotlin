@@ -926,12 +926,13 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
         if event_at < min_plausible_event_ms:
             return
 
-    # Both bank accounts and credit cards use the transaction's natural sign:
-    # DEBIT decreases the tracked balance; CREDIT increases it.
+    # Bank account balance: DEBIT decreases it, CREDIT increases it.
+    # Credit card balance is the amount owed (outstanding): a card spend
+    # (DEBIT) increases it and a payment/refund (CREDIT) decreases it.
     if t.type == "DEBIT":
-        delta = -t.amountMinor
+        delta = t.amountMinor if t.accountType == "CREDIT_CARD" else -t.amountMinor
     elif t.type == "CREDIT":
-        delta = t.amountMinor
+        delta = -t.amountMinor if t.accountType == "CREDIT_CARD" else t.amountMinor
     else:
         return
 
