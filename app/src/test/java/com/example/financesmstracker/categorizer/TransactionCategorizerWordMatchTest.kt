@@ -44,4 +44,34 @@ class TransactionCategorizerWordMatchTest {
         assertEquals("ASHU ONKAR", MerchantParser.extractMerchantAndVpa("Rs.50 paid to ASHU ONKAR on 16-10-26").first)
         assertEquals("MR SHARMA", MerchantParser.extractMerchantAndVpa("INR 15 sent to MR SHARMA\nRef 123456789012").first)
     }
+
+    private fun axisCard(amount: Int, stamp: String, merchant: String) =
+        "Spent INR $amount\nusing Axis Bank Credit Card no. XX9206 on\n$stamp IST at\n$merchant.\n" +
+            "Avl limit: INR 64678.85. Not you? SMS BLOCK\n9206 to +919951860002."
+
+    @Test
+    fun newAxisCardLayoutKeepsFullMerchantName() {
+        assertEquals("RAJNEESH PR", MerchantParser.extractMerchantAndVpa(axisCard(20, "15-10-26 17:16:04", "RAJNEESH PR")).first)
+        assertEquals("ASHU PHARME", MerchantParser.extractMerchantAndVpa(axisCard(20, "16-10-26 16:45:50", "ASHU PHARME")).first)
+        assertEquals("Tanveer hot", MerchantParser.extractMerchantAndVpa(axisCard(60, "17-10-26 20:02:42", "Tanveer hot")).first)
+        assertEquals("JAVED", MerchantParser.extractMerchantAndVpa(axisCard(20, "17-10-26 18:48:52", "JAVED")).first)
+    }
+
+    @Test
+    fun axisCardPaymentDueReminderIsNotATransaction() {
+        val sms = "Payment of INR 53136.06 for Axis Bank Credit Card no. XX9206 is due on 21-10-26 with minimum amount due of INR 1063. Ignore if paid."
+        val result = com.example.financesmstracker.parser.SmsParserManager().parse("AD-AXISBK-S", sms)
+        org.junit.Assert.assertFalse(result.isTransaction)
+    }
+
+    @Test
+    fun newAxisCardLayoutParsesAsCardSpend() {
+        val result = com.example.financesmstracker.parser.SmsParserManager()
+            .parse("AD-AXISBK", axisCard(20, "15-10-26 17:16:04", "RAJNEESH PR"))
+        org.junit.Assert.assertTrue(result.isTransaction)
+        assertEquals(2000L, result.amountPaise)
+        assertEquals("9206", result.accountLastFour)
+        assertEquals("RAJNEESH PR", result.merchantName)
+        assertEquals(PaymentMethod.CARD, result.paymentMethod)
+    }
 }

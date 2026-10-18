@@ -81,11 +81,26 @@ object MerchantParser {
             }
         }
 
+        // 3b. Newer Axis card layout: "... IST at\nMERCHANT NAME.\nAvl limit: ..."
+        // The merchant sits on its own line after "at" and ends with a period.
+        if (merchant == null) {
+            val axisAtMatcher = Pattern.compile(
+                "[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\s+[A-Z]+)?\\s+at\\s*\\r?\\n\\s*([^\\r\\n]+?)\\s*\\r?\\n\\s*(?:Avl|Avbl|Available|Not\\s+you)",
+                Pattern.CASE_INSENSITIVE
+            ).matcher(messageBody)
+            if (axisAtMatcher.find()) {
+                val raw = cleanMerchant(axisAtMatcher.group(1))
+                if (raw.isNotBlank() && isValidMerchant(raw)) {
+                    merchant = raw
+                }
+            }
+        }
+
         // 4. Merchant name after "to", "paid to", "sent to", "towards", "at"
         if (merchant == null) {
             val merchantMatcher = Pattern.compile("(?:to|paid\\s+to|sent\\s+to|towards|at)\\s+([a-zA-Z0-9\\s._-]+?)(?:\\s+(?:Ref\\b|UPI\\b|A/C\\b|on\\b|at\\b|via\\b|IMPS\\b|NEFT\\b|card\\b|ending\\b|\\*|\\d{2}-)|\\s*[\\r\\n]|$)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
             if (merchantMatcher.find()) {
-                val rawMerchant = merchantMatcher.group(1)?.trim()
+                val rawMerchant = merchantMatcher.group(1)?.let { cleanMerchant(it) }
                 if (!rawMerchant.isNullOrBlank() && !rawMerchant.equals("UPI", ignoreCase = true) && !rawMerchant.equals("P2A", ignoreCase = true)) {
                     if (isValidMerchant(rawMerchant)) {
                         merchant = rawMerchant
@@ -107,6 +122,10 @@ object MerchantParser {
 
         return Pair(merchant, vpa)
     }
+
+    /** Trim whitespace and the sentence-ending period banks put after a merchant name. */
+    private fun cleanMerchant(value: String?): String =
+        (value ?: "").trim().trimEnd('.', ',').trim()
 
     private fun isValidMerchant(candidate: String): Boolean {
         val trimmed = candidate.trim()
