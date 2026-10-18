@@ -16,3 +16,5 @@
 local.properties
 /finance-signing.properties
 /finance-release.jks
+__pycache__/
+*.pyc
