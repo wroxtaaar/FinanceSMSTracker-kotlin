@@ -392,7 +392,7 @@ def test_internal_transfer_neutralizes_splitwise_even_when_credit_category_diffe
 
     # Reproduce the device pattern: the debit is TRANSFER while the receiving
     # side was classified independently as REFUND.
-    sync_transaction(T("axis-debit-300", "DEBIT", "AXIS", "3370", "OTHER"))
+    sync_transaction(T("axis-debit-300", "DEBIT", "AXIS", "3370", "TRANSFER"))
     sync_transaction(T("hdfc-credit-300", "CREDIT", "HDFC", "9591", "REFUND"))
 
     # Reproduce the observed asymmetric state: only the receiving credit
@@ -1310,7 +1310,7 @@ def test_splitwise_uses_signed_bank_and_card_rules():
 
     # Bank debit +2500, bank credit -7000, card debit +1000, card credit -600.
     sync_transaction(T("splitwise-bank-debit", "DEBIT", "BANK_ACCOUNT", "HDFC", "FOOD", 2500, "1234"))
-    sync_transaction(T("splitwise-other", "DEBIT", "BANK_ACCOUNT", "HDFC", "OTHER", 9000, "1234"))
+    sync_transaction(T("splitwise-other", "DEBIT", "BANK_ACCOUNT", "HDFC", "TRANSFER", 9000, "1234"))
     sync_transaction(T("splitwise-bank-credit", "CREDIT", "BANK_ACCOUNT", "HDFC", "FOOD", 7000, "1234"))
     sync_transaction(T("splitwise-card-debit", "DEBIT", "CREDIT_CARD", "AXIS", "FOOD", 1000, "5678"))
     sync_transaction(T("splitwise-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "FOOD", 600, "5678"))
@@ -1380,12 +1380,12 @@ def test_category_edit_updates_splitwise_contribution():
         accountLast4 = "4321"
         reference = None
         timestamp = 2300000000000
-        category = "OTHER"
+        category = "GROCERIES"
         confidence = 0.95
 
     set_balance("category-edit-account", "Category Edit", "INR", "BANK_ACCOUNT", "HDFC", "4321", 100000)
 
-    # Splitwise follows the canonical bank/card movement regardless of category.
+    # Splitwise follows the canonical bank/card movement; only OTHER opts out.
     sync_transaction(T())
     assert get_manual_splitwise_total("INR") == 4200
 
@@ -1394,7 +1394,13 @@ def test_category_edit_updates_splitwise_contribution():
     assert sync_transaction(T()) is False
     assert get_manual_splitwise_total("INR") == 4200
 
+    # OTHER is the explicit opt-out: the share leaves Splitwise...
     T.category = "OTHER"
+    assert sync_transaction(T()) is False
+    assert get_manual_splitwise_total("INR") == 0
+
+    # ...and comes back when the category is changed again.
+    T.category = "FOOD"
     assert sync_transaction(T()) is False
     assert get_manual_splitwise_total("INR") == 4200
 
@@ -1889,7 +1895,7 @@ def test_splitwise_is_rebuilt_from_final_bank_and_card_ledger_movements():
     sync_transaction(T("sw-card-credit", "CREDIT", "CREDIT_CARD", "AXIS", "9206", 2000))
 
     # Category does not alter the ledger-derived Splitwise amount.
-    sync_transaction(T("sw-other", "DEBIT", "BANK_ACCOUNT", "AXIS", "3370", 500, "OTHER"))
+    sync_transaction(T("sw-other", "DEBIT", "BANK_ACCOUNT", "AXIS", "3370", 500, "TRANSFER"))
 
     # A bank -> card payment is a +20 bank effect in Splitwise and a -20
     # card-outstanding effect, so it cancels completely.

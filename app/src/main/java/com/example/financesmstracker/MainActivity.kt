@@ -89,7 +89,8 @@ class MainActivity : AppCompatActivity() {
     private val creditCategories = listOf(
         "SALARY",
         "TRANSFER",
-        "REFUND"
+        "REFUND",
+        "OTHER"
     )
 
     private val transactionDataChangedReceiver = object : BroadcastReceiver() {
@@ -953,7 +954,7 @@ class MainActivity : AppCompatActivity() {
                             "This is the amount you set. It then changes automatically with every " +
                                 "transaction: money leaving a bank account or a card spend adds to it, " +
                                 "money coming in subtracts from it, and transfers between your own " +
-                                "accounts cancel out. Categories do not change it."
+                                "accounts cancel out. Categories do not change it, except OTHER, which keeps a transaction out of Splitwise."
                         )
                         .setView(container)
                         .setNegativeButton("Cancel", null)
@@ -1146,7 +1147,7 @@ class MainActivity : AppCompatActivity() {
 
         /*
          * Credits can only use:
-         * SALARY, TRANSFER, REFUND.
+         * SALARY, TRANSFER, REFUND, OTHER (keeps it out of Splitwise).
          *
          * Debits can use the complete category list.
          */

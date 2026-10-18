@@ -27,7 +27,8 @@ def splitwise_delta(account_type, transaction_type, amount_minor, category=None)
     """Return the Splitwise effect implied by the final ledger movement.
 
     Splitwise is deliberately derived from the same ledger movement as the
-    account balance, not from categories or a second set of expense rules.
+    account balance, not from a second set of expense rules. The one category
+    that matters is OTHER: the user's explicit "keep this out of Splitwise".
 
     Bank account:
       DEBIT  -> bank -X, so Splitwise +X
@@ -43,6 +44,9 @@ def splitwise_delta(account_type, transaction_type, amount_minor, category=None)
     amount = int(amount_minor)
     account_type = str(account_type or "").strip().upper()
     transaction_type = str(transaction_type or "").strip().upper()
+
+    if str(category or "").strip().upper() == "OTHER":
+        return 0
 
     if account_type in ("BANK_ACCOUNT", "CREDIT_CARD"):
         return amount if transaction_type == "DEBIT" else -amount if transaction_type == "CREDIT" else 0
@@ -646,9 +650,9 @@ def sync_transaction(t, apply_balance=True):
                 )
 
         # Category edits are sent as the same transaction ID. They update the
-        # ledger metadata only: the Splitwise value is derived from the ledger
-        # (amount, direction and account type), so a category never shifts it,
-        # and the bank/card balance is not reapplied.
+        # ledger metadata only; the bank/card balance is not reapplied. The
+        # Splitwise value is derived from the ledger on read, so switching a
+        # row to or from OTHER adds or removes its share automatically.
         if (
             before is not None
             and before["status"] == "ACTIVE"
@@ -1301,8 +1305,8 @@ def _ledger_splitwise_total(conn, cur):
 
     Only active, canonical transactions that actually affect a bank/card
     balance are included. A bank/card transfer naturally cancels because its
-    two ledger effects have opposite signs; no category or Splitwise adjustment
-    history is consulted.
+    two ledger effects have opposite signs; only the OTHER category (explicit
+    opt-out) is consulted.
     """
     rows = conn.execute(
         """SELECT id,amount_minor,currency,type,account_type,payment_method,
