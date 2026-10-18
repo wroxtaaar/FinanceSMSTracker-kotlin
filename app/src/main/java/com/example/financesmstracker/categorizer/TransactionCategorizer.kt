@@ -23,6 +23,10 @@ object TransactionCategorizer {
         fun has(keyword: String): Boolean =
             Regex("(?<![a-z0-9])" + Regex.escape(keyword) + "s?(?![a-z0-9])").containsMatchIn(combined)
 
+        // Word-start match for stems such as "pharm" (pharmacy, pharma, pharme).
+        fun hasStem(stem: String): Boolean =
+            Regex("(?<![a-z0-9])" + Regex.escape(stem)).containsMatchIn(combined)
+
         /*
          * CREDIT transactions have a deliberately restricted
          * category set:
@@ -67,6 +71,16 @@ object TransactionCategorizer {
             has("atm") ||
             has("cash withdrawal") ||
             parserResult.paymentMethod == PaymentMethod.ATM -> "ATM"
+
+            hasStem("medic") ||
+            hasStem("pharm") ||
+            has("chemist") ||
+            has("hospital") ||
+            has("clinic") ||
+            has("diagnostic") ||
+            has("dental") ||
+            has("dentist") ||
+            has("doctor") -> "MEDICAL"
 
             has("netflix") ||
             has("spotify") ||

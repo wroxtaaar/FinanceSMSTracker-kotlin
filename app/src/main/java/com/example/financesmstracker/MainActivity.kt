@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity() {
 
     private val categories = listOf(
         "FOOD", "GROCERIES", "SHOPPING", "FUEL", "TRAVEL",
-        "SUBSCRIPTION", "BILLS", "TRANSFER", "ATM",
+        "SUBSCRIPTION", "BILLS", "MEDICAL", "TRANSFER", "ATM",
         "SALARY", "REFUND", "OTHER"
     )
 

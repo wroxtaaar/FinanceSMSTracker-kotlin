@@ -74,4 +74,12 @@ class TransactionCategorizerWordMatchTest {
         assertEquals("RAJNEESH PR", result.merchantName)
         assertEquals(PaymentMethod.CARD, result.paymentMethod)
     }
+
+    @Test
+    fun medicalMerchantsGetMedicalCategory() {
+        assertEquals("MEDICAL", TransactionCategorizer.categorize(debit("ASHU PHARME"), "Spent INR 20 at ASHU PHARME"))
+        assertEquals("MEDICAL", TransactionCategorizer.categorize(debit("RAJ MEDICAL"), "Spent INR 1820 at RAJ MEDICAL"))
+        assertEquals("MEDICAL", TransactionCategorizer.categorize(debit("CITY HOSPITAL"), "Spent INR 500 at CITY HOSPITAL"))
+        assertNotEquals("MEDICAL", TransactionCategorizer.categorize(debit("JAVED"), "Spent INR 20 at JAVED"))
+    }
 }
