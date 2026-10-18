@@ -533,7 +533,7 @@ def test_configured_credit_roster_is_complete_and_not_duplicated():
         rows = conn.execute("SELECT bank,last4 FROM accounts WHERE account_type='CREDIT_CARD'").fetchall()
     got = sorted((r["bank"], r["last4"]) for r in rows)
     expected = [("ICICI", x) for x in ("1012", "8001", "0005", "6002", "9001")] + [
-        ("ACE", "1175"), ("AIRTEL", "9206"), ("HDFC", "5304"), ("SBI", "0065"),
+        ("AXIS", "1175"), ("AXIS", "9206"), ("HDFC", "5304"), ("SBI", "0065"),
         ("SBI", "7345"), ("INDUSIND", "3526"), ("HSBC", "5145")]
     assert got == sorted(expected)
 
@@ -598,3 +598,17 @@ def test_other_optout_migration_keeps_displayed_splitwise_value():
                         timestamp=T0 + 10**9, category="OTHER", accountType="BANK_ACCOUNT"))
     assert get_manual_splitwise_total("INR") == before - 1_000
     assert L.migrate_splitwise_other_optout() is False
+
+
+def test_axis_card_spend_reaches_the_airtel_axis_card_and_old_seed_is_corrected():
+    # Production had this card seeded under the wrong bank (AIRTEL).
+    with connection() as conn:
+        conn.execute("UPDATE accounts SET bank='AIRTEL' WHERE id='airtel-card-9206'")
+    db.init_db()
+    with connection() as conn:
+        assert conn.execute("SELECT bank FROM accounts WHERE id='airtel-card-9206'").fetchone()[0] == "AXIS"
+    L.sync_transaction(Tx(id="sms:fareed", amountMinor=12_000, type="DEBIT", bank="AXIS", accountLast4="9206",
+                          paymentMethod="CARD", accountType="CREDIT_CARD", timestamp=T0 + 10**9,
+                          merchantOrPayee="FAREED", category="GROCERIES"))
+    with connection() as conn:
+        assert conn.execute("SELECT balance_minor FROM accounts WHERE id='airtel-card-9206'").fetchone()[0] == 12_000

@@ -214,13 +214,16 @@ def init_db():
         ]
         for bank, last4 in (
             ("ICICI", "1012"), ("ICICI", "0005"), ("ICICI", "6002"), ("ICICI", "9001"),
-            ("ACE", "1175"), ("AIRTEL", "9206"), ("SBI", "0065"),
-            ("INDUSIND", "3526"), ("HSBC", "5145"),
+            ("SBI", "0065"), ("INDUSIND", "3526"), ("HSBC", "5145"),
         ):
             configured_cards.append((
                 f"{bank.lower()}-card-{last4}", f"{_card_bank_label(bank)} Credit Card",
                 "INR", "CREDIT_CARD", bank, last4,
             ))
+        # Co-branded cards are issued by Axis: their SMS/e-mail alerts say
+        # "Axis Bank Credit Card", so the bank must be AXIS or no spend matches.
+        configured_cards.append(("airtel-card-9206", "Airtel Axis Credit Card", "INR", "CREDIT_CARD", "AXIS", "9206"))
+        configured_cards.append(("ace-card-1175", "Axis Ace Credit Card", "INR", "CREDIT_CARD", "AXIS", "1175"))
         now = __import__("time").time()
         now_ms = int(now * 1000)
         for account_id, name, currency, account_type, bank, last4 in configured_cards:
@@ -232,7 +235,7 @@ def init_db():
                 (account_id, name, currency, account_type, bank, last4, now_ms),
             )
             # Names no longer embed the last four (the app shows them separately).
-            conn.execute("UPDATE accounts SET name=? WHERE id=?", (name, account_id))
+            conn.execute("UPDATE accounts SET name=?, bank=? WHERE id=?", (name, bank, account_id))
 
 
         evidence_columns = {
