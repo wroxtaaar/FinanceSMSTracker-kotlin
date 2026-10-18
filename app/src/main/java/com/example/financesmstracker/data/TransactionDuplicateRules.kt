@@ -19,6 +19,54 @@ object TransactionDuplicateRules {
     private const val STRICT_WINDOW_MILLIS = 2L * 60L * 1000L
     private const val MIRROR_WINDOW_MILLIS = 15L * 60L * 1000L
 
+    /** Details a voided duplicate can hand to the canonical row. Null = leave as is. */
+    data class Enrichment(
+        val merchantName: String? = null,
+        val payeeId: String? = null,
+        val bank: String? = null,
+        val accountLastFour: String? = null,
+        val refNumber: String? = null
+    ) {
+        fun isEmpty(): Boolean =
+            merchantName == null && payeeId == null && bank == null &&
+                accountLastFour == null && refNumber == null
+
+        fun isNotEmpty(): Boolean = !isEmpty()
+    }
+
+    /** True for a missing merchant or one that is just the bank's own name. */
+    fun isGenericMerchant(merchant: String?, bank: String?): Boolean {
+        val value = merchant?.trim()?.uppercase().orEmpty()
+        if (value.isEmpty() || value == "-" || value == "NULL" || value == "NONE") return true
+        val normalizedBank = normalizedBank(bank)
+        val normalizedValue = normalizedBank(value)
+        return normalizedBank != null && normalizedValue == normalizedBank
+    }
+
+    /** What [canonical] is missing that [duplicate] knows. */
+    fun enrichmentFrom(canonical: Transaction, duplicate: Transaction): Enrichment {
+        val merchant = duplicate.merchantName?.trim()?.takeIf {
+            it.isNotEmpty() &&
+                isGenericMerchant(canonical.merchantName, canonical.bank) &&
+                !isGenericMerchant(it, duplicate.bank ?: canonical.bank)
+        }
+        return Enrichment(
+            merchantName = merchant,
+            payeeId = duplicate.payeeId?.takeIf {
+                it.isNotBlank() && canonical.payeeId.isNullOrBlank()
+            },
+            bank = duplicate.bank?.takeIf {
+                it.isNotBlank() && canonical.bank.isNullOrBlank()
+            },
+            accountLastFour = duplicate.accountLastFour?.takeIf {
+                it.isNotBlank() && canonical.accountLastFour.isNullOrBlank()
+            },
+            refNumber = TransactionReferenceNormalizer.normalize(duplicate.refNumber)?.takeIf {
+                TransactionReferenceNormalizer.normalize(canonical.refNumber) == null
+            }
+        )
+    }
+
     fun normalizedBank(value: String?): String? =
         value?.trim()
             ?.takeIf { it.isNotEmpty() && !it.equals("null", true) && !it.equals("none", true) }

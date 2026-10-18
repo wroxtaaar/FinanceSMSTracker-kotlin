@@ -215,7 +215,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
             val semanticDuplicate = findCanonicalDuplicate(db, transaction)
             if (semanticDuplicate != null) {
                 val values = ContentValues().apply {
-                    if (semanticDuplicate.merchantName.isNullOrBlank() && !transaction.merchantName.isNullOrBlank()) {
+                    if (TransactionDuplicateRules.isGenericMerchant(semanticDuplicate.merchantName, semanticDuplicate.bank) && !transaction.merchantName.isNullOrBlank()) {
                         put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, transaction.merchantName)
                     }
                     if (semanticDuplicate.payeeId.isNullOrBlank() && !transaction.payeeId.isNullOrBlank()) {
@@ -453,6 +453,38 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
                 )
 
                 if (updated > 0) {
+                    // The voided row may hold details the canonical row lacks
+                    // (typically the merchant from the SMS while the canonical
+                    // notification only knows the bank). Carry them over.
+                    val canonicalRow = rows.firstOrNull { it.id == canonicalId }
+                    val duplicateRow = rows.firstOrNull { it.id == duplicateId }
+                    if (canonicalRow != null && duplicateRow != null) {
+                        val enrichment = TransactionDuplicateRules.enrichmentFrom(canonicalRow, duplicateRow)
+                        if (enrichment.isNotEmpty()) {
+                            val enrichValues = ContentValues()
+                            enrichment.merchantName?.let {
+                                enrichValues.put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, it)
+                            }
+                            enrichment.payeeId?.let {
+                                enrichValues.put(FinanceDatabaseHelper.COLUMN_PAYEE_ID, it)
+                            }
+                            enrichment.bank?.let {
+                                enrichValues.put(FinanceDatabaseHelper.COLUMN_BANK, it)
+                            }
+                            enrichment.accountLastFour?.let {
+                                enrichValues.put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, it)
+                            }
+                            enrichment.refNumber?.let {
+                                enrichValues.put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, it)
+                            }
+                            db.update(
+                                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                                enrichValues,
+                                FinanceDatabaseHelper.COLUMN_ID + " = ?",
+                                arrayOf(canonicalId.toString())
+                            )
+                        }
+                    }
                     val evidenceValues = ContentValues().apply {
                         put(FinanceDatabaseHelper.COLUMN_EVIDENCE_TRANSACTION_ID, canonicalId)
                         put(FinanceDatabaseHelper.COLUMN_EVIDENCE_STATUS, EvidenceStatus.MATCHED.name)

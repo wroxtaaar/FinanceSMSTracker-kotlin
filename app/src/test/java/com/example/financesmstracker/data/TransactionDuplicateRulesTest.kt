@@ -163,4 +163,23 @@ class TransactionDuplicateRulesTest {
         val later = axisCredit(3, "notification:c", null, t0 + 5 * minute)
         assertTrue(TransactionDuplicateRules.selectLoosePairs(listOf(a, later)).isEmpty())
     }
+
+    @Test
+    fun enrichmentCopiesSmsMerchantOntoBankOnlyNotificationRow() {
+        val notification = tx(1, "notification:1").copy(merchantName = null, bank = "AXIS", accountLastFour = "9206")
+        val sms = tx(2, "sms:2").copy(merchantName = "JAVED", bank = "AXIS", accountLastFour = "9206")
+        assertEquals("JAVED", TransactionDuplicateRules.enrichmentFrom(notification, sms).merchantName)
+    }
+
+    @Test
+    fun enrichmentTreatsBankNameAsMissingMerchantButKeepsRealOnes() {
+        val bankNamed = tx(1, "notification:1").copy(merchantName = "Axis Bank", bank = "AXIS")
+        val real = tx(2, "sms:2").copy(merchantName = "JAVED", bank = "AXIS")
+        assertEquals("JAVED", TransactionDuplicateRules.enrichmentFrom(bankNamed, real).merchantName)
+
+        val keepsOwn = tx(3, "sms:3").copy(merchantName = "RAJ MEDICAL", bank = "AXIS")
+        assertEquals(null, TransactionDuplicateRules.enrichmentFrom(keepsOwn, real).merchantName)
+        assertTrue(TransactionDuplicateRules.isGenericMerchant(null, "AXIS"))
+        assertFalse(TransactionDuplicateRules.isGenericMerchant("JAVED", "AXIS"))
+    }
 }
