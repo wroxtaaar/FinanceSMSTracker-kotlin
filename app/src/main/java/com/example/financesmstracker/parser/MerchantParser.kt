@@ -42,8 +42,8 @@ object MerchantParser {
             merchant = upiPathMatcher.group(1)?.trim()
             vpa = upiPathMatcher.group(2)?.trim()
         } else {
-            // Check multi-segment UPI/P2A/ref/merchant/...
-            val multiUpiMatcher = Pattern.compile("UPI/P2A/[^/]+/([^/\\r\\n]+?)(?=/|\\r?\\n|$)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
+            // Check multi-segment UPI/P2A/ref/merchant/... (P2M = payment to a merchant)
+            val multiUpiMatcher = Pattern.compile("UPI/P2[AM]/[^/]+/([^/\\r\\n]+?)(?=/|\\r?\\n|$)", Pattern.CASE_INSENSITIVE).matcher(messageBody)
             if (multiUpiMatcher.find()) {
                 val candidate = multiUpiMatcher.group(1)?.trim()
                 if (candidate != null && !candidate.all { it.isDigit() }) {

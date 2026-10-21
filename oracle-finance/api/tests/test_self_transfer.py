@@ -612,3 +612,28 @@ def test_axis_card_spend_reaches_the_airtel_axis_card_and_old_seed_is_corrected(
                           merchantOrPayee="FAREED", category="GROCERIES"))
     with connection() as conn:
         assert conn.execute("SELECT balance_minor FROM accounts WHERE id='airtel-card-9206'").fetchone()[0] == 12_000
+
+
+def test_gmail_debit_default_is_not_the_splitwise_opt_out():
+    from app.gmail_sync import _gmail_default_category
+    assert _gmail_default_category("DEBIT", "debited from a/c") == "GROCERIES"
+    assert _gmail_default_category("CREDIT", "credited") == "TRANSFER"
+
+
+def test_gmail_default_category_migration_only_touches_recent_gmail_debits():
+    with connection() as conn:
+        for tid, created, cat in (("gmail:old", 1_000, "OTHER"), ("gmail:new", 1_792_300_000_000, "OTHER"),
+                                  ("sms:new", 1_792_300_000_000, "OTHER")):
+            conn.execute(
+                """INSERT INTO transactions(id,amount_minor,currency,type,payment_method,account_type,bank,
+                   account_last4,timestamp,category,confidence,created_at,status)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE')""",
+                (tid, 100, "INR", "DEBIT", "UPI", "BANK_ACCOUNT", "AXIS", "1111", created, cat, 0.9, created))
+        conn.execute("DELETE FROM applied_migrations WHERE name='gmail_default_category'")
+    assert L.migrate_gmail_default_category() == 1
+    with connection() as conn:
+        cats = {r["id"]: r["category"] for r in conn.execute("SELECT id,category FROM transactions")}
+    assert cats["gmail:new"] == "GROCERIES"
+    assert cats["gmail:old"] == "OTHER"
+    assert cats["sms:new"] == "OTHER"
+    assert L.migrate_gmail_default_category() == 0

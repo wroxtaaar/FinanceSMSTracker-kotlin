@@ -31,6 +31,7 @@ repair_missing_balance_adjustments()
 repair_duplicate_transactions()
 match_internal_transfers()
 migrate_splitwise_other_optout()
+migrate_gmail_default_category()
 # Splitwise is a materialized view of the canonical bank/card ledger.
 # Rebuild it after startup repairs so legacy incremental drift is corrected
 # immediately and every app reopen starts from the same source of truth.

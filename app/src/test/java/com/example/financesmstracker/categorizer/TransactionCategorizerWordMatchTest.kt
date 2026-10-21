@@ -82,4 +82,27 @@ class TransactionCategorizerWordMatchTest {
         assertEquals("MEDICAL", TransactionCategorizer.categorize(debit("CITY HOSPITAL"), "Spent INR 500 at CITY HOSPITAL"))
         assertNotEquals("MEDICAL", TransactionCategorizer.categorize(debit("JAVED"), "Spent INR 20 at JAVED"))
     }
+
+    @Test
+    fun upiMerchantPaymentKeepsMerchantNameAndReference() {
+        val sms = "INR 33136.06 debited\nA/c no. XX3370\n21-10-26, 22:41:09\nUPI/P2M/629471619542/CRED Club\n" +
+            "Not you? SMS BLOCKUPI Cust ID to 919951860002\nAxis Bank"
+        val result = com.example.financesmstracker.parser.SmsParserManager().parse("AD-AXISBK-S", sms)
+        org.junit.Assert.assertTrue(result.isTransaction)
+        assertEquals(3_313_606L, result.amountPaise)
+        assertEquals("CRED Club", result.merchantName)
+        assertEquals("629471619542", result.refNumber)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals("3370", result.accountLastFour)
+    }
+
+    @Test
+    fun cardPaymentReceivedSmsIsRecognisedAsCardBillPayment() {
+        val sms = "Payment of INR 33136.06 has been received towards your Axis Bank Credit Card XX9206 on 21-10-26 - Axis Bank"
+        val parsed = com.example.financesmstracker.parser.CardBillPaymentSmsParser.parse("AD-AXISBK-S", sms)
+        org.junit.Assert.assertNotNull(parsed)
+        assertEquals(3_313_606L, parsed!!.amountPaise)
+        assertEquals("AXIS", parsed.cardBank)
+        assertEquals("9206", parsed.cardLastFour)
+    }
 }

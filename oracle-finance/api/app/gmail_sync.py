@@ -1068,10 +1068,10 @@ def parse_card_bill_email(message):
 def _gmail_default_category(transaction_type, combined):
     """Return a valid automatic category for Gmail-derived transactions.
 
-    Credit notifications/emails must never fall back to OTHER because OTHER is
-    an explicit user choice meaning "exclude from Splitwise". Generic credits
-    are transfers; refunds/reversals and salary/payroll retain their specific
-    categories.
+    Neither direction may fall back to OTHER because OTHER is an explicit user
+    choice meaning "exclude from Splitwise". Generic credits are transfers;
+    refunds/reversals and salary/payroll retain their specific categories;
+    debits default to GROCERIES, the same default the phone uses.
     """
     if str(transaction_type or "").upper() == "CREDIT":
         if re.search(r"(?i)\b(?:refund|reversal|reversed)\b", combined):
@@ -1079,7 +1079,7 @@ def _gmail_default_category(transaction_type, combined):
         if re.search(r"(?i)\b(?:salary|payroll|stipend)\b", combined):
             return "SALARY"
         return "TRANSFER"
-    return "OTHER"
+    return "GROCERIES"
 
 _AMOUNT_RE = re.compile(
     r"(?i)(INR|Rs\.?|₹|USD|EUR|GBP|SGD|AUD|CAD|AED)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)"
