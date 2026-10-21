@@ -127,4 +127,33 @@ class GmailNotificationParserTest {
         assertEquals("911389419630", result!!.refNumber)
     }
 
+
+    @Test
+    fun foreignCurrencySpendIsNotReplacedByAvailableLimit() {
+        val result = GmailNotificationParser.parse(
+            "Axis Bank",
+            "Spent USD 205.7 using Axis Bank Credit Card no. XX1175 on 21-10-26 22:19:26 IST at UZAIRWAYS*C. " +
+                "Avl limit: INR 61312.07. Not you? SMS BLOCK 1175 to +919951860002.",
+            null,
+            null
+        )
+
+        assertNotNull(result)
+        assertEquals(20570L, result!!.amountPaise)
+        assertEquals("USD", result.currency)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(AccountType.CREDIT_CARD, result.accountType)
+        assertEquals("1175", result.accountLastFour)
+    }
+
+    @Test
+    fun alertWithOnlyAnAvailableLimitIsNotATransaction() {
+        val result = GmailNotificationParser.parse(
+            "Axis Bank",
+            "Your card limit update. Avl limit: INR 61312.07.",
+            null,
+            null
+        )
+        assertNull(result)
+    }
 }

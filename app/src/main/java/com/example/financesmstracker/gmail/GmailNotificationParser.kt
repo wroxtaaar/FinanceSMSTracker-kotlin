@@ -30,9 +30,30 @@ data class GmailNotificationTransaction(
 )
 
 object GmailNotificationParser {
+    // Group 1 = currency marker, group 2 = amount. Foreign-currency spends
+    // ("Spent USD 205.7") must be read as that currency, otherwise the first
+    // INR figure in the alert (the available limit) is mistaken for the spend.
     private val amountRegex = Regex(
-        """(?i)(?:INR|Rs\.?|₹)\s*([0-9][0-9,]*(?:\.\d{1,2})?)"""
+        """(?i)(INR|Rs\.?|₹|USD|EUR|GBP|SGD|AUD|CAD|AED)\s*([0-9][0-9,]*(?:\.\d{1,2})?)"""
     )
+    private val balanceContextWords = listOf(
+        "limit", "balance", "avl bal", "avbl", "available", "outstanding", "due"
+    )
+
+    /** First amount that is not an available limit / balance / due figure. */
+    private fun findTransactionAmount(haystack: String): MatchResult? =
+        amountRegex.findAll(haystack).firstOrNull { match ->
+            val prefix = haystack
+                .substring(maxOf(0, match.range.first - 35), match.range.first)
+                .lowercase()
+            balanceContextWords.none { prefix.contains(it) }
+        }
+
+    private fun currencyFor(marker: String): String =
+        when (marker.uppercase().trimEnd('.')) {
+            "INR", "RS", "₹" -> "INR"
+            else -> marker.uppercase()
+        }
     private val lastFourRegex = Regex(
         """(?i)(?:(?:account|a/c)\s*(?:ending|no\.?|number)?|(?:credit\s+)?card\s*(?:ending|no\.?|number)?)\s*[:#-]?\s*(?:x{2,}|\*{2,})?\s*(\d{4})"""
     )
@@ -54,12 +75,10 @@ object GmailNotificationParser {
      * after the transaction line.
      */
     private fun transactionLine(haystack: String, amountMatch: MatchResult): String {
-        val lines = haystack.split("\n")
-        return lines.firstOrNull { amountRegex.containsMatchIn(it) }
-            ?: haystack.substring(
-                maxOf(0, amountMatch.range.first - 160),
-                minOf(haystack.length, amountMatch.range.last + 161)
-            )
+        val start = amountMatch.range.first
+        val lineStart = haystack.lastIndexOf('\n', start).let { if (it < 0) 0 else it + 1 }
+        val lineEnd = haystack.indexOf('\n', start).let { if (it < 0) haystack.length else it }
+        return haystack.substring(lineStart, lineEnd)
     }
 
     fun parse(title: String?, text: String?, bigText: String?, subText: String?): GmailNotificationTransaction? {
@@ -70,9 +89,9 @@ object GmailNotificationParser {
 
         if (haystack.isBlank()) return null
 
-        val amountMatch = amountRegex.find(haystack) ?: return null
+        val amountMatch = findTransactionAmount(haystack) ?: return null
         val amountPaise = runCatching {
-            BigDecimal(amountMatch.groupValues[1].replace(",", ""))
+            BigDecimal(amountMatch.groupValues[2].replace(",", ""))
                 .setScale(2, RoundingMode.HALF_UP)
                 .movePointRight(2)
                 .longValueExact()
@@ -160,6 +179,7 @@ object GmailNotificationParser {
 
         return GmailNotificationTransaction(
             amountPaise = amountPaise,
+            currency = currencyFor(amountMatch.groupValues[1]),
             transactionType = direction,
             paymentMethod = paymentMethod,
             accountType = accountType,

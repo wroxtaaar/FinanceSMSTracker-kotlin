@@ -42,7 +42,8 @@ class TransactionAdapter(
 
         val rupees = tx.amountPaise / 100.0
         val sign = if (tx.transactionType == TransactionType.CREDIT) "+" else "-"
-        holder.textViewAmount.text = String.format(Locale.getDefault(), "%s₹%.2f", sign, rupees)
+        val symbol = if (tx.currency.equals("INR", ignoreCase = true)) "₹" else tx.currency.uppercase() + " "
+        holder.textViewAmount.text = String.format(Locale.getDefault(), "%s%s%.2f", sign, symbol, rupees)
         if (tx.transactionType == TransactionType.CREDIT) {
             holder.textViewAmount.setTextColor(Color.parseColor("#2E7D32")) // Green
         } else {
