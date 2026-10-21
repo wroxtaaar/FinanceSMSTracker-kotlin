@@ -1741,3 +1741,22 @@ def test_gmail_credit_category_specific_cases():
     assert _gmail_default_category("CREDIT", "refund for UPI transaction") == "REFUND"
     assert _gmail_default_category("CREDIT", "monthly salary credited") == "SALARY"
     assert _gmail_default_category("CREDIT", "amount credited via UPI") == "TRANSFER"
+
+
+def test_foreign_currency_card_email_uses_the_spend_not_the_available_limit():
+    message = _message(
+        "usd-1",
+        "Dear Customer, Your ICICI Bank Credit Card XX1012 has been used "
+        "for a transaction of USD 205.70 on Oct 21, 2026 at 22:19:26. "
+        "Info: UZAIRWAYS. "
+        "The Available Credit Limit on your card is INR 61312.07 and Total Credit Limit is INR 200000.00. "
+        "You can pay your Credit Card bills from your bank account.",
+        subject="Transaction alert for your ICICI Bank Credit Card",
+        internal_date="1790491657000",
+    )
+    parsed = parse_bank_email(message)
+    assert parsed is not None
+    transaction, evidence = parsed
+    assert transaction.amountMinor == 20570
+    assert transaction.currency == "USD"
+    assert evidence.currency == "USD"

@@ -1081,6 +1081,29 @@ def _gmail_default_category(transaction_type, combined):
         return "TRANSFER"
     return "OTHER"
 
+_AMOUNT_RE = re.compile(
+    r"(?i)(INR|Rs\.?|₹|USD|EUR|GBP|SGD|AUD|CAD|AED)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)"
+)
+_BALANCE_CONTEXT = ("limit", "balance", "avl bal", "avbl", "available", "outstanding", "due")
+
+
+def _transaction_amount(text):
+    """First amount that is not an available-limit/balance/due figure.
+
+    Returns (amount_minor, currency) or (None, "INR"). Foreign-currency spends
+    ("Spent USD 205.7 ... Avl limit INR 61312.07") are read in their own
+    currency instead of mistaking the INR limit for the spend.
+    """
+    for match in _AMOUNT_RE.finditer(text):
+        prefix = text[max(0, match.start() - 35):match.start()].lower()
+        if any(word in prefix for word in _BALANCE_CONTEXT):
+            continue
+        marker = match.group(1).upper().rstrip(".")
+        currency = "INR" if marker in ("INR", "RS", "₹") else marker
+        return int(round(float(match.group(2).replace(",", "")) * 100)), currency
+    return None, "INR"
+
+
 def parse_bank_email(message):
     payload=message.get("payload",{})
     headers=_headers(payload)
@@ -1092,8 +1115,7 @@ def parse_bank_email(message):
     if _hard_reject_email(subject, text):
         return None
 
-    m=re.search(r"(?i)(?:INR|Rs\.?)[\s₹]*([0-9][0-9,]*(?:\.\d{1,2})?)",combined)
-    amount=int(round(float(m.group(1).replace(",",""))*100)) if m else None
+    amount, txn_currency = _transaction_amount(combined)
     bank=_recognized_bank(combined, sender)
     # Resolve direction only after bank identification so bank-specific
     # authoritative wording (especially Axis account alerts) can win over
@@ -1155,12 +1177,12 @@ def parse_bank_email(message):
 
     tx_id="gmail:"+hashlib.sha256((message["id"]+":"+str(amount)+":"+direction).encode()).hexdigest()[:32]
     ev_id="gmail-evidence:"+message["id"]
-    t=SyncTransactionModel(id=tx_id,amountMinor=amount,currency="INR",type=direction,
+    t=SyncTransactionModel(id=tx_id,amountMinor=amount,currency=txn_currency,type=direction,
        paymentMethod="CARD" if account_type=="CREDIT_CARD" else "UPI",accountType=account_type,
        bank=bank,merchantOrPayee=merchant_or_payee,accountLast4=last4,reference=reference,
        timestamp=int(message.get("internalDate","0")),category=_gmail_default_category(direction, combined),confidence=min(score, 1.0))
     e=SyncEvidenceModel(id=ev_id,sourceType="GMAIL",sourceId=message["id"],status="UNMATCHED",
-       observedAt=int(message.get("internalDate","0")),transactionId=tx_id,amountMinor=amount,currency="INR",
+       observedAt=int(message.get("internalDate","0")),transactionId=tx_id,amountMinor=amount,currency=txn_currency,
        direction=direction,bankProvider=bank,accountLast4=last4,reference=reference,
        contentHash=hashlib.sha256(combined.encode()).hexdigest(),confidence=min(score, 1.0))
     return t,e
