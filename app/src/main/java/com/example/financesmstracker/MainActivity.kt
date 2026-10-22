@@ -1103,6 +1103,68 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Foreign-currency spends are converted to an INR estimate on the server.
+     * For those rows (and only those) show the estimate and let the user type
+     * the exact rupee amount from the statement.
+     */
+    private fun setupForeignAmountSection(dialogView: View, tx: Transaction) {
+        val section = dialogView.findViewById<View>(R.id.foreignAmountSection)
+        val summary = dialogView.findViewById<TextView>(R.id.foreignAmountSummary)
+        val input = dialogView.findViewById<EditText>(R.id.foreignAmountInput)
+        val save = dialogView.findViewById<Button>(R.id.foreignAmountSave)
+        val oracleId = FinanceSyncBridge.oracleVoidId(tx.id, repository.getSmsHashById(tx.id))
+
+        fun render(info: FinanceSyncClient.ForeignAmountInfo) {
+            section.visibility = View.VISIBLE
+            val inr = String.format(Locale.US, "%.2f", info.inrMinor / 100.0)
+            val original = String.format(
+                Locale.US, "%s %.2f", info.origCurrency, info.origAmountMinor / 100.0
+            )
+            summary.text = if (info.exact) {
+                "Foreign spend $original → ₹$inr (exact)"
+            } else {
+                "Foreign spend $original → ₹$inr (estimate: day rate + card markup)"
+            }
+            input.setText(inr)
+        }
+
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).fetchForeignAmountInfo(oracleId)
+            runOnUiThread {
+                result.onSuccess { info -> if (info.foreign) render(info) }
+            }
+        }
+
+        save.setOnClickListener {
+            val rupees = input.text.toString().trim().toBigDecimalOrNull()
+            if (rupees == null || rupees.signum() <= 0) {
+                Toast.makeText(this, "Enter the exact rupee amount charged", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val minor = rupees.movePointRight(2)
+                .setScale(0, java.math.RoundingMode.HALF_UP).toLong()
+            save.isEnabled = false
+            oracleExecutor.execute {
+                val client = FinanceSyncClient(this@MainActivity)
+                val result = client.setForeignInrAmount(oracleId, minor)
+                val refreshed = if (result.isSuccess) client.fetchForeignAmountInfo(oracleId).getOrNull() else null
+                runOnUiThread {
+                    save.isEnabled = true
+                    result.onSuccess {
+                        refreshed?.takeIf { it.foreign }?.let { render(it) }
+                        Toast.makeText(this, "Exact amount saved", Toast.LENGTH_SHORT).show()
+                        loadOracleSummary()
+                    }.onFailure { error ->
+                        Toast.makeText(
+                            this, "Could not save: " + (error.message ?: "Unavailable"), Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+        }
+    }
+
     private fun showTransactionDetailDialog(tx: Transaction) {
         val dialogView = LayoutInflater.from(this)
             .inflate(R.layout.dialog_transaction_detail, null)
@@ -1156,11 +1218,13 @@ class MainActivity : AppCompatActivity() {
         val rupees = tx.amountPaise / 100.0
 
         detailTextAmount.text =
-            String.format(
-                Locale.getDefault(),
-                "Amount: ₹%.2f",
-                rupees
-            )
+            if (tx.currency.equals("INR", ignoreCase = true)) {
+                String.format(Locale.getDefault(), "Amount: ₹%.2f", rupees)
+            } else {
+                String.format(Locale.getDefault(), "Amount: %s %.2f", tx.currency.uppercase(), rupees)
+            }
+
+        setupForeignAmountSection(dialogView, tx)
 
         detailTextType.text =
             "Type: ${tx.transactionType.name}"

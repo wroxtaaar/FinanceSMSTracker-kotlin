@@ -96,6 +96,35 @@
             android:paddingBottom="12dp"
             android:text="Date/Time: -" />
 
+        <LinearLayout
+            android:id="@+id/foreignAmountSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/foreignAmountSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textStyle="bold"
+                android:text="Foreign spend" />
+
+            <EditText
+                android:id="@+id/foreignAmountInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Exact amount charged in ₹"
+                android:inputType="numberDecimal" />
+
+            <Button
+                android:id="@+id/foreignAmountSave"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Save exact ₹ amount" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

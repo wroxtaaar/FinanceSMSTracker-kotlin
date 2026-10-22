@@ -152,6 +152,41 @@ class FinanceSyncClient(
         }
     }
 
+    data class ForeignAmountInfo(
+        val foreign: Boolean,
+        val inrMinor: Long = 0L,
+        val origAmountMinor: Long = 0L,
+        val origCurrency: String = "",
+        val exact: Boolean = false
+    )
+
+    /** Foreign-spend details for a row, as Oracle knows it (foreign=false for rupee rows). */
+    fun fetchForeignAmountInfo(oracleId: String): Result<ForeignAmountInfo> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return get("/api/v1/transactions/" + android.net.Uri.encode(oracleId) + "/fx").map { body ->
+            val json = JSONObject(body)
+            if (!json.optBoolean("foreign", false)) {
+                ForeignAmountInfo(foreign = false)
+            } else {
+                ForeignAmountInfo(
+                    foreign = true,
+                    inrMinor = json.getLong("inrMinor"),
+                    origAmountMinor = json.getLong("origAmountMinor"),
+                    origCurrency = json.optString("origCurrency", ""),
+                    exact = json.optBoolean("exact", false)
+                )
+            }
+        }
+    }
+
+    fun setForeignInrAmount(oracleId: String, amountMinor: Long): Result<String> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        val json = JSONObject().apply { put("amountMinor", amountMinor) }
+        return put("/api/v1/transactions/" + android.net.Uri.encode(oracleId) + "/inr-amount", json.toString())
+    }
+
     fun fetchSummary(): Result<OracleLedgerSummary> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
