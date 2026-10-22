@@ -6,6 +6,14 @@ import android.database.sqlite.SQLiteOpenHelper
 
 class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
+    private val appContext: Context = context.applicationContext
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        // Fix the Oracle id boundary before this process inserts anything.
+        com.example.financesmstracker.integration.OracleIds.initialize(appContext, db)
+    }
+
     companion object {
         private const val DATABASE_NAME = "finance_tracker.db"
         private const val DATABASE_VERSION = 7

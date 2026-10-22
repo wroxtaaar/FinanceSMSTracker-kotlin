@@ -135,7 +135,14 @@ class FinanceSyncClient(
         }
     }
 
-    fun fetchGmailTransactions(): Result<List<OracleTransaction>> {
+    fun fetchGmailTransactions(): Result<List<OracleTransaction>> =
+        fetchOracleTransactions(onlyGmail = true)
+
+    /** Every active transaction the server holds, for "Restore history from server". */
+    fun fetchAllOracleTransactions(): Result<List<OracleTransaction>> =
+        fetchOracleTransactions(onlyGmail = false)
+
+    private fun fetchOracleTransactions(onlyGmail: Boolean): Result<List<OracleTransaction>> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
 
@@ -145,7 +152,8 @@ class FinanceSyncClient(
                 for (index in 0 until items.length()) {
                     val item = items.getJSONObject(index)
                     val id = item.optString("id")
-                    if (!id.startsWith("gmail:")) continue
+                    if (id.isBlank()) continue
+                    if (onlyGmail && !id.startsWith("gmail:")) continue
 
                     add(
                         OracleTransaction(

@@ -1055,6 +1055,64 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
      * existing unique sms_hash column with an explicit prefix, so this works
      * without a destructive database migration and remains idempotent.
      */
+    /**
+     * Bring back server history that the phone no longer has (for example
+     * after a reinstall). Rows already on the phone are never touched:
+     * a server row is skipped when a local row already maps to its id, when
+     * it is a Gmail row (the normal pull handles those), or when an equal
+     * amount/direction/bank event within two minutes is already here.
+     * Restored rows carry the "oracle:gmail:<id>" marker so deleting or
+     * correcting them reaches the right server row. Nothing is sent back.
+     */
+    fun restoreMissingFromOracle(
+        remote: List<OracleTransaction>,
+        scheme: com.example.financesmstracker.integration.OracleIds.Scheme,
+        isCleared: (OracleTransaction) -> Boolean
+    ): Int {
+        val db = dbHelper.writableDatabase
+        val local = getAllTransactions()
+        val represented = local
+            .map { com.example.financesmstracker.integration.FinanceSyncBridge.oracleVoidId(it.id, it.smsHash, scheme) }
+            .toHashSet()
+        var restored = 0
+
+        remote.forEach { r ->
+            if (r.id.startsWith("gmail:") || r.id in represented || isCleared(r)) return@forEach
+
+            val sameEventPresent = local.any { l ->
+                l.amountPaise == r.amountMinor &&
+                    l.transactionType.name.equals(r.transactionType, ignoreCase = true) &&
+                    kotlin.math.abs(l.timestamp - r.timestamp) <= 120_000L &&
+                    (normalizedBank(l.bank) == null || normalizedBank(r.bank) == null ||
+                        normalizedBank(l.bank) == normalizedBank(r.bank)) &&
+                    (l.accountLastFour.isNullOrBlank() || r.accountLast4.isNullOrBlank() ||
+                        l.accountLastFour == r.accountLast4)
+            }
+            if (sameEventPresent) return@forEach
+
+            val values = ContentValues().apply {
+                put(FinanceDatabaseHelper.COLUMN_AMOUNT_PAISE, r.amountMinor)
+                put(FinanceDatabaseHelper.COLUMN_CURRENCY, r.currency)
+                put(FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE, r.transactionType)
+                put(FinanceDatabaseHelper.COLUMN_PAYMENT_METHOD, r.paymentMethod)
+                put(FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE, r.accountType)
+                put(FinanceDatabaseHelper.COLUMN_BANK, r.bank)
+                put(FinanceDatabaseHelper.COLUMN_MERCHANT_NAME, r.merchantOrPayee)
+                put(FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR, r.accountLast4)
+                put(FinanceDatabaseHelper.COLUMN_REF_NUMBER, r.reference)
+                put(FinanceDatabaseHelper.COLUMN_TIMESTAMP, r.timestamp)
+                put(FinanceDatabaseHelper.COLUMN_SMS_HASH, "oracle:gmail:" + r.id)
+                put(FinanceDatabaseHelper.COLUMN_CATEGORY, r.category)
+                put(FinanceDatabaseHelper.COLUMN_PARSER_CONFIDENCE, r.confidence)
+            }
+            val rowId = db.insertWithOnConflict(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS, null, values, SQLiteDatabase.CONFLICT_IGNORE
+            )
+            if (rowId != -1L) restored++
+        }
+        return restored
+    }
+
     fun upsertOracleGmailTransaction(transaction: OracleTransaction): Long {
         val db = dbHelper.writableDatabase
         val remoteMarker = "oracle:gmail:" + transaction.id

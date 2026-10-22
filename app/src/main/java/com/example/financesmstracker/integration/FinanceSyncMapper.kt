@@ -4,9 +4,13 @@ import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.evidence.SourceEvidence
 
 object FinanceSyncMapper {
-    fun toSyncTransaction(transaction: Transaction): SyncTransaction =
+    fun toSyncTransaction(
+        transaction: Transaction,
+        scheme: OracleIds.Scheme = OracleIds.BARE
+    ): SyncTransaction =
         SyncTransaction(
             localTransactionId = transaction.id,
+            serverId = scheme.transactionId(transaction.id),
             amountMinor = transaction.amountPaise,
             currency = transaction.currency,
             transactionType = transaction.transactionType,
@@ -22,9 +26,14 @@ object FinanceSyncMapper {
             parserConfidence = transaction.parserConfidence
         )
 
-    fun toSyncEvidence(evidence: SourceEvidence): SyncEvidence =
+    fun toSyncEvidence(
+        evidence: SourceEvidence,
+        scheme: OracleIds.Scheme = OracleIds.BARE
+    ): SyncEvidence =
         SyncEvidence(
             localEvidenceId = evidence.id,
+            serverEvidenceId = scheme.evidenceId(evidence.id),
+            serverTransactionId = evidence.transactionId?.let { scheme.transactionId(it) },
             sourceType = evidence.sourceType,
             sourceKey = evidence.sourceKey,
             receivedAt = evidence.receivedAt,

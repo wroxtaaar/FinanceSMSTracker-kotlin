@@ -56,7 +56,9 @@ object FinanceSyncBridge {
             runCatching {
                 val service = FinanceSyncService(appContext)
                 service.enqueue(
-                    transactions = listOf(FinanceSyncMapper.toSyncTransaction(transaction)),
+                    transactions = listOf(
+                        FinanceSyncMapper.toSyncTransaction(transaction, OracleIds.scheme(appContext))
+                    ),
                     evidence = emptyList(),
                     internalTransferCandidates = detectInternalTransferCandidates(
                         appContext,
@@ -92,7 +94,9 @@ object FinanceSyncBridge {
                 service.enqueue(
                     transactions = emptyList(),
                     evidence = emptyList(),
-                    voidedTransactionIds = listOf(oracleVoidId(transactionId, smsHash))
+                    voidedTransactionIds = listOf(
+                        oracleVoidId(transactionId, smsHash, OracleIds.scheme(appContext))
+                    )
                 )
                 service.flush()
             }
@@ -135,9 +139,10 @@ object FinanceSyncBridge {
                         "${candidate.debitTransactionId}:${candidate.creditTransactionId}"
                     }
 
+                val scheme = OracleIds.scheme(appContext)
                 service.enqueue(
-                    transactions = transactions.map(FinanceSyncMapper::toSyncTransaction),
-                    evidence = evidence.map(FinanceSyncMapper::toSyncEvidence),
+                    transactions = transactions.map { FinanceSyncMapper.toSyncTransaction(it, scheme) },
+                    evidence = evidence.map { FinanceSyncMapper.toSyncEvidence(it, scheme) },
                     internalTransferCandidates = candidates
                 )
                 service.flush()
@@ -145,23 +150,21 @@ object FinanceSyncBridge {
         }
     }
 
-    internal fun oracleVoidId(localId: Long, smsHash: String?): String {
+    internal fun oracleVoidId(
+        localId: Long,
+        smsHash: String?,
+        scheme: OracleIds.Scheme = OracleIds.BARE
+    ): String {
         val marker = "oracle:gmail:"
         return if (smsHash != null && smsHash.startsWith(marker)) {
             smsHash.removePrefix(marker)
         } else {
-            localId.toString()
+            scheme.transactionId(localId)
         }
     }
 
-    private fun oracleTransactionId(transaction: Transaction): String {
-        val marker = "oracle:gmail:"
-        return if (transaction.smsHash.startsWith(marker)) {
-            transaction.smsHash.removePrefix(marker)
-        } else {
-            transaction.id.toString()
-        }
-    }
+    private fun oracleTransactionId(transaction: Transaction, scheme: OracleIds.Scheme): String =
+        oracleVoidId(transaction.id, transaction.smsHash, scheme)
 
     private fun detectInternalTransferCandidates(
         context: Context,
@@ -170,6 +173,7 @@ object FinanceSyncBridge {
         if (transaction.accountType != com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT) {
             return emptyList()
         }
+        val scheme = OracleIds.scheme(context)
 
         // Search a bounded local window. The detector itself only uses the wider
         // window for reference/UTR matches; amount-only matches still require
@@ -210,8 +214,8 @@ object FinanceSyncBridge {
                     }
 
                 SyncInternalTransferCandidate(
-                    debitTransactionId = oracleTransactionId(candidate.debit),
-                    creditTransactionId = oracleTransactionId(candidate.credit),
+                    debitTransactionId = oracleTransactionId(candidate.debit, scheme),
+                    creditTransactionId = oracleTransactionId(candidate.credit, scheme),
                     amountMinor = candidate.debit.amountPaise,
                     currency = candidate.debit.currency,
                     timeDifferenceMillis = candidate.timeDifferenceMillis,

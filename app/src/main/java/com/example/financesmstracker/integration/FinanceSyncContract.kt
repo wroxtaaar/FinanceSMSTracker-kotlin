@@ -32,7 +32,9 @@ data class SyncTransaction(
     val reference: String?,
     val timestamp: Long,
     val category: String?,
-    val parserConfidence: Float
+    val parserConfidence: Float,
+    /** Identity on Oracle. Defaults to the bare local number (pre-scheme behaviour). */
+    val serverId: String = localTransactionId.toString()
 )
 
 /**
@@ -70,7 +72,9 @@ data class SyncEvidence(
     val reference: String?,
     val contentHash: String,
     val confidence: Float,
-    val status: EvidenceStatus
+    val status: EvidenceStatus,
+    val serverEvidenceId: String = localEvidenceId.toString(),
+    val serverTransactionId: String? = localTransactionId?.toString()
 )
 
 

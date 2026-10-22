@@ -42,6 +42,7 @@ import com.example.financesmstracker.ui.TransactionAdapter
 
 import com.example.financesmstracker.integration.FinanceSyncClient
 import com.example.financesmstracker.integration.FinanceSyncBridge
+import com.example.financesmstracker.integration.OracleIds
 import com.example.financesmstracker.integration.SyncSettings
 import com.example.financesmstracker.integration.OracleLedgerSummary
 import com.example.financesmstracker.integration.OracleAccount
@@ -73,6 +74,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var buttonEditBankAccounts: Button
     private lateinit var buttonEditCreditCards: Button
     private lateinit var buttonClearLocalHistory: Button
+    private lateinit var buttonRestoreHistory: Button
 
     private val oracleExecutor = Executors.newSingleThreadExecutor()
 
@@ -160,6 +162,8 @@ class MainActivity : AppCompatActivity() {
         buttonEditBankAccounts = findViewById(R.id.buttonEditBankAccounts)
         buttonEditCreditCards = findViewById(R.id.buttonEditCreditCards)
         buttonClearLocalHistory = findViewById(R.id.buttonClearLocalHistory)
+        buttonRestoreHistory = findViewById(R.id.buttonRestoreHistory)
+        buttonRestoreHistory.setOnClickListener { restoreHistoryFromServer() }
 
         buttonEditSplitwise.setOnClickListener {
             showManualSplitwiseDialog()
@@ -358,6 +362,45 @@ class MainActivity : AppCompatActivity() {
      * and inconsistent bank casing. The last four are shown separately, so strip
      * them here and keep well-known bank acronyms in capitals.
      */
+    /**
+     * Pull back transactions the server holds that this phone lacks (after a
+     * reinstall, say). Respects Clear Local History and never re-sends anything.
+     */
+    private fun restoreHistoryFromServer() {
+        buttonRestoreHistory.isEnabled = false
+        buttonRestoreHistory.text = "Restoring..."
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).fetchAllOracleTransactions()
+            runOnUiThread {
+                result.onSuccess { remote ->
+                    val clearedAt = localHistoryPrefs.getLong(KEY_LOCAL_HISTORY_CLEARED_AT, 0L)
+                    val clearedIds = localHistoryPrefs.getStringSet(
+                        KEY_LOCAL_HISTORY_CLEARED_ORACLE_IDS, emptySet()
+                    ) ?: emptySet()
+                    val restored = repository.restoreMissingFromOracle(
+                        remote, OracleIds.scheme(this@MainActivity)
+                    ) { tx -> tx.id in clearedIds || (clearedAt > 0L && tx.timestamp <= clearedAt) }
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Server has ${remote.size} transactions; restored $restored missing",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    syncOracleGmailTransactions()
+                    loadOracleSummary()
+                    loadTransactions()
+                }.onFailure { error ->
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Restore failed: " + (error.message ?: "Unavailable"),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                buttonRestoreHistory.isEnabled = true
+                buttonRestoreHistory.text = "Restore history from server"
+            }
+        }
+    }
+
     private fun showSmsHandlingLog() {
         val smsText = com.example.financesmstracker.receiver.SmsHandlingLog.format(
             com.example.financesmstracker.receiver.SmsHandlingLog.read(this)
@@ -1124,7 +1167,9 @@ class MainActivity : AppCompatActivity() {
         val summary = dialogView.findViewById<TextView>(R.id.foreignAmountSummary)
         val input = dialogView.findViewById<EditText>(R.id.foreignAmountInput)
         val save = dialogView.findViewById<Button>(R.id.foreignAmountSave)
-        val oracleId = FinanceSyncBridge.oracleVoidId(tx.id, repository.getSmsHashById(tx.id))
+        val oracleId = FinanceSyncBridge.oracleVoidId(
+            tx.id, repository.getSmsHashById(tx.id), OracleIds.scheme(this)
+        )
 
         fun render(info: FinanceSyncClient.ForeignAmountInfo) {
             section.visibility = View.VISIBLE
@@ -1421,7 +1466,7 @@ class MainActivity : AppCompatActivity() {
         if (foreignAmountsByOracleId.isEmpty()) return
         val byLocalId = HashMap<Long, FinanceSyncClient.ForeignAmountInfo>()
         transactions.forEach { tx ->
-            foreignAmountsByOracleId[FinanceSyncBridge.oracleVoidId(tx.id, tx.smsHash)]
+            foreignAmountsByOracleId[FinanceSyncBridge.oracleVoidId(tx.id, tx.smsHash, OracleIds.scheme(this))]
                 ?.let { byLocalId[tx.id] = it }
         }
         adapter.setForeignAmounts(byLocalId)
