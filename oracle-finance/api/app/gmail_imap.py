@@ -397,6 +397,8 @@ class IMAPService:
             # HSBC.
             "hsbc@mail.hsbc.co.in",
             "alerts@mail.hsbc.co.in",
+            # HSBC India now sends card alerts from its .bank.in domain.
+            "hsbc@hsbc.bank.in",
             # IndusInd.
             "transactionalert@indusind.com",
             "indusind_bank@indusind.com",
@@ -413,7 +415,10 @@ class IMAPService:
             "sbicard.com",
             "hsbc.co.in",
             "hsbc.com",
+            "hsbc.bank.in",
             "indusind.com",
+            "indusind.bank.in",
+            "sbi.bank.in",
         )
 
         per_sender_limit = max(

@@ -258,3 +258,19 @@ def test_imap_quotes_mailbox_names(monkeypatch):
     assert service.folder == "[Gmail]/All Mail"
     assert fake.selected == ['"[Gmail]/All Mail"']
     assert service.uidvalidity == "9"
+
+
+def test_imap_searches_hsbc_bank_in_sender():
+    service = IMAPService.__new__(IMAPService)
+    service._imap = FakeIMAP()
+    service.uidvalidity = "7"
+    service.folder = "[Gmail]/All Mail"
+    service._last_synced_since = lambda: datetime(
+        2026, 10, 1, tzinfo=timezone.utc
+    )
+
+    service._list_messages("after:2026/10/01", 100)
+
+    searches = service._imap.searches
+    assert any('FROM "hsbc@hsbc.bank.in"' in s for s in searches)
+    assert any('FROM "hsbc.bank.in"' in s for s in searches)
