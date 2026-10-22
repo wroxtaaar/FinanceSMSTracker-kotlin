@@ -35,6 +35,8 @@ class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Log.d(TAG, "SMS_RECEIVER_ENTERED -> action=${intent.action}")
         if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION) {
+            var lastSender = "?"
+            var lastBody = ""
             try {
                 val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
                 Log.d(TAG, "SMS_RECEIVER_PARSED_INTENT -> messageParts=${messages?.size ?: 0}")
@@ -42,6 +44,8 @@ class SmsReceiver : BroadcastReceiver() {
                     val sender = messages[0].originatingAddress ?: "UNKNOWN"
                     val timestamp = messages[0].timestampMillis
                     val fullBody = messages.joinToString(separator = "") { it.messageBody ?: "" }
+                    lastSender = sender
+                    lastBody = fullBody
 
                     val trustStatus = SenderTrustManager.classifySender(sender)
                     val smsHash = HashUtil.sha256(fullBody)
@@ -56,12 +60,13 @@ class SmsReceiver : BroadcastReceiver() {
                     // digits and a received payment, so it is accepted from an unknown
                     // (non-personal) sender id too; only personal numbers are refused.
                     if (cardBillPayment != null && trustStatus != SenderTrustStatus.UNTRUSTED) {
-                        processCardBillPayment(
+                        val paymentOutcome = processCardBillPayment(
                             context = context,
                             timestamp = timestamp,
                             smsHash = smsHash,
                             parsed = cardBillPayment
                         )
+                        SmsHandlingLog.record(context, sender, fullBody, paymentOutcome)
                         val updateIntent = Intent(ACTION_TRANSACTION_DATA_CHANGED).apply {
                             setPackage(context.packageName)
                         }
@@ -97,6 +102,7 @@ class SmsReceiver : BroadcastReceiver() {
                                 ", last2=" + cardBill.accountLastTwo
                         )
 
+                        SmsHandlingLog.record(context, sender, fullBody, "Card statement/bill alert, sent to server (not a transaction)")
                         val updateIntent = Intent(ACTION_TRANSACTION_DATA_CHANGED).apply {
                             setPackage(context.packageName)
                         }
@@ -194,11 +200,20 @@ class SmsReceiver : BroadcastReceiver() {
                             Log.d(TAG, "Successfully persisted multipart transaction ID: $rowId, Amount: $amountFormatted, Category: $category")
                             Log.d("FinanceSource", "SMS_TRANSACTION_SAVED -> ID: $rowId, Amount: ${parserResult.amountPaise}, Currency: ${parserResult.currency}, Type: ${parserResult.transactionType}, Bank: ${parserResult.bank}, Timestamp: $timestamp")
 
+                            val savedRow = repository.getTransactionById(rowId)
+                            SmsHandlingLog.record(
+                                context, sender, fullBody,
+                                if (rowId == 0L) "NOT SAVED: older than your cleared local history"
+                                else "Saved as ${parserResult.transactionType} ${parserResult.accountType} " +
+                                    "${parserResult.bank ?: "?"} ${parserResult.accountLastFour ?: "?"} (row $rowId, " +
+                                    "${savedRow?.merchantName ?: "-"})"
+                            )
                             val updateIntent = Intent(ACTION_TRANSACTION_DATA_CHANGED).apply {
                                 setPackage(context.packageName)
                             }
                             context.sendBroadcast(updateIntent)
                         } else {
+                            SmsHandlingLog.record(context, sender, fullBody, "Skipped: duplicate (already stored)")
                             Log.d(TAG, "Duplicate SMS skipped (hash already exists): $smsHash")
                         }
                     } else {
@@ -223,11 +238,22 @@ class SmsReceiver : BroadcastReceiver() {
                                 reason = reason
                             )
                             repository.insertUnrecognizedSms(unrecognized)
+                            SmsHandlingLog.record(context, sender, fullBody, "Sent to Review: $reason")
+                        } else {
+                            SmsHandlingLog.record(
+                                context, sender, fullBody,
+                                if (nonTransactionalMessage) "Ignored: not a transaction (info/reminder/OTP)"
+                                else "Ignored: not a financial message"
+                            )
                         }
                     }
                     dbHelper.close()
                 }
             } catch (e: Exception) {
+                SmsHandlingLog.record(
+                    context, lastSender, lastBody,
+                    "ERROR: ${e.javaClass.simpleName}: ${e.message}"
+                )
                 Log.e(TAG, "Error processing received SMS pipeline", e)
             }
         }
@@ -238,7 +264,7 @@ class SmsReceiver : BroadcastReceiver() {
         timestamp: Long,
         smsHash: String,
         parsed: com.example.financesmstracker.parser.CardBillPaymentSms
-    ) {
+    ): String {
         val dbHelper = FinanceDatabaseHelper(context)
         val repository = TransactionRepository(dbHelper, context)
         try {
@@ -260,7 +286,7 @@ class SmsReceiver : BroadcastReceiver() {
             val evidenceId = repository.insertSourceEvidence(evidence)
             if (evidenceId == -1L) {
                 Log.d(TAG, "Duplicate card bill payment SMS skipped: " + smsHash)
-                return
+                return "Skipped: card payment SMS already recorded"
             }
 
             val transaction = Transaction(
@@ -283,7 +309,10 @@ class SmsReceiver : BroadcastReceiver() {
             val rowId = repository.insertTransaction(transaction)
             if (rowId == -1L) {
                 Log.d(TAG, "Card bill payment transaction already exists")
-                return
+                return "Skipped: card payment row already exists"
+            }
+            if (rowId == 0L) {
+                return "NOT SAVED: older than your cleared local history"
             }
 
             repository.resolveEvidenceToTransaction(evidenceId, rowId)?.let {
@@ -305,6 +334,9 @@ class SmsReceiver : BroadcastReceiver() {
                     ", method=" + parsed.paymentMethod +
                     ", ref=" + parsed.reference
             )
+            val saved = repository.getTransactionById(rowId)
+            return "Card payment saved: CREDIT ${parsed.cardBank} card ${parsed.cardLastFour} " +
+                "(row $rowId, now ${saved?.accountType ?: "?"}/${saved?.transactionType ?: "?"} ${saved?.merchantName ?: "-"})"
         } finally {
             dbHelper.close()
         }

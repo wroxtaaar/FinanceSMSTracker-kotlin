@@ -204,6 +204,17 @@
             android:paddingEnd="2dp"
             android:text="Review" />
 
+        <Button
+            android:id="@+id/buttonSmsLog"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:minHeight="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:text="SMS Log" />
+
     </LinearLayout>
 
     <Button

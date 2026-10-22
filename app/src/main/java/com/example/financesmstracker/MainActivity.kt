@@ -155,6 +155,7 @@ class MainActivity : AppCompatActivity() {
         buttonOracleSettings = findViewById(R.id.buttonOracleSettings)
         buttonGmailSync = findViewById(R.id.buttonGmailSync)
         buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
+        findViewById<Button>(R.id.buttonSmsLog).setOnClickListener { showSmsHandlingLog() }
         buttonEditSplitwise = findViewById(R.id.buttonEditSplitwise)
         buttonEditBankAccounts = findViewById(R.id.buttonEditBankAccounts)
         buttonEditCreditCards = findViewById(R.id.buttonEditCreditCards)
@@ -357,6 +358,28 @@ class MainActivity : AppCompatActivity() {
      * and inconsistent bank casing. The last four are shown separately, so strip
      * them here and keep well-known bank acronyms in capitals.
      */
+    private fun showSmsHandlingLog() {
+        val text = com.example.financesmstracker.receiver.SmsHandlingLog.format(
+            com.example.financesmstracker.receiver.SmsHandlingLog.read(this)
+        )
+        val view = android.widget.TextView(this).apply {
+            this.text = text
+            setTextIsSelectable(true)
+            setPadding(48, 24, 48, 24)
+            textSize = 13f
+        }
+        AlertDialog.Builder(this)
+            .setTitle("SMS handling log (newest first)")
+            .setView(android.widget.ScrollView(this).apply { addView(view) })
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Copy") { _, _ ->
+                val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("SMS log", text))
+                Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
     private fun displayAccountName(rawName: String): String {
         val withoutDigits = rawName.replace(Regex("""\s*\.{3}\s*\d{4}\s*$"""), "").trim()
         return withoutDigits.replace(
