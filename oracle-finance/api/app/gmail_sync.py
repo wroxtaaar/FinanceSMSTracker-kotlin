@@ -1130,7 +1130,7 @@ def parse_bank_email(message):
             combined,
         ) else (
             "CREDIT" if re.search(
-                r"(?i)credited|credit alert|payment.*received|refund|"
+                r"(?i)credited|credit alert|payment.*received|received\s+(?:your\s+)?payment|refund|"
                 r"amount\s+credited",
                 combined,
             ) else None

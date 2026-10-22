@@ -105,4 +105,14 @@ class TransactionCategorizerWordMatchTest {
         assertEquals("AXIS", parsed.cardBank)
         assertEquals("9206", parsed.cardLastFour)
     }
+
+    @Test
+    fun cardPaymentReceivedYourPaymentWordingIsRecognised() {
+        val sms = "We have received your payment of INR 33,136.06 on your Axis Bank Credit Card no. XX9206. Available limit: INR 129893.14"
+        val parsed = com.example.financesmstracker.parser.CardBillPaymentSmsParser.parse("AX-AXISBK-S", sms)
+        org.junit.Assert.assertNotNull(parsed)
+        assertEquals(3_313_606L, parsed!!.amountPaise)
+        assertEquals("AXIS", parsed.cardBank)
+        assertEquals("9206", parsed.cardLastFour)
+    }
 }

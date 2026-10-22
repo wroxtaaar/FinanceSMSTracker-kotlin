@@ -52,7 +52,7 @@ object CardBillPaymentSmsParser {
         if (!Regex("""\bcredit\s+card\b""").containsMatchIn(lower)) return null
 
         val destinationPaymentSignal =
-            Regex("""(?is)(?:credited\s+to|payment\s+(?:received|processed|successful|completed|credited)|received\s+(?:towards|for|on)|paid\s+(?:towards|for|on|to)).{0,120}\bcredit\s+card\b""").containsMatchIn(lower) ||
+            Regex("""(?is)(?:credited\s+to|payment\s+(?:received|processed|successful|completed|credited)|received\s+(?:your\s+)?payment|received\s+(?:towards|for|on)|paid\s+(?:towards|for|on|to)).{0,120}\bcredit\s+card\b""").containsMatchIn(lower) ||
             Regex("""(?is)\bcredit\s+card\b.{0,100}(?:payment\s+(?:received|processed|successful|completed)|has\s+been\s+(?:processed|credited)|credited\s+to)""").containsMatchIn(lower)
 
         if (!destinationPaymentSignal) return null

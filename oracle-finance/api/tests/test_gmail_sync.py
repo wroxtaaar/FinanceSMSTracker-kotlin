@@ -1760,3 +1760,27 @@ def test_foreign_currency_card_email_uses_the_spend_not_the_available_limit():
     assert transaction.amountMinor == 20570
     assert transaction.currency == "USD"
     assert evidence.currency == "USD"
+
+
+def test_axis_card_received_your_payment_email_is_card_credit():
+    message = _message(
+        "axis-card-payment",
+        "Dear Customer, we have received your payment of INR 33,136.06 on your "
+        "Axis Bank Credit Card no. XX9206. Available Limit: INR 129893.14.",
+        subject="Axis Bank Alerts",
+        internal_date="1792000000000",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Axis Bank Alerts"},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, _ = parsed
+    assert transaction.amountMinor == 3313606
+    assert transaction.type == "CREDIT"
+    assert transaction.accountType == "CREDIT_CARD"
+    assert transaction.accountLast4 == "9206"
+    assert transaction.category == "TRANSFER"
