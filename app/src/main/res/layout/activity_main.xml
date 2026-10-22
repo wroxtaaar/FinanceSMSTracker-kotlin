@@ -98,34 +98,52 @@
             <Button
                 android:id="@+id/buttonEditSplitwise"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="32dp"
                 android:layout_weight="1"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
                 android:minHeight="0dp"
+                android:paddingTop="0dp"
+                android:paddingBottom="0dp"
                 android:paddingStart="4dp"
                 android:paddingEnd="4dp"
-                android:text="Splitwise" />
+                android:text="Splitwise"
+                android:maxLines="1"
+                android:textSize="11sp" />
 
             <Button
                 android:id="@+id/buttonEditBankAccounts"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="4dp"
                 android:layout_weight="1"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
                 android:minHeight="0dp"
+                android:paddingTop="0dp"
+                android:paddingBottom="0dp"
                 android:paddingStart="4dp"
                 android:paddingEnd="4dp"
-                android:text="Banks" />
+                android:text="Banks"
+                android:maxLines="1"
+                android:textSize="11sp" />
 
             <Button
                 android:id="@+id/buttonEditCreditCards"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="4dp"
                 android:layout_weight="1"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
                 android:minHeight="0dp"
+                android:paddingTop="0dp"
+                android:paddingBottom="0dp"
                 android:paddingStart="4dp"
                 android:paddingEnd="4dp"
-                android:text="Cards" />
+                android:text="Cards"
+                android:maxLines="1"
+                android:textSize="11sp" />
         </LinearLayout>
 
     </LinearLayout>
@@ -143,78 +161,33 @@
         <Button
             android:id="@+id/buttonOracleSettings"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="32dp"
             android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
             android:minHeight="0dp"
             android:paddingStart="2dp"
+            android:paddingTop="0dp"
             android:paddingEnd="2dp"
-            android:text="Settings" />
-
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/oracleControlsRow2"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow">
-
-        <Button
-            android:id="@+id/buttonGmailSync"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:text="Check Gmail" />
-
-        <Button
-            android:id="@+id/buttonReviewReconcile"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:text="Review" />
-
-        <Button
-            android:id="@+id/buttonSmsLog"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:text="SMS Log" />
-
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/historyButtonsRow"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:orientation="horizontal"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow2">
+            android:paddingBottom="0dp"
+            android:maxLines="1"
+            android:text="Settings"
+            android:textSize="11sp" />
 
         <Button
             android:id="@+id/buttonClearLocalHistory"
             android:layout_width="0dp"
             android:layout_height="32dp"
+            android:layout_marginStart="4dp"
             android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
             android:minHeight="0dp"
-            android:paddingStart="4dp"
+            android:paddingStart="2dp"
             android:paddingTop="0dp"
-            android:paddingEnd="4dp"
+            android:paddingEnd="2dp"
             android:paddingBottom="0dp"
+            android:maxLines="1"
             android:text="Clear history"
             android:textSize="11sp" />
 
@@ -224,13 +197,79 @@
             android:layout_height="32dp"
             android:layout_marginStart="4dp"
             android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
             android:minHeight="0dp"
-            android:paddingStart="4dp"
+            android:paddingStart="2dp"
             android:paddingTop="0dp"
-            android:paddingEnd="4dp"
+            android:paddingEnd="2dp"
             android:paddingBottom="0dp"
+            android:maxLines="1"
             android:text="Restore history"
             android:textSize="11sp" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/oracleControlsRow2"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow">
+
+        <Button
+            android:id="@+id/buttonGmailSync"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="2dp"
+            android:paddingTop="0dp"
+            android:paddingEnd="2dp"
+            android:paddingBottom="0dp"
+            android:maxLines="1"
+            android:text="Sync Gmail"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/buttonReviewReconcile"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="2dp"
+            android:paddingTop="0dp"
+            android:paddingEnd="2dp"
+            android:paddingBottom="0dp"
+            android:maxLines="1"
+            android:text="Review"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/buttonSmsLog"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="2dp"
+            android:paddingTop="0dp"
+            android:paddingEnd="2dp"
+            android:paddingBottom="0dp"
+            android:maxLines="1"
+            android:text="SMS Log"
+            android:textSize="11sp" />
+
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
@@ -241,7 +280,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/historyButtonsRow"
+        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow2"
         tools:listitem="@layout/item_transaction" />
 
     <TextView

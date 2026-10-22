@@ -883,7 +883,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun triggerManualGmailSync() {
         buttonGmailSync.isEnabled = false
-        buttonGmailSync.text = "Syncing Gmail..."
+        buttonGmailSync.text = "Syncing..."
 
         oracleExecutor.execute {
             val result = FinanceSyncClient(this@MainActivity).triggerGmailSync()
@@ -927,9 +927,9 @@ class MainActivity : AppCompatActivity() {
             repository.getUnresolvedUnrecognizedSmsCount()
 
         buttonReviewReconcile.text = if (count > 0) {
-            "Review & Reconcile ($count)"
+            "Review ($count)"
         } else {
-            "Review & Reconcile"
+            "Review"
         }
     }
 
