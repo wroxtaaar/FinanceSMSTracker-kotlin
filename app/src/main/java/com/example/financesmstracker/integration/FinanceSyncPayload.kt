@@ -12,7 +12,7 @@ object FinanceSyncPayload {
         transactions: List<SyncTransaction>,
         evidence: List<SyncEvidence>,
         internalTransferCandidates: List<SyncInternalTransferCandidate> = emptyList(),
-        voidedTransactionIds: List<Long> = emptyList(),
+        voidedTransactionIds: List<String> = emptyList(),
         cardBills: List<SyncCardBill> = emptyList()
     ): String {
         val out = StringBuilder(256)

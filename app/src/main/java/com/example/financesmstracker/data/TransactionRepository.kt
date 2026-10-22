@@ -1649,6 +1649,23 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         return list
     }
 
+    /** The stored source hash of a row in any status (voided rows included). */
+    fun getSmsHashById(id: Long): String? {
+        val db = dbHelper.readableDatabase
+        db.query(
+            FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+            arrayOf(FinanceDatabaseHelper.COLUMN_SMS_HASH),
+            "${FinanceDatabaseHelper.COLUMN_ID} = ?",
+            arrayOf(id.toString()),
+            null,
+            null,
+            null,
+            "1"
+        ).use {
+            return if (it.moveToFirst()) it.getString(0) else null
+        }
+    }
+
     fun voidTransaction(id: Long): Int {
         val db = dbHelper.writableDatabase
         val values = ContentValues().apply {

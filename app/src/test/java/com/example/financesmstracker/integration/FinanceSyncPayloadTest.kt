@@ -44,4 +44,17 @@ class FinanceSyncPayloadTest {
         assertTrue(payload.contains("\"matchType\":\"AMOUNT_TIME\""))
     }
 
+
+    @Test
+    fun voidOfRowPulledFromOracleGmailUsesTheRemoteId() {
+        assertEquals("gmail:abc123", FinanceSyncBridge.oracleVoidId(77L, "oracle:gmail:gmail:abc123"))
+        assertEquals("77", FinanceSyncBridge.oracleVoidId(77L, "notification:xyz"))
+        assertEquals("77", FinanceSyncBridge.oracleVoidId(77L, null))
+    }
+
+    @Test
+    fun voidedIdsAreSerializedAsStrings() {
+        val payload = FinanceSyncPayload.build(emptyList(), emptyList(), voidedTransactionIds = listOf("gmail:abc123", "42"))
+        assertTrue(payload.contains("\"voidedTransactionIds\":[\"gmail:abc123\",\"42\"]"))
+    }
 }

@@ -83,10 +83,16 @@ object FinanceSyncBridge {
         executor.execute {
             runCatching {
                 val service = FinanceSyncService(appContext)
+                // A row pulled from the Oracle Gmail ledger is known to Oracle
+                // by its remote id, not by the phone's local row number.
+                val smsHash = TransactionRepository(
+                    FinanceDatabaseHelper(appContext),
+                    appContext
+                ).getSmsHashById(transactionId)
                 service.enqueue(
                     transactions = emptyList(),
                     evidence = emptyList(),
-                    voidedTransactionIds = listOf(transactionId)
+                    voidedTransactionIds = listOf(oracleVoidId(transactionId, smsHash))
                 )
                 service.flush()
             }
@@ -136,6 +142,15 @@ object FinanceSyncBridge {
                 )
                 service.flush()
             }
+        }
+    }
+
+    internal fun oracleVoidId(localId: Long, smsHash: String?): String {
+        val marker = "oracle:gmail:"
+        return if (smsHash != null && smsHash.startsWith(marker)) {
+            smsHash.removePrefix(marker)
+        } else {
+            localId.toString()
         }
     }
 
