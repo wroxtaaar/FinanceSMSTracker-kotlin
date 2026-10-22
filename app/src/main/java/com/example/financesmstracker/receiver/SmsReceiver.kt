@@ -52,7 +52,10 @@ class SmsReceiver : BroadcastReceiver() {
                     // card. A normal "Sent/Debited from bank account" SMS
                     // must remain a bank transaction.
                     val cardBillPayment = CardBillPaymentSmsParser.parse(sender, fullBody)
-                    if (cardBillPayment != null && trustStatus == SenderTrustStatus.TRUSTED) {
+                    // The message itself must name a bank, a credit card with its last
+                    // digits and a received payment, so it is accepted from an unknown
+                    // (non-personal) sender id too; only personal numbers are refused.
+                    if (cardBillPayment != null && trustStatus != SenderTrustStatus.UNTRUSTED) {
                         processCardBillPayment(
                             context = context,
                             timestamp = timestamp,
