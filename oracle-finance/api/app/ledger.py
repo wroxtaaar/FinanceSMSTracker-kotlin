@@ -1336,6 +1336,33 @@ def foreign_amount_info(transaction_id):
         }
 
 
+def foreign_amount_map():
+    """{transaction id: foreign-spend info} for every active foreign row.
+
+    Rows merged into a canonical foreign row as duplicates map to that row's
+    amounts too, so a phone-side copy of the same spend can show the rupees.
+    """
+    with connection() as conn:
+        canon = conn.execute(
+            """SELECT id,amount_minor,orig_amount_minor,orig_currency,fx_exact
+               FROM transactions
+               WHERE status='ACTIVE' AND orig_currency IS NOT NULL AND duplicate_of IS NULL"""
+        ).fetchall()
+        info = {
+            r["id"]: {
+                "inrMinor": int(r["amount_minor"]),
+                "origAmountMinor": int(r["orig_amount_minor"]),
+                "origCurrency": r["orig_currency"],
+                "exact": bool(r["fx_exact"]),
+            }
+            for r in canon
+        }
+        for ident in list(info):
+            for d in conn.execute("SELECT id FROM transactions WHERE duplicate_of=?", (ident,)).fetchall():
+                info.setdefault(d["id"], info[ident])
+        return info
+
+
 def set_foreign_inr_amount(transaction_id, inr_minor):
     """Set the exact rupee charge of a foreign-currency spend.
 

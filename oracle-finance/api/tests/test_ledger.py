@@ -2083,3 +2083,21 @@ def test_corrected_foreign_row_still_matches_same_spend_from_another_source(monk
         b = conn.execute("SELECT * FROM transactions WHERE id='gmail:src-b'").fetchone()
     assert a["amount_minor"] != b["amount_minor"]
     assert _rows_are_duplicate(a, b)
+
+
+def test_foreign_amount_map_includes_duplicates_and_skips_rupee_rows(monkeypatch):
+    from app import fx
+    from app.ledger import sync_transaction, set_foreign_inr_amount, foreign_amount_map
+
+    monkeypatch.setattr(fx, "_fetch_rate", lambda currency, rate_date: 88.0)
+    set_balance("airtel-card-9206", "Airtel Axis", "INR", "CREDIT_CARD", "AXIS", "9206", 0)
+    sync_transaction(_usd_tx("map-a"))
+    sync_transaction(_usd_tx("map-inr").model_copy({"currency": "INR", "amountMinor": 5000, "merchantOrPayee": "X", "timestamp": 1790000000000}))
+    with connection() as conn:
+        conn.execute("INSERT INTO transactions (id,amount_minor,currency,type,payment_method,account_type,account_last4,timestamp,category,confidence,status,created_at,duplicate_of) "
+                     "VALUES ('map-dup',1,'INR','DEBIT','CARD','CREDIT_CARD','9206',1,'OTHER',0.9,'VOIDED',1,'map-a')")
+    set_foreign_inr_amount("map-a", 2_500_000)
+    result = foreign_amount_map()
+    assert "map-inr" not in result
+    assert result["map-a"]["inrMinor"] == 2_500_000 and result["map-a"]["exact"] is True
+    assert result["map-dup"] == result["map-a"]

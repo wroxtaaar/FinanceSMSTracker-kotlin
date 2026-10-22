@@ -235,6 +235,10 @@ def summary(currency:str="INR",x_sync_token:str=Header(default="")):
 def transactions(limit:int=100,x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return {"transactions":list_transactions(max(1,min(limit,1000)))}
 
+@app.get("/api/v1/foreign-amounts")
+def foreign_amounts(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return {"items":foreign_amount_map()}
+
 @app.get("/api/v1/transactions/{transaction_id}/fx")
 def transaction_fx(transaction_id:str,x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return foreign_amount_info(transaction_id)

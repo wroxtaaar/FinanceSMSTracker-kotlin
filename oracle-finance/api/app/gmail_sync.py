@@ -63,9 +63,9 @@ _BANK_SENDER_DOMAINS = {
     "HDFC": ("hdfcbank.net", "hdfcbank.bank.in"),
     "AXIS": ("axisbank.com", "axis.bank.in"),
     "ICICI": ("icicibank.com", "icici.bank.in"),
-    "SBI": ("sbi.co.in",),
-    "HSBC": ("hsbc.co.in", "hsbc.com"),
-    "INDUSIND": ("indusind.com",),
+    "SBI": ("sbi.co.in", "sbi.bank.in"),
+    "HSBC": ("hsbc.co.in", "hsbc.com", "hsbc.bank.in"),
+    "INDUSIND": ("indusind.com", "indusind.bank.in"),
 }
 def _email_sender(headers):
     return parseaddr(headers.get("from", ""))[1].lower()
@@ -258,6 +258,19 @@ def _merchant_or_payee(combined):
     if transfer_match:
         value = transfer_match.group(1).strip(" \t\r\n.,;:-")
         return value or None
+
+    # Card alerts such as HSBC's "...used for a transaction of USD 4.00 at
+    # HUGGINGFACE on 21/10/26." name the merchant after "at".
+    card_merchant = re.search(
+        r"(?i)\b(?:transaction|purchase|spend|payment)\s+of\s+"
+        r"(?:INR|Rs\.?|\u20b9|USD|EUR|GBP|SGD|AUD|CAD|AED)\s*[0-9][0-9,]*(?:\.\d{1,2})?"
+        r"\s+at\s+(.+?)(?=\s+on\s+\d|\s+on\b|[.,;]|$)",
+        normalized,
+    )
+    if card_merchant:
+        value = card_merchant.group(1).strip(" \t\r\n.,;:-")
+        if value:
+            return value
 
     return None
 

@@ -921,6 +921,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 result.onSuccess { summary ->
                     renderOracleSummary(summary)
+                    refreshForeignAmounts()
                 }.onFailure { error ->
                     textViewOracleStatus.text = "Oracle ledger: " + (error.message ?: "Unavailable")
                 }
@@ -1155,6 +1156,7 @@ class MainActivity : AppCompatActivity() {
                         refreshed?.takeIf { it.foreign }?.let { render(it) }
                         Toast.makeText(this, "Exact amount saved", Toast.LENGTH_SHORT).show()
                         loadOracleSummary()
+                        refreshForeignAmounts()
                     }.onFailure { error ->
                         Toast.makeText(
                             this, "Could not save: " + (error.message ?: "Unavailable"), Toast.LENGTH_LONG
@@ -1403,6 +1405,31 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    private var foreignAmountsByOracleId: Map<String, FinanceSyncClient.ForeignAmountInfo> = emptyMap()
+
+    private fun applyForeignAmounts(transactions: List<Transaction>) {
+        if (foreignAmountsByOracleId.isEmpty()) return
+        val byLocalId = HashMap<Long, FinanceSyncClient.ForeignAmountInfo>()
+        transactions.forEach { tx ->
+            foreignAmountsByOracleId[FinanceSyncBridge.oracleVoidId(tx.id, tx.smsHash)]
+                ?.let { byLocalId[tx.id] = it }
+        }
+        adapter.setForeignAmounts(byLocalId)
+    }
+
+    /** Fetch the rupee amounts of foreign spends so the list can show them. */
+    private fun refreshForeignAmounts() {
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@MainActivity).fetchForeignAmounts()
+            runOnUiThread {
+                result.onSuccess { amounts ->
+                    foreignAmountsByOracleId = amounts
+                    applyForeignAmounts(repository.getAllTransactions())
+                }
+            }
+        }
+    }
+
     private fun loadTransactions() {
         // Repair same-side duplicates that were already stored before the
         // stronger repository matcher was deployed. The repair only changes
@@ -1417,6 +1444,7 @@ class MainActivity : AppCompatActivity() {
         val transactions = repository.getAllTransactions()
 
         adapter.updateData(transactions)
+        applyForeignAmounts(transactions)
         updateReviewCount()
 
         if (transactions.isEmpty()) {

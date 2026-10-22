@@ -156,4 +156,22 @@ class GmailNotificationParserTest {
         )
         assertNull(result)
     }
+
+    @Test
+    fun parsesHsbcCardUsdEmailNotification() {
+        val result = GmailNotificationParser.parse(
+            "HSBC",
+            "Dear Customer, We're writing to confirm that your HSBC Credit Card xx5145 was used for a transaction of USD 4.00 at HUGGINGFACE on 21/10/26. Available limit: INR 169620.11 Amount due: INR 379.89",
+            null,
+            null
+        )
+
+        assertNotNull(result)
+        assertEquals(400L, result!!.amountPaise)
+        assertEquals("USD", result.currency)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(AccountType.CREDIT_CARD, result.accountType)
+        assertEquals("HSBC", result.bank)
+        assertEquals("5145", result.accountLastFour)
+    }
 }

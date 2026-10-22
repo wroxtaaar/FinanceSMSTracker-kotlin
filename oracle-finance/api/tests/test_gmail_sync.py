@@ -1784,3 +1784,31 @@ def test_axis_card_received_your_payment_email_is_card_credit():
     assert transaction.accountType == "CREDIT_CARD"
     assert transaction.accountLast4 == "9206"
     assert transaction.category == "TRANSFER"
+
+
+def test_hsbc_card_email_reads_usd_amount_and_merchant_without_alert_subject():
+    message = _message(
+        "hsbc-usd",
+        "Dear Customer, We're writing to confirm that your HSBC Credit Card xx5145 was used "
+        "for a transaction of USD 4.00 at HUGGINGFACE on 21/10/26. "
+        "Available limit: INR 169620.11 Amount due: INR 379.89 "
+        "If you did not make this transaction, please contact us promptly.",
+        subject="Your HSBC Credit Card was used",
+        internal_date="1792231140000",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Your HSBC Credit Card was used"},
+        {"name": "From", "value": "HSBC <hsbc@hsbc.bank.in>"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, _ = parsed
+    assert transaction.amountMinor == 400
+    assert transaction.currency == "USD"
+    assert transaction.type == "DEBIT"
+    assert transaction.bank == "HSBC"
+    assert transaction.accountType == "CREDIT_CARD"
+    assert transaction.accountLast4 == "5145"
+    assert transaction.merchantOrPayee == "HUGGINGFACE"

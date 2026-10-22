@@ -180,6 +180,25 @@ class FinanceSyncClient(
         }
     }
 
+    /** Every active foreign spend Oracle knows, keyed by Oracle transaction id. */
+    fun fetchForeignAmounts(): Result<Map<String, ForeignAmountInfo>> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return get("/api/v1/foreign-amounts").map { body ->
+            val items = JSONObject(body).optJSONObject("items") ?: JSONObject()
+            items.keys().asSequence().associateWith { key ->
+                val o = items.getJSONObject(key)
+                ForeignAmountInfo(
+                    foreign = true,
+                    inrMinor = o.getLong("inrMinor"),
+                    origAmountMinor = o.getLong("origAmountMinor"),
+                    origCurrency = o.optString("origCurrency", ""),
+                    exact = o.optBoolean("exact", false)
+                )
+            }
+        }
+    }
+
     fun setForeignInrAmount(oracleId: String, amountMinor: Long): Result<String> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
