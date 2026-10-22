@@ -84,7 +84,14 @@ class TransactionAdapter(
 
         holder.textViewCategory.text = tx.category ?: "OTHER"
         holder.textViewType.text = tx.transactionType.name
-        holder.textViewPaymentMethod.text = tx.paymentMethod.name
+        // Shown on the right, under the bank name: "Credit card" for card
+        // accounts, otherwise how it was paid (UPI, NEFT, ...).
+        holder.textViewPaymentMethod.text =
+            if (tx.accountType == com.example.financesmstracker.parser.AccountType.CREDIT_CARD) {
+                "Credit card"
+            } else {
+                tx.paymentMethod.name
+            }
         holder.textViewBank.text = tx.bank ?: ""
 
         val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
