@@ -173,5 +173,6 @@ class GmailNotificationParserTest {
         assertEquals(AccountType.CREDIT_CARD, result.accountType)
         assertEquals("HSBC", result.bank)
         assertEquals("5145", result.accountLastFour)
+        assertEquals("HUGGINGFACE", result.merchantName)
     }
 }

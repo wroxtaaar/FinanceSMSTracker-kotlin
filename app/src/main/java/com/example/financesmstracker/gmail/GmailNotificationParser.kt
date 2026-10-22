@@ -62,8 +62,13 @@ object GmailNotificationParser {
     )
     private val parenthesizedNameRegex = Regex("""\(([^()]{2,80})\)""")
 
+    // Card alerts such as "...used for a transaction of USD 4.00 at HUGGINGFACE on 21/10/26."
+    private val cardMerchantRegex = Regex(
+        """(?i)\b(?:transaction|purchase|spend|payment)\s+of\s+(?:INR|Rs\.?|₹|USD|EUR|GBP|SGD|AUD|CAD|AED)\s*[0-9][0-9,]*(?:\.\d{1,2})?\s+at\s+(.+?)(?=\s+on\b|[.,;]|$)"""
+    )
+
     private val explicitDebitRegex = Regex(
-        """(?i)\b(?:was|has been|is|is being)?\s*debited\b|\b(?:spent|purchased|purchase|charged|paid|withdrawn)\b"""
+        """(?i)\b(?:was|has been|is|is being)?\s*debited\b|\b(?:spent|purchased|purchase|charged|paid|withdrawn)\b|\bused\s+for\s+(?:a\s+)?(?:transaction|purchase)\b"""
     )
     private val explicitCreditRegex = Regex(
         """(?i)\b(?:was|has been|is|is being)?\s*credited\b|\b(?:received|deposited)\b"""
@@ -149,7 +154,7 @@ object GmailNotificationParser {
         val merchantName = if (vpa != null) {
             parenthesizedNameRegex.find(line)?.groupValues?.getOrNull(1)?.trim()
         } else {
-            null
+            cardMerchantRegex.find(line)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
         }
 
         val isCreditCard = Regex(
