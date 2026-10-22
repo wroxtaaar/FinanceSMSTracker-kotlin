@@ -1339,7 +1339,18 @@ def _ingest_messages(service,query="newer_than:30d"):
         "statementTransactionsMatched":0,
         "statementErrors":[],
         "gmailDiagnostics":None,
+        # One short line per scanned e-mail saying what the scan did with it,
+        # so a message that never became a transaction can be explained.
+        "messageLog":[],
     }
+
+    def note(sender, subject, outcome):
+        if len(stats["messageLog"]) < 300:
+            stats["messageLog"].append({
+                "sender": str(sender or "")[:80],
+                "subject": str(subject or "")[:90],
+                "outcome": outcome,
+            })
 
     # These two repairs are cheap, database-only safety passes. Run them
     # on every sync so a long-lived API process also cleans up false rows that
@@ -1395,6 +1406,8 @@ def _ingest_messages(service,query="newer_than:30d"):
                 ))
                 if not known_bank_sender and not transaction_subject:
                     stats["ignoredCount"] += 1
+                    note(sender_preview, subject_preview,
+                         "Skipped: sender is not a known bank and the subject has no transaction words")
                     continue
 
             subject_preview = item.get("subject", "") or ""
@@ -1448,6 +1461,8 @@ def _ingest_messages(service,query="newer_than:30d"):
                     ).fetchone()
                     if active_link:
                         stats["alreadyProcessed"] += 1
+                        note(item.get("from"), subject_preview,
+                             "Already processed (its transaction exists)")
                         continue
 
                     # The message was marked PARSED but no active transaction
@@ -1563,6 +1578,13 @@ def _ingest_messages(service,query="newer_than:30d"):
                     row=conn.execute(
                         "SELECT * FROM transactions WHERE id=?",(t.id,)
                     ).fetchone()
+                    note(
+                        sender, h.get("subject"),
+                        f"Read as {t.type} {t.amountMinor/100:.2f} {t.currency} "
+                        f"{t.bank or '?'} {t.accountType} {t.accountLast4 or '?'}: "
+                        + ("merged into an existing transaction (duplicate)"
+                           if row and row["duplicate_of"] else "new transaction")
+                    )
                     if row and row["duplicate_of"]:
                         stats["duplicateTransactions"] += 1
                     elif row:
@@ -1615,6 +1637,12 @@ def _ingest_messages(service,query="newer_than:30d"):
                         (h_status, msg_id),
                     )
 
+                note(
+                    sender, h.get("subject"),
+                    "Looks like a bank e-mail but could not be read safely (sent to Review)"
+                    if h_status == "REVIEW"
+                    else "Not a transaction e-mail (no amount/bank/transaction wording)"
+                )
                 if h_status == "REVIEW":
                     stats["reviewCount"] += 1
                     add_review(

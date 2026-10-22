@@ -21,4 +21,19 @@ class SmsHandlingLogTest {
         assertTrue(s.startsWith("Payment of INR 33136.06 x"))
         assertEquals(90, s.length)
     }
+
+    @Test
+    fun gmailScanFormatShowsSearchSummaryAndEachMessage() {
+        val text = SmsHandlingLog.formatGmailScan(
+            "folder=INBOX, candidates=2",
+            listOf("hsbc@hsbc.bank.in | HSBC alert\n→ Read as DEBIT 4.00 USD", "x | y\n→ Skipped")
+        )
+        assertTrue(text.startsWith("Search: folder=INBOX, candidates=2"))
+        assertTrue(text.contains("HSBC alert"))
+        assertTrue(text.contains("→ Skipped"))
+        assertEquals(
+            "The scan returned no e-mails to look at.",
+            SmsHandlingLog.formatGmailScan("", emptyList())
+        )
+    }
 }

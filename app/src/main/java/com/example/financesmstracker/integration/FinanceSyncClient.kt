@@ -113,7 +113,24 @@ class FinanceSyncClient(
                 reviewCount = json.optInt("reviewCount", 0),
                 ignoredCount = json.optInt("ignoredCount", 0),
                 createdEvidence = json.optInt("createdEvidence", 0),
-                repairedTransactions = json.optInt("repairedTransactions", 0)
+                repairedTransactions = json.optInt("repairedTransactions", 0),
+                messageLog = json.optJSONArray("messageLog")?.let { arr ->
+                    (0 until arr.length()).map { i ->
+                        val o = arr.getJSONObject(i)
+                        o.optString("sender") + " | " + o.optString("subject") +
+                            "\n→ " + o.optString("outcome")
+                    }
+                } ?: emptyList(),
+                searchSummary = json.optJSONObject("gmailDiagnostics")?.let { d ->
+                    val counts = d.optJSONObject("senderSearchCounts")
+                    val hits = counts?.keys()?.asSequence()
+                        ?.filter { counts.optInt(it, 0) > 0 }
+                        ?.joinToString(", ") { it + "=" + counts.optInt(it) }
+                        .orEmpty()
+                    "folder=" + d.optString("folder") + ", candidates=" +
+                        d.optInt("candidateUidCount") + ", senders with mail: " +
+                        hits.ifEmpty { "none" }
+                }.orEmpty()
             )
         }
     }
@@ -322,7 +339,11 @@ data class GmailSyncResult(
     val reviewCount: Int,
     val ignoredCount: Int,
     val createdEvidence: Int,
-    val repairedTransactions: Int
+    val repairedTransactions: Int,
+    /** One line per scanned e-mail: "sender | subject → what the scan did". */
+    val messageLog: List<String> = emptyList(),
+    /** Compact IMAP search summary (folder, per-sender hit counts). */
+    val searchSummary: String = ""
 )
 
 data class OracleTransaction(

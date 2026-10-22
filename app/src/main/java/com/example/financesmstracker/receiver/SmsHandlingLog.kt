@@ -35,6 +35,37 @@ object SmsHandlingLog {
         }
     }
 
+    private const val KEY_GMAIL_SCAN = "last_gmail_scan"
+    private const val KEY_GMAIL_SCAN_AT = "last_gmail_scan_at"
+
+    /** Pure formatter for a Gmail scan report (header + one block per e-mail). */
+    fun formatGmailScan(searchSummary: String, lines: List<String>): String {
+        val header = if (searchSummary.isBlank()) "" else "Search: $searchSummary\n\n"
+        return if (lines.isEmpty()) {
+            header + "The scan returned no e-mails to look at."
+        } else {
+            header + lines.joinToString("\n\n")
+        }
+    }
+
+    fun saveGmailScan(context: Context, text: String) {
+        runCatching {
+            context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_GMAIL_SCAN, text)
+                .putLong(KEY_GMAIL_SCAN_AT, System.currentTimeMillis())
+                .apply()
+        }
+    }
+
+    /** Last saved Gmail scan report, or null if none has run yet. */
+    fun readGmailScan(context: Context): String? = runCatching {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val text = prefs.getString(KEY_GMAIL_SCAN, null) ?: return@runCatching null
+        val at = prefs.getLong(KEY_GMAIL_SCAN_AT, 0L)
+        val stamp = SimpleDateFormat("dd MMM HH:mm", Locale.US).format(Date(at))
+        "Last Gmail scan ($stamp)\n\n$text"
+    }.getOrNull()
+
     @Synchronized
     fun record(context: Context, sender: String, body: String, outcome: String) {
         runCatching {

@@ -1812,3 +1812,19 @@ def test_hsbc_card_email_reads_usd_amount_and_merchant_without_alert_subject():
     assert transaction.accountType == "CREDIT_CARD"
     assert transaction.accountLast4 == "5145"
     assert transaction.merchantOrPayee == "HUGGINGFACE"
+
+
+def test_ingest_records_a_log_line_per_message():
+    message = _message(
+        "log-1",
+        "HDFC Bank A/c XX9591 debited INR 5.00. Ref UPI-LOG-1.",
+    )
+    service = FakeService([message])
+    set_balance("gmail-log", "Gmail Log", "INR", "BANK_ACCOUNT", "HDFC", "9591", 100000)
+
+    stats = ingest_messages(service, query="newer_than:30d")
+
+    log = stats["messageLog"]
+    assert len(log) == 1
+    assert log[0]["subject"] == "HDFC Bank Transaction Alert"
+    assert "Read as DEBIT 5.00 INR HDFC" in log[0]["outcome"]

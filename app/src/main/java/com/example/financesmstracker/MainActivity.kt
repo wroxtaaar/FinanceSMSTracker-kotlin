@@ -359,9 +359,13 @@ class MainActivity : AppCompatActivity() {
      * them here and keep well-known bank acronyms in capitals.
      */
     private fun showSmsHandlingLog() {
-        val text = com.example.financesmstracker.receiver.SmsHandlingLog.format(
+        val smsText = com.example.financesmstracker.receiver.SmsHandlingLog.format(
             com.example.financesmstracker.receiver.SmsHandlingLog.read(this)
         )
+        val gmailText = com.example.financesmstracker.receiver.SmsHandlingLog.readGmailScan(this)
+            ?: "No Gmail scan yet. Tap Sync Gmail."
+        val text = "SMS handling (newest first)\n\n" + smsText +
+            "\n\n────────────\n\n" + gmailText
         val view = android.widget.TextView(this).apply {
             this.text = text
             setTextIsSelectable(true)
@@ -369,7 +373,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 13f
         }
         AlertDialog.Builder(this)
-            .setTitle("SMS handling log (newest first)")
+            .setTitle("Logs: SMS and Gmail scan")
             .setView(android.widget.ScrollView(this).apply { addView(view) })
             .setPositiveButton("Close", null)
             .setNeutralButton("Copy") { _, _ ->
@@ -878,6 +882,12 @@ class MainActivity : AppCompatActivity() {
                 buttonGmailSync.text = "Sync Gmail"
 
                 result.onSuccess { summary ->
+                    com.example.financesmstracker.receiver.SmsHandlingLog.saveGmailScan(
+                        this@MainActivity,
+                        com.example.financesmstracker.receiver.SmsHandlingLog.formatGmailScan(
+                            summary.searchSummary, summary.messageLog
+                        )
+                    )
                     Toast.makeText(
                         this@MainActivity,
                         "Gmail: scanned ${summary.messagesScanned}, new transactions " +
