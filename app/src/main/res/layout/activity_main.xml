@@ -141,31 +141,9 @@
         app:layout_constraintTop_toBottomOf="@id/oracleLedgerPanel">
 
         <Button
-            android:id="@+id/buttonRefreshOracle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:text="Refresh" />
-
-        <Button
-            android:id="@+id/buttonViewAccounts"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:layout_weight="1"
-            android:minHeight="0dp"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:text="Accounts" />
-
-        <Button
             android:id="@+id/buttonOracleSettings"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
             android:layout_weight="1"
             android:minHeight="0dp"
             android:paddingStart="2dp"
@@ -217,27 +195,43 @@
 
     </LinearLayout>
 
-    <Button
-        android:id="@+id/buttonClearLocalHistory"
+    <LinearLayout
+        android:id="@+id/historyButtonsRow"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:minHeight="0dp"
-        android:text="Clear Local History"
+        android:orientation="horizontal"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow2" />
+        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow2">
 
-    <Button
-        android:id="@+id/buttonRestoreHistory"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:minHeight="0dp"
-        android:text="Restore history from server"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/buttonClearLocalHistory" />
+        <Button
+            android:id="@+id/buttonClearLocalHistory"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_weight="1"
+            android:minHeight="0dp"
+            android:paddingStart="4dp"
+            android:paddingTop="0dp"
+            android:paddingEnd="4dp"
+            android:paddingBottom="0dp"
+            android:text="Clear history"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/buttonRestoreHistory"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:minHeight="0dp"
+            android:paddingStart="4dp"
+            android:paddingTop="0dp"
+            android:paddingEnd="4dp"
+            android:paddingBottom="0dp"
+            android:text="Restore history"
+            android:textSize="11sp" />
+    </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerViewTransactions"
@@ -247,7 +241,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/buttonRestoreHistory"
+        app:layout_constraintTop_toBottomOf="@id/historyButtonsRow"
         tools:listitem="@layout/item_transaction" />
 
     <TextView

@@ -65,8 +65,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textViewBankCash: TextView
     private lateinit var textViewCardOutstanding: TextView
     private lateinit var textViewSplitwiseReceivable: TextView
-    private lateinit var buttonRefreshOracle: Button
-    private lateinit var buttonViewAccounts: Button
     private lateinit var buttonOracleSettings: Button
     private lateinit var buttonGmailSync: Button
     private lateinit var buttonReviewReconcile: Button
@@ -152,8 +150,6 @@ class MainActivity : AppCompatActivity() {
         textViewBankCash = findViewById(R.id.textViewBankCash)
         textViewCardOutstanding = findViewById(R.id.textViewCardOutstanding)
         textViewSplitwiseReceivable = findViewById(R.id.textViewSplitwiseReceivable)
-        buttonRefreshOracle = findViewById(R.id.buttonRefreshOracle)
-        buttonViewAccounts = findViewById(R.id.buttonViewAccounts)
         buttonOracleSettings = findViewById(R.id.buttonOracleSettings)
         buttonGmailSync = findViewById(R.id.buttonGmailSync)
         buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
@@ -175,14 +171,6 @@ class MainActivity : AppCompatActivity() {
 
         buttonEditCreditCards.setOnClickListener {
             loadOracleAccountsForManualEdit("CREDIT_CARD")
-        }
-
-        buttonRefreshOracle.setOnClickListener {
-            loadOracleSummary()
-        }
-
-        buttonViewAccounts.setOnClickListener {
-            loadOracleAccounts()
         }
 
         buttonOracleSettings.setOnClickListener {
@@ -318,26 +306,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadOracleAccounts() {
-        buttonViewAccounts.isEnabled = false
-        oracleExecutor.execute {
-            val result = FinanceSyncClient(this@MainActivity).fetchAccounts()
-
-            runOnUiThread {
-                buttonViewAccounts.isEnabled = true
-                result.onSuccess { accounts ->
-                    showAccountsDialog(accounts)
-                }.onFailure { error ->
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Could not load accounts: " + (error.message ?: "Unavailable"),
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
-
     private fun loadOracleAccountsForManualEdit(accountType: String) {
         oracleExecutor.execute {
             val result = FinanceSyncClient(this@MainActivity).fetchAccounts()
@@ -396,7 +364,7 @@ class MainActivity : AppCompatActivity() {
                     ).show()
                 }
                 buttonRestoreHistory.isEnabled = true
-                buttonRestoreHistory.text = "Restore history from server"
+                buttonRestoreHistory.text = "Restore history"
             }
         }
     }
