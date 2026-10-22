@@ -238,6 +238,17 @@ def init_db():
             conn.execute("UPDATE accounts SET name=?, bank=? WHERE id=?", (name, bank, account_id))
 
 
+        transaction_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(transactions)").fetchall()
+        }
+        for name, sql_type in {
+            "orig_amount_minor": "INTEGER",
+            "orig_currency": "TEXT",
+            "fx_rate": "REAL",
+        }.items():
+            if name not in transaction_columns:
+                conn.execute(f"ALTER TABLE transactions ADD COLUMN {name} {sql_type}")
+
         evidence_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(evidence)").fetchall()
         }

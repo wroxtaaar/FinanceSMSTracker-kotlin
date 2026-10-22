@@ -1923,3 +1923,102 @@ def test_splitwise_is_rebuilt_from_final_bank_and_card_ledger_movements():
     sync_transaction(T("sw-after-reset", "DEBIT", "BANK_ACCOUNT", "AXIS", "3370", 500))
     rebuild_manual_splitwise_total()
     assert get_manual_splitwise_total("INR") == 500
+
+
+class _Tx:
+    """Pydantic-like holder with model_copy, as sync_transaction expects."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def model_copy(self, update=None):
+        data = dict(self.__dict__)
+        data.update(update or {})
+        return _Tx(**data)
+
+
+def _usd_tx(tx_id, amount_minor=29246, ts=1792300000000):
+    return _Tx(
+        id=tx_id, amountMinor=amount_minor, currency="USD", type="DEBIT",
+        paymentMethod="CARD", accountType="CREDIT_CARD", bank="AXIS",
+        merchantOrPayee="OPENAI", accountLast4="9206", reference=None,
+        timestamp=ts, category="SUBSCRIPTION", confidence=0.95,
+    )
+
+
+def test_usd_card_spend_is_converted_and_moves_card_and_splitwise(monkeypatch):
+    from app import fx
+    from app.ledger import sync_transaction, get_manual_splitwise_total
+
+    monkeypatch.setattr(fx, "_fetch_rate", lambda currency, rate_date: 88.0)
+    set_balance("airtel-card-9206", "Airtel Axis", "INR", "CREDIT_CARD", "AXIS", "9206", 0)
+    before = get_manual_splitwise_total("INR")
+
+    sync_transaction(_usd_tx("usd-1"))
+
+    # 292.46 USD * 88.0 * 1.0413 = 26_799.35 INR (rounded to paise)
+    expected = round(29246 * 88.0 * 1.0413)
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT amount_minor,currency,orig_amount_minor,orig_currency FROM transactions WHERE id='usd-1'"
+        ).fetchone()
+        card = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='airtel-card-9206'"
+        ).fetchone()["balance_minor"]
+    assert row["currency"] == "INR"
+    assert abs(row["amount_minor"] - expected) <= 1
+    assert row["orig_amount_minor"] == 29246 and row["orig_currency"] == "USD"
+    assert abs(card - expected) <= 1
+    after = get_manual_splitwise_total("INR")
+    assert after is not None
+    assert abs((after or 0) - (before or 0) - expected) <= 1
+
+
+def test_same_usd_spend_from_two_sources_converts_identically(monkeypatch):
+    from app import fx
+
+    monkeypatch.setattr(fx, "_fetch_rate", lambda currency, rate_date: 88.0)
+    first = fx.to_inr(20570, "USD", 1792300000000)
+    second = fx.to_inr(20570, "USD", 1792300005000)
+    assert first == second
+
+
+def test_fx_falls_back_when_rate_lookup_fails(monkeypatch):
+    from app import fx
+
+    monkeypatch.setattr(fx, "_fetch_rate", lambda currency, rate_date: None)
+    inr, _ = fx.to_inr(10000, "USD", 1792300000000)
+    assert inr == round(10000 * fx.FALLBACK_INR_PER_UNIT["USD"] * 1.0413)
+    assert fx.to_inr(10000, "INR", 1792300000000) is None
+    assert fx.to_inr(10000, "XYZ", 1792300000000) is None
+
+
+def test_migration_converts_existing_usd_rows_once(monkeypatch):
+    from app import fx
+    from app.ledger import migrate_foreign_currency_rows
+
+    monkeypatch.setattr(fx, "_fetch_rate", lambda currency, rate_date: 88.0)
+    set_balance("airtel-card-9206", "Airtel Axis", "INR", "CREDIT_CARD", "AXIS", "9206", 0)
+    import time
+    now = int(time.time() * 1000) + 60_000  # created after the card's last reconciliation
+    with connection() as conn:
+        conn.execute(
+            """INSERT INTO transactions
+               (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,
+                account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at)
+               VALUES ('old-usd',20570,'USD','DEBIT','CARD','CREDIT_CARD','AXIS','OPENAI','9206',
+                       NULL,?,'SUBSCRIPTION',0.95,NULL,'ACTIVE',?)""",
+            (now, now),
+        )
+
+    assert migrate_foreign_currency_rows() == 1
+    assert migrate_foreign_currency_rows() == 0  # one-time
+
+    expected = round(20570 * 88.0 * 1.0413)
+    with connection() as conn:
+        row = conn.execute("SELECT amount_minor,currency,orig_currency FROM transactions WHERE id='old-usd'").fetchone()
+        card = conn.execute("SELECT balance_minor FROM accounts WHERE id='airtel-card-9206'").fetchone()["balance_minor"]
+        adj = conn.execute("SELECT COUNT(*) v FROM balance_adjustments WHERE transaction_id='old-usd'").fetchone()["v"]
+    assert row["currency"] == "INR" and row["orig_currency"] == "USD"
+    assert abs(row["amount_minor"] - expected) <= 1
+    assert abs(card - expected) <= 1
+    assert adj == 1

@@ -30,6 +30,7 @@ repair_missing_balance_adjustments()
 # contribution without requiring a new bank SMS.
 repair_duplicate_transactions()
 match_internal_transfers()
+migrate_foreign_currency_rows()
 migrate_splitwise_other_optout()
 migrate_gmail_default_category()
 # Splitwise is a materialized view of the canonical bank/card ledger.

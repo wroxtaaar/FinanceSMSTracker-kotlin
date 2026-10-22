@@ -557,7 +557,21 @@ def repair_duplicate_transactions():
         return repaired
 
 
+def _convert_foreign_transaction(t):
+    """Foreign-currency spend -> INR estimate. Returns (model, orig_amount, orig_currency, rate)."""
+    from . import fx
+    converted = fx.to_inr(t.amountMinor, t.currency, t.timestamp)
+    if converted is None:
+        return t, None, None, None
+    inr_minor, rate = converted
+    return (
+        t.model_copy(update={"amountMinor": inr_minor, "currency": "INR"}),
+        int(t.amountMinor), str(t.currency).strip().upper(), rate,
+    )
+
+
 def sync_transaction(t, apply_balance=True):
+    t, orig_amount, orig_currency, fx_rate = _convert_foreign_transaction(t)
     with connection() as conn:
         before=conn.execute(
             """SELECT * FROM transactions WHERE id=?""",
@@ -566,10 +580,11 @@ def sync_transaction(t, apply_balance=True):
         created_at=now_ms()
         provisional = is_provisional_unresolved_transaction(t)
         conn.execute("""INSERT OR IGNORE INTO transactions
-        (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (id,amount_minor,currency,type,payment_method,account_type,bank,merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at,
+         orig_amount_minor,orig_currency,fx_rate)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (t.id,t.amountMinor,t.currency,t.type,t.paymentMethod,t.accountType,t.bank,t.merchantOrPayee,t.accountLast4,normalize_reference(t.reference),
-         t.timestamp,t.category,t.confidence,None,"ACTIVE",created_at))
+         t.timestamp,t.category,t.confidence,None,"ACTIVE",created_at,orig_amount,orig_currency,fx_rate))
 
         if (
             before is None
@@ -614,13 +629,15 @@ def sync_transaction(t, apply_balance=True):
                        amount_minor=?, currency=?, type=?, payment_method=?,
                        account_type=?, bank=?, merchant_or_payee=?,
                        account_last4=?, reference=?, timestamp=?, confidence=?,
+                       orig_amount_minor=?, orig_currency=?, fx_rate=?,
                        status='ACTIVE'
                        WHERE id=?""",
                     (
                         t.amountMinor, t.currency, t.type, t.paymentMethod,
                         t.accountType, t.bank, t.merchantOrPayee,
                         t.accountLast4, normalize_reference(t.reference),
-                        t.timestamp, t.confidence, t.id,
+                        t.timestamp, t.confidence,
+                        orig_amount, orig_currency, fx_rate, t.id,
                     ),
                 )
 
@@ -742,6 +759,69 @@ def repair_missing_balance_adjustments():
                 repaired += 1
 
         return repaired
+
+
+def migrate_foreign_currency_rows():
+    """One-time: convert already-stored foreign-currency rows to INR estimates.
+
+    New foreign spends are converted on arrival (see fx.py). Rows that were
+    stored before that existed stay in their own currency bucket and move no
+    account, so convert them once and apply the missing balance adjustment.
+    Returns the number of rows converted.
+    """
+    from types import SimpleNamespace
+    from . import fx
+
+    converted_count = 0
+    with connection() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS applied_migrations (name TEXT PRIMARY KEY)")
+        if conn.execute(
+            "SELECT 1 FROM applied_migrations WHERE name='foreign_currency_to_inr'"
+        ).fetchone():
+            return 0
+        rows = conn.execute(
+            """SELECT * FROM transactions
+               WHERE status='ACTIVE'
+                 AND UPPER(TRIM(COALESCE(currency,''))) NOT IN ('', 'INR')
+                 AND orig_currency IS NULL
+               ORDER BY created_at, id"""
+        ).fetchall()
+        for row in rows:
+            converted = fx.to_inr(row["amount_minor"], row["currency"], row["timestamp"])
+            if converted is None:
+                continue
+            inr_minor, rate = converted
+            conn.execute(
+                """UPDATE transactions
+                   SET orig_amount_minor=?, orig_currency=?, fx_rate=?,
+                       amount_minor=?, currency='INR'
+                   WHERE id=?""",
+                (int(row["amount_minor"]), str(row["currency"]).strip().upper(), rate,
+                 inr_minor, row["id"]),
+            )
+            converted_count += 1
+            if conn.execute(
+                "SELECT 1 FROM balance_adjustments WHERE transaction_id=?", (row["id"],)
+            ).fetchone():
+                continue
+            if is_provisional_row(row):
+                continue
+            apply_transaction_to_account(
+                conn,
+                SimpleNamespace(
+                    id=str(row["id"]), amountMinor=inr_minor, currency="INR",
+                    type=row["type"], paymentMethod=row["payment_method"],
+                    accountType=row["account_type"], bank=row["bank"],
+                    merchantOrPayee=row["merchant_or_payee"],
+                    accountLast4=row["account_last4"], reference=row["reference"],
+                    timestamp=int(row["timestamp"]), category=row["category"],
+                    confidence=float(row["confidence"] or 0.0),
+                ),
+                now_ms(),
+                transaction_created_at=int(row["created_at"]),
+            )
+        conn.execute("INSERT INTO applied_migrations(name) VALUES('foreign_currency_to_inr')")
+    return converted_count
 
 
 def _auto_provision_bank_account(conn, t, bank, last4, now_ms):
@@ -965,6 +1045,11 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
             )
 
 def sync_evidence(e):
+    if e.amountMinor is not None and e.currency and str(e.currency).strip().upper() != "INR":
+        from . import fx
+        converted = fx.to_inr(e.amountMinor, e.currency, e.observedAt)
+        if converted is not None:
+            e = e.model_copy(update={"amountMinor": converted[0], "currency": "INR"})
     with connection() as conn:
         before=conn.execute(
             "SELECT id FROM evidence WHERE source_type=? AND source_id=?",
