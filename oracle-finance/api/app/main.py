@@ -235,6 +235,21 @@ def summary(currency:str="INR",x_sync_token:str=Header(default="")):
 def transactions(limit:int=100,x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return {"transactions":list_transactions(max(1,min(limit,1000)))}
 
+@app.get("/api/v1/transactions/{transaction_id}/fx")
+def transaction_fx(transaction_id:str,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return foreign_amount_info(transaction_id)
+
+class InrAmountRequest(BaseModel):
+    amountMinor:int
+
+@app.put("/api/v1/transactions/{transaction_id}/inr-amount")
+def transaction_inr_amount(transaction_id:str,req:InrAmountRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    result=set_foreign_inr_amount(transaction_id,req.amountMinor)
+    if result["status"]=="NOT_FOUND": raise HTTPException(status_code=404,detail=result)
+    if result["status"] in ("NOT_FOREIGN","INVALID_AMOUNT"): raise HTTPException(status_code=400,detail=result)
+    return result
+
 @app.get("/api/v1/reviews")
 def reviews(x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return {"reviews":list_review_queue()}

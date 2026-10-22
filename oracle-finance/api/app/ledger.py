@@ -134,6 +134,24 @@ def _mirror_kind(source_id):
     return "other"
 
 
+def _same_amount(first, second):
+    """Equal INR amount, or the same original foreign amount.
+
+    A foreign spend whose rupee amount the user corrected no longer equals the
+    estimate that another source converts to, but it is still the same charge.
+    """
+    if int(first["amount_minor"]) == int(second["amount_minor"]):
+        return True
+    keys_first, keys_second = first.keys(), second.keys()
+    if "orig_amount_minor" not in keys_first or "orig_amount_minor" not in keys_second:
+        return False
+    return (
+        first["orig_amount_minor"] is not None
+        and first["orig_amount_minor"] == second["orig_amount_minor"]
+        and str(first["orig_currency"] or "").upper() == str(second["orig_currency"] or "").upper()
+    )
+
+
 def _rows_are_duplicate(first, second):
     """Return True only for the same ledger-side transaction represented twice.
 
@@ -165,7 +183,7 @@ def _rows_are_duplicate(first, second):
             return False
         return first_ref == second_ref
 
-    if int(first["amount_minor"]) != int(second["amount_minor"]):
+    if not _same_amount(first, second):
         return False
     if str(first["type"]).strip().upper() != str(second["type"]).strip().upper():
         return False
@@ -577,6 +595,13 @@ def sync_transaction(t, apply_balance=True):
             """SELECT * FROM transactions WHERE id=?""",
             (t.id,)
         ).fetchone()
+        if before is not None and before["fx_exact"]:
+            # The user fixed the exact rupee charge for this foreign spend;
+            # a later re-sync of the same row must not revert it to an estimate.
+            t = t.model_copy(update={"amountMinor": int(before["amount_minor"]), "currency": "INR"})
+            orig_amount = before["orig_amount_minor"]
+            orig_currency = before["orig_currency"]
+            fx_rate = before["fx_rate"]
         created_at=now_ms()
         provisional = is_provisional_unresolved_transaction(t)
         conn.execute("""INSERT OR IGNORE INTO transactions
@@ -1284,6 +1309,78 @@ def void_transaction(transaction_id):
             "transactionId":transaction_id,
             "reversedAdjustment": bool(adjustment)
         }
+
+def _resolve_canonical_row(conn, transaction_id):
+    row = conn.execute("SELECT * FROM transactions WHERE id=?", (transaction_id,)).fetchone()
+    hops = 0
+    while row is not None and row["duplicate_of"] and hops < 5:
+        row = conn.execute("SELECT * FROM transactions WHERE id=?", (row["duplicate_of"],)).fetchone()
+        hops += 1
+    return row
+
+
+def foreign_amount_info(transaction_id):
+    """Foreign-spend details for a row, or {"foreign": False} for rupee rows."""
+    with connection() as conn:
+        row = _resolve_canonical_row(conn, transaction_id)
+        if row is None or row["status"] != "ACTIVE" or not row["orig_currency"]:
+            return {"foreign": False, "transactionId": transaction_id}
+        return {
+            "foreign": True,
+            "transactionId": row["id"],
+            "inrMinor": int(row["amount_minor"]),
+            "origAmountMinor": int(row["orig_amount_minor"]),
+            "origCurrency": row["orig_currency"],
+            "fxRate": row["fx_rate"],
+            "exact": bool(row["fx_exact"]),
+        }
+
+
+def set_foreign_inr_amount(transaction_id, inr_minor):
+    """Set the exact rupee charge of a foreign-currency spend.
+
+    Only rows that were converted from another currency can be corrected. The
+    account balance moves by the difference and Splitwise (derived from the
+    ledger) follows automatically.
+    """
+    inr_minor = int(inr_minor)
+    if inr_minor <= 0:
+        return {"status": "INVALID_AMOUNT", "transactionId": transaction_id}
+    with connection() as conn:
+        row = _resolve_canonical_row(conn, transaction_id)
+        if row is None or row["status"] != "ACTIVE":
+            return {"status": "NOT_FOUND", "transactionId": transaction_id}
+        if not row["orig_currency"]:
+            return {"status": "NOT_FOREIGN", "transactionId": transaction_id}
+
+        old_minor = int(row["amount_minor"])
+        adjustment = conn.execute(
+            "SELECT account_id,delta_minor FROM balance_adjustments WHERE transaction_id=?",
+            (row["id"],),
+        ).fetchone()
+        if adjustment and old_minor:
+            old_delta = int(adjustment["delta_minor"])
+            new_delta = (1 if old_delta >= 0 else -1) * inr_minor
+            conn.execute(
+                "UPDATE accounts SET balance_minor=balance_minor+?, updated_at=? WHERE id=?",
+                (new_delta - old_delta, now_ms(), adjustment["account_id"]),
+            )
+            conn.execute(
+                "UPDATE balance_adjustments SET delta_minor=? WHERE transaction_id=?",
+                (new_delta, row["id"]),
+            )
+        orig = int(row["orig_amount_minor"])
+        conn.execute(
+            "UPDATE transactions SET amount_minor=?, fx_rate=?, fx_exact=1 WHERE id=?",
+            (inr_minor, (inr_minor / orig) if orig else row["fx_rate"], row["id"]),
+        )
+        return {
+            "status": "UPDATED",
+            "transactionId": row["id"],
+            "inrMinor": inr_minor,
+            "previousInrMinor": old_minor,
+        }
+
 
 def balances():
     with connection() as conn:
@@ -2007,7 +2104,7 @@ def reconcile_duplicate_transaction(transaction_id):
                 candidate_ref = normalize_reference(c["reference"])
                 if candidate_ref and candidate_ref != tx_ref:
                     continue
-                if tx["amount_minor"] != c["amount_minor"] or tx["currency"] != c["currency"]:
+                if tx["currency"] != c["currency"] or not _same_amount(tx, c):
                     continue
                 if tx["type"] != c["type"]:
                     continue
@@ -2077,19 +2174,19 @@ def reconcile_duplicate_transaction(transaction_id):
                 """SELECT * FROM transactions
                    WHERE id<>? AND duplicate_of IS NULL
                      AND id NOT LIKE 'gmail:%' AND status='ACTIVE'
-                     AND amount_minor=? AND currency=? AND type=?
+                     AND (amount_minor=? OR (orig_amount_minor IS NOT NULL AND orig_amount_minor=? AND orig_currency IS ?)) AND currency=? AND type=?
                      AND ABS(timestamp-?)<=86400000
                    ORDER BY ABS(timestamp-?) LIMIT 5""",
-                (tx["id"],tx["amount_minor"],tx["currency"],tx["type"],tx["timestamp"],tx["timestamp"])
+                (tx["id"],tx["amount_minor"],tx["orig_amount_minor"],tx["orig_currency"],tx["currency"],tx["type"],tx["timestamp"],tx["timestamp"])
             ).fetchall()
         else:
             candidates=conn.execute(
                 """SELECT * FROM transactions WHERE id<>? AND duplicate_of IS NULL
                    AND id NOT LIKE 'gmail:%' AND status='ACTIVE'
-                   AND amount_minor=? AND currency=? AND type=?
+                   AND (amount_minor=? OR (orig_amount_minor IS NOT NULL AND orig_amount_minor=? AND orig_currency IS ?)) AND currency=? AND type=?
                    AND ABS(timestamp-?)<=86400000
                    ORDER BY ABS(timestamp-?) LIMIT 5""",
-                (tx["id"],tx["amount_minor"],tx["currency"],tx["type"],tx["timestamp"],tx["timestamp"])
+                (tx["id"],tx["amount_minor"],tx["orig_amount_minor"],tx["orig_currency"],tx["currency"],tx["type"],tx["timestamp"],tx["timestamp"])
             ).fetchall()
 
         strong=[]

@@ -2022,3 +2022,64 @@ def test_migration_converts_existing_usd_rows_once(monkeypatch):
     assert abs(row["amount_minor"] - expected) <= 1
     assert abs(card - expected) <= 1
     assert adj == 1
+
+
+def test_foreign_row_inr_correction_moves_card_and_splitwise(monkeypatch):
+    from app import fx
+    from app.ledger import (
+        sync_transaction, set_foreign_inr_amount, foreign_amount_info,
+        get_manual_splitwise_total,
+    )
+
+    monkeypatch.setattr(fx, "_fetch_rate", lambda currency, rate_date: 88.0)
+    set_balance("airtel-card-9206", "Airtel Axis", "INR", "CREDIT_CARD", "AXIS", "9206", 0)
+    sync_transaction(_usd_tx("usd-fix"))
+    estimate = foreign_amount_info("usd-fix")
+    assert estimate["foreign"] and not estimate["exact"] and estimate["origCurrency"] == "USD"
+    splitwise_before = get_manual_splitwise_total("INR") or 0
+
+    result = set_foreign_inr_amount("usd-fix", 2_500_000)  # exact charge ₹25,000.00
+    assert result["status"] == "UPDATED"
+
+    with connection() as conn:
+        card = conn.execute("SELECT balance_minor FROM accounts WHERE id='airtel-card-9206'").fetchone()["balance_minor"]
+        adj = conn.execute("SELECT delta_minor FROM balance_adjustments WHERE transaction_id='usd-fix'").fetchone()["delta_minor"]
+    assert card == 2_500_000 and adj == 2_500_000
+    splitwise_after = get_manual_splitwise_total("INR") or 0
+    assert splitwise_after - splitwise_before == 2_500_000 - estimate["inrMinor"]
+    assert foreign_amount_info("usd-fix")["exact"] is True
+
+    # Re-syncing the same row (e.g. the phone resending it) must keep the exact amount.
+    sync_transaction(_usd_tx("usd-fix"))
+    assert foreign_amount_info("usd-fix")["inrMinor"] == 2_500_000
+    with connection() as conn:
+        card = conn.execute("SELECT balance_minor FROM accounts WHERE id='airtel-card-9206'").fetchone()["balance_minor"]
+    assert card == 2_500_000
+
+
+def test_inr_correction_refuses_rupee_rows_and_bad_amounts():
+    from app.ledger import sync_transaction, set_foreign_inr_amount, foreign_amount_info
+
+    inr = _usd_tx("inr-row")
+    inr = inr.model_copy({"currency": "INR", "amountMinor": 5000})
+    sync_transaction(inr)
+    assert foreign_amount_info("inr-row") == {"foreign": False, "transactionId": "inr-row"}
+    assert set_foreign_inr_amount("inr-row", 6000)["status"] == "NOT_FOREIGN"
+    assert set_foreign_inr_amount("missing", 6000)["status"] == "NOT_FOUND"
+    assert set_foreign_inr_amount("inr-row", 0)["status"] == "INVALID_AMOUNT"
+
+
+def test_corrected_foreign_row_still_matches_same_spend_from_another_source(monkeypatch):
+    from app import fx
+    from app.ledger import _rows_are_duplicate, sync_transaction, set_foreign_inr_amount
+
+    monkeypatch.setattr(fx, "_fetch_rate", lambda currency, rate_date: 88.0)
+    set_balance("airtel-card-9206", "Airtel Axis", "INR", "CREDIT_CARD", "AXIS", "9206", 0)
+    sync_transaction(_usd_tx("src-a"))
+    sync_transaction(_usd_tx("gmail:src-b", ts=1792300060000))
+    set_foreign_inr_amount("src-a", 2_500_000)
+    with connection() as conn:
+        a = conn.execute("SELECT * FROM transactions WHERE id='src-a'").fetchone()
+        b = conn.execute("SELECT * FROM transactions WHERE id='gmail:src-b'").fetchone()
+    assert a["amount_minor"] != b["amount_minor"]
+    assert _rows_are_duplicate(a, b)
