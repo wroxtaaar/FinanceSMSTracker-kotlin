@@ -261,7 +261,16 @@ def _rows_are_duplicate(first, second):
             # Accept a notification/SMS pair only inside a short window.
             # repair_duplicate_transactions additionally requires exactly one
             # candidate, so two real same-amount purchases are never merged.
-            return abs(int(first["timestamp"]) - int(second["timestamp"])) <= 15 * 60 * 1000
+            # A server-read e-mail can be stamped well away from the SMS, and
+            # reconcile_duplicate_transaction already allows 24h when the
+            # e-mail arrives second. Allow the same when it arrives first, or
+            # the pair is double counted depending only on arrival order.
+            window = (
+                24 * 60 * 60 * 1000
+                if first_source.startswith("gmail:") or second_source.startswith("gmail:")
+                else 15 * 60 * 1000
+            )
+            return abs(int(first["timestamp"]) - int(second["timestamp"])) <= window
 
     if first_source.startswith("gmail:") or second_source.startswith("gmail:"):
         max_time_diff = 24 * 60 * 60 * 1000

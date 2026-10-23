@@ -2101,3 +2101,50 @@ def test_foreign_amount_map_includes_duplicates_and_skips_rupee_rows(monkeypatch
     assert "map-inr" not in result
     assert result["map-a"]["inrMinor"] == 2_500_000 and result["map-a"]["exact"] is True
     assert result["map-dup"] == result["map-a"]
+
+
+def test_card_spend_email_first_then_sms_is_not_double_counted():
+    from app.ledger import (
+        get_manual_splitwise_total,
+        reconcile_duplicate_transaction,
+        repair_duplicate_transactions,
+        sync_transaction,
+    )
+
+    class T:
+        def __init__(self, id, merchant, timestamp):
+            self.id = id
+            self.amountMinor = 5000
+            self.currency = "INR"
+            self.type = "DEBIT"
+            self.paymentMethod = "CARD"
+            self.accountType = "CREDIT_CARD"
+            self.bank = "AXIS"
+            self.merchantOrPayee = merchant
+            self.accountLast4 = "9206"
+            self.reference = None
+            self.timestamp = timestamp
+            self.category = "GROCERIES"
+            self.confidence = 0.95
+
+    set_balance("card-order", "Axis 9206", "INR", "CREDIT_CARD", "AXIS", "9206", 0)
+    before = get_manual_splitwise_total("INR") or 0
+
+    # The e-mail row lands first; the SMS (with a merchant) arrives 30 minutes
+    # away from the e-mail's timestamp. Arrival order must not change the result.
+    email = T("gmail:order-1", None, 1_800_000_000_000 + 30 * 60 * 1000)
+    sync_transaction(email)
+    reconcile_duplicate_transaction(email.id)
+    repair_duplicate_transactions()
+
+    sms = T("sms-order-1", "Mr ISRAR", 1_800_000_000_000)
+    sync_transaction(sms)
+    reconcile_duplicate_transaction(sms.id)
+    repair_duplicate_transactions()
+
+    with connection() as conn:
+        card = conn.execute(
+            "SELECT balance_minor FROM accounts WHERE id='card-order'"
+        ).fetchone()["balance_minor"]
+    assert card == 5000
+    assert (get_manual_splitwise_total("INR") or 0) - before == 5000
