@@ -187,6 +187,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
                     )
                 )
             }
+            logNotification(title, payloadText, "Card statement/bill notification (not a transaction)")
             NotificationAccessHelper.recordGmailNotificationParsed(
                 applicationContext,
                 parsed = true,
@@ -214,6 +215,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 parsed = false,
                 error = "No transaction amount/direction found"
             )
+            logNotification(title, payloadText, "Ignored: no transaction amount/direction found")
             return
         }
 
@@ -378,6 +380,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 parsed = false,
                 error = "No transaction amount/direction found"
             )
+            logNotification(title, payloadText, "Ignored: no transaction amount/direction found")
             return
         }
 
@@ -405,6 +408,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 error = "Parser returned null"
             )
             Log.d(TAG, "Gmail notification details were not parseable; IMAP sync will clarify it")
+            logNotification(title, text, "Ignored: parser could not read it")
             return
         }
 
@@ -463,6 +467,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
             val evidenceId = repository.insertSourceEvidence(evidence)
             if (evidenceId == -1L) {
                 Log.d(TAG, "Duplicate Gmail notification evidence skipped")
+                logNotification(title, text, "Skipped: this notification was already handled")
                 dismissProcessedNotification(sbn)
                 return
             }
@@ -486,6 +491,10 @@ class GmailNotificationListenerService : NotificationListenerService() {
             var persistedEvidence = repository.getSourceEvidenceById(evidenceId)
             if (persistedEvidence?.status == EvidenceStatus.MATCHED) {
                 Log.d(TAG, "Gmail notification matched existing transaction " + persistedEvidence.transactionId)
+                logNotification(
+                    title, text,
+                    "Matched an existing transaction (row ${persistedEvidence.transactionId}); no new row"
+                )
                 dismissProcessedNotification(sbn)
                 return
             }
@@ -516,6 +525,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
             val rowId = repository.insertTransaction(transaction)
             if (rowId == -1L) {
                 Log.d(TAG, "Notification transaction already exists for content hash")
+                logNotification(title, text, "Skipped: a row for this notification already exists")
                 dismissProcessedNotification(sbn)
                 return
             }
@@ -533,6 +543,12 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 )
             }
 
+            logNotification(
+                title, text,
+                "Saved as ${parsed.transactionType} ${parsed.accountType} ${parsed.bank ?: "?"} " +
+                    "${parsed.accountLastFour ?: "?"} ${parsed.currency} " +
+                    "%.2f (row $rowId, ${parsed.merchantName ?: "no merchant"})".format(parsed.amountPaise / 100.0)
+            )
             Log.d(
                 TAG,
                 "Immediate Gmail notification transaction saved: id=" + rowId +
@@ -545,6 +561,16 @@ class GmailNotificationListenerService : NotificationListenerService() {
         } finally {
             dbHelper.close()
         }
+    }
+
+    /** One line in the Logs screen: what was done with this Gmail notification. */
+    private fun logNotification(title: String?, body: String?, outcome: String) {
+        com.example.financesmstracker.receiver.SmsHandlingLog.record(
+            applicationContext,
+            "Gmail notification: " + (title ?: "-"),
+            body ?: "",
+            outcome
+        )
     }
 
     private fun triggerBackgroundGmailSync() {
