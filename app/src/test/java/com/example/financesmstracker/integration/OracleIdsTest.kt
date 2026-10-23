@@ -85,4 +85,21 @@ class OracleIdsTest {
         )
         assertTrue(legacy.contains("\"id\":\"77\""))
     }
+
+    @Test
+    fun mirroredGmailRowKeepsItsServerIdWhenResynced() {
+        val tx = Transaction(
+            id = 77L, amountPaise = 1000L, transactionType = TransactionType.DEBIT,
+            paymentMethod = PaymentMethod.CARD, accountType = AccountType.CREDIT_CARD,
+            bank = "HSBC", merchantName = "M", payeeId = null, accountLastFour = "1234",
+            refNumber = null, timestamp = 1L, smsHash = "oracle:gmail:gmail:abc123",
+            category = "FOOD", parserConfidence = 0.9f
+        )
+        val payload = FinanceSyncPayload.build(
+            listOf(FinanceSyncMapper.toSyncTransaction(tx, scheme)),
+            emptyList()
+        )
+        assertTrue(payload.contains("\"id\":\"gmail:abc123\""))
+        assertTrue(!payload.contains("a1b2c3-77"))
+    }
 }

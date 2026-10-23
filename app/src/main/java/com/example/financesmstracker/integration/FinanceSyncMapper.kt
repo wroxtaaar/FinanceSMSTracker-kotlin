@@ -10,7 +10,11 @@ object FinanceSyncMapper {
     ): SyncTransaction =
         SyncTransaction(
             localTransactionId = transaction.id,
-            serverId = scheme.transactionId(transaction.id),
+            // A row mirrored from the server's Gmail ledger is known to the server by
+            // its own id. Sending the phone's row number instead made the server
+            // create a second row, or overwrite an unrelated one, on any re-sync
+            // such as a category edit.
+            serverId = FinanceSyncBridge.oracleVoidId(transaction.id, transaction.smsHash, scheme),
             amountMinor = transaction.amountPaise,
             currency = transaction.currency,
             transactionType = transaction.transactionType,
