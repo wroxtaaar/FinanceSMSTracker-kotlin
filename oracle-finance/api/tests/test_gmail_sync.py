@@ -1828,3 +1828,29 @@ def test_ingest_records_a_log_line_per_message():
     assert len(log) == 1
     assert log[0]["subject"] == "HDFC Bank Transaction Alert"
     assert "Read as DEBIT 5.00 INR HDFC" in log[0]["outcome"]
+
+
+def test_axis_credit_card_spend_email_is_debit():
+    message = _message(
+        "axis-card-spend",
+        "Dear Abdul Wasiq, Here's the summary of your Axis Bank Credit Card Transaction: "
+        "Transaction Amount: INR 100 spent on credit card no. XX9206. "
+        "Available Limit: INR 129893.14.",
+        subject="Axis Bank Alerts",
+        internal_date="1790951871000",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Axis Bank Alerts"},
+        {"name": "From", "value": "Axis Bank Alerts <alerts@axis.bank.in>"},
+    ]
+
+    parsed = parse_bank_email(message)
+
+    assert parsed is not None
+    transaction, evidence = parsed
+    assert transaction.amountMinor == 10000
+    assert transaction.type == "DEBIT"
+    assert transaction.bank == "AXIS"
+    assert transaction.accountType == "CREDIT_CARD"
+    assert transaction.accountLast4 == "9206"
+    assert evidence.direction == "DEBIT"
