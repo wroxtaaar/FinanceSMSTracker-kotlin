@@ -322,11 +322,23 @@ def sync_card_bill(bill):
     }.get(source_type, 0)
 
     with connection() as conn:
-        inserted = conn.execute(
-            """INSERT OR IGNORE INTO card_bill_evidence
+        # Re-reading the same source (same message/attachment) with a corrected
+        # parser must replace its earlier amount; keeping the first value made
+        # a mis-parsed bill permanent. A changed amount is re-applied.
+        conn.execute(
+            """INSERT INTO card_bill_evidence
                (id,source_type,source_key,observed_at,amount_minor,currency,bank,
                 account_last4,account_last2,confidence,applied,created_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,0,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,0,?)
+               ON CONFLICT(source_type,source_key) DO UPDATE SET
+                 observed_at=excluded.observed_at,
+                 amount_minor=excluded.amount_minor,
+                 bank=excluded.bank,
+                 account_last4=excluded.account_last4,
+                 account_last2=excluded.account_last2,
+                 confidence=excluded.confidence,
+                 applied=CASE WHEN card_bill_evidence.amount_minor IS excluded.amount_minor
+                              THEN card_bill_evidence.applied ELSE 0 END""",
             (
                 f"card-bill:{source_type}:{source_key}",
                 source_type,
@@ -340,7 +352,7 @@ def sync_card_bill(bill):
                 confidence,
                 now_ms(),
             ),
-        ).rowcount
+        )
 
         # Find the configured card. Prefer a full last-4 match; fall back to
         # a unique visible last-two suffix from statement notifications.
@@ -386,10 +398,11 @@ def sync_card_bill(bill):
 
         # Compare the strongest already-applied evidence for this exact card.
         previous = conn.execute(
-            """SELECT e.source_type,e.amount_minor
+            """SELECT e.source_type,e.amount_minor,e.observed_at
                FROM card_bill_evidence e
                JOIN accounts a ON a.id=?
                WHERE e.applied=1
+                 AND NOT (e.source_type=? AND e.source_key=?)
                  AND e.currency=?
                  AND UPPER(TRIM(COALESCE(e.bank,'')))=?
                  AND (
@@ -398,8 +411,14 @@ def sync_card_bill(bill):
                  )
                ORDER BY e.observed_at DESC
                LIMIT 1""",
-            (account["id"], bill.get("currency") or "INR", bank or ""),
+            (account["id"], source_type, source_key, bill.get("currency") or "INR", bank or ""),
         ).fetchone()
+
+        # A statement from a later billing cycle simply replaces the previous
+        # one: the totals differ every month and that is not a conflict. The
+        # priority/conflict rules only compare evidence about the same statement.
+        if previous and int(previous["observed_at"]) < observed_at - 24 * 60 * 60 * 1000:
+            previous = None
 
         if previous:
             previous_priority = {

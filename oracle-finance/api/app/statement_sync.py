@@ -969,6 +969,57 @@ def _find_existing(conn, row, metadata):
     return None
 
 
+def _parse_statement_pdf(bank, pdf_bytes, key):
+    if bank == "HDFC":
+        return parse_hdfc_statement(pdf_bytes, key)
+    if bank == "ICICI":
+        return parse_icici_statement(pdf_bytes, key)
+    if bank == "SBI":
+        return parse_sbi_statement(pdf_bytes, key)
+    if bank == "INDUSIND":
+        return parse_indusind_statement(pdf_bytes, key)
+    if bank == "AXIS":
+        return parse_axis_statement(pdf_bytes, key)
+    raise ValueError(f"statement parser for {bank} is not implemented")
+
+
+def _refresh_card_bill_from_parsed_pdf(bank, pdf_bytes, attachment_id, message):
+    """Re-derive the card bill from a PDF whose rows were already imported.
+
+    An attachment is imported once and then skipped, so a bill that was read
+    wrongly (or whose record was cleared) could never be corrected. This reads
+    only the printed Total Amount Due; the statement rows are left alone.
+    """
+    with connection() as conn:
+        if conn.execute(
+            "SELECT 1 FROM card_bill_evidence WHERE source_type='GMAIL_STATEMENT_PDF' AND source_key=?",
+            (attachment_id,),
+        ).fetchone():
+            return
+    for key in _statement_keys(bank):
+        try:
+            metadata, _rows = _parse_statement_pdf(bank, pdf_bytes, key)
+            if metadata.get("account_type") != "CREDIT_CARD":
+                return
+            amount = _extract_statement_bill_amount(_pdf_text(pdf_bytes, key))
+            if amount is None:
+                return
+            sync_card_bill({
+                "sourceType": "GMAIL_STATEMENT_PDF",
+                "sourceKey": attachment_id,
+                "timestamp": int(message.get("internalDate", "0")),
+                "amountMinor": amount,
+                "currency": metadata.get("currency", "INR"),
+                "bank": metadata.get("bank"),
+                "accountLast4": metadata.get("account_last4"),
+                "accountLast2": metadata.get("account_last2"),
+                "confidence": 1.0,
+            })
+            return
+        except Exception:
+            continue
+
+
 def process_statement_attachments(service, message):
     headers = _headers(message)
     subject = headers.get("subject", "")
@@ -1006,6 +1057,7 @@ def process_statement_attachments(service, message):
                     (attachment_id,),
                 ).fetchone()
             if existing and existing["status"] == "PARSED":
+                _refresh_card_bill_from_parsed_pdf(bank, pdf_bytes, attachment_id, message)
                 continue
 
             keys = _statement_keys(bank)
@@ -1015,18 +1067,7 @@ def process_statement_attachments(service, message):
             parse_error = None
             for key in keys:
                 try:
-                    if bank == "HDFC":
-                        metadata, rows = parse_hdfc_statement(pdf_bytes, key)
-                    elif bank == "ICICI":
-                        metadata, rows = parse_icici_statement(pdf_bytes, key)
-                    elif bank == "SBI":
-                        metadata, rows = parse_sbi_statement(pdf_bytes, key)
-                    elif bank == "INDUSIND":
-                        metadata, rows = parse_indusind_statement(pdf_bytes, key)
-                    elif bank == "AXIS":
-                        metadata, rows = parse_axis_statement(pdf_bytes, key)
-                    else:
-                        raise ValueError(f"statement parser for {bank} is not implemented")
+                    metadata, rows = _parse_statement_pdf(bank, pdf_bytes, key)
                     parse_error = None
                     break
                 except Exception as exc:

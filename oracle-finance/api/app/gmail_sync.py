@@ -99,6 +99,12 @@ def _retry_pending_statement_messages(service, stats):
             continue
 
         retried += 1
+        # The e-mail body carries the bill total too. Read it first so the bill
+        # is recorded even when the PDF cannot be opened or parsed.
+        bill_from_email = parse_card_bill_email(message)
+        if bill_from_email:
+            sync_card_bill(bill_from_email)
+            stats["cardBillDetected"] = stats.get("cardBillDetected", 0) + 1
         statement_stats = process_statement_attachments(service, message)
         stats["statementAttachmentsScanned"] += statement_stats["attachmentsScanned"]
         stats["statementAttachmentsParsed"] += statement_stats["attachmentsParsed"]

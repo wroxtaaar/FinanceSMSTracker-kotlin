@@ -395,3 +395,49 @@ def test_icici_statement_bill_amount_reads_the_backtick_rupee_sign():
         "`3,80,000.00 `3,77,912.00 `38,000.00\n"
     )
     assert _extract_statement_bill_amount(text) == 208800
+
+
+def test_pending_statement_retry_reads_the_bill_from_the_email_body_when_the_pdf_fails():
+    import app.gmail_sync as gmail_sync
+    from app.ledger import set_balance
+
+    set_balance("retry-card", "ICICI Credit Card", "INR", "CREDIT_CARD", "ICICI", "1012", 0)
+    html = (
+        '<div style="color:#fff"><span style="x">ICICI Bank Credit Card</span><span style="x">XX1012</span></div>'
+        '<p style="x">Total Amount Due:</p><p style="x"><b style="x">&#8377;2,088.00</b></p>'
+    )
+    message = _message(
+        "retry-1", html,
+        subject="Amazon Pay ICICI Bank Credit Card Statement for the period September 29, 2026 to October 28, 2026",
+        internal_date="1900000000000",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": message["payload"]["headers"][0]["value"]},
+        {"name": "From", "value": "ICICI Bank <credit_cards@icici.bank.in>"},
+    ]
+    with connection() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO gmail_messages(id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)"
+            " VALUES('retry-1','t',1900000000000,'credit_cards@icici.bank.in',?,'retry-fp','PENDING',1900000000000)",
+            (message["payload"]["headers"][0]["value"],),
+        )
+    original = gmail_sync.process_statement_attachments
+    gmail_sync.process_statement_attachments = lambda service, m: {
+        "attachmentsScanned": 1, "attachmentsParsed": 0, "transactionsAdded": 0,
+        "transactionsMatched": 0, "errors": ["ICICI statement password is not configured"],
+    }
+    try:
+        stats = {
+            "statementAttachmentsScanned": 0, "statementAttachmentsParsed": 0,
+            "statementTransactionsAdded": 0, "statementTransactionsMatched": 0, "statementErrors": [],
+        }
+        gmail_sync._retry_pending_statement_messages(FakeService([message]), stats)
+    finally:
+        gmail_sync.process_statement_attachments = original
+
+    with connection() as conn:
+        bill = conn.execute(
+            "SELECT bill_balance_minor FROM accounts WHERE id='retry-card'"
+        ).fetchone()[0]
+    assert bill == 208800
+    assert stats["statementErrors"] == ["ICICI statement password is not configured"]

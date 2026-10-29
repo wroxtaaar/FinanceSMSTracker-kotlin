@@ -55,3 +55,35 @@ def migrate_splitwise_other_optout():
             )
         conn.execute("INSERT INTO applied_migrations(name) VALUES('splitwise_other_optout')")
         return True
+
+
+def migrate_card_bill_reread(window_days=45, now_ms_value=None):
+    """One-time: re-derive recent card bills with the corrected parsers.
+
+    Earlier parsers read some statements wrongly (an ICICI bill came out as
+    1.00). A parsed attachment or e-mail is never revisited, and a wrong bill
+    record could not be replaced. Clear the recent bill records and queue the
+    recent statement e-mails to be read again; the Gmail scan then rebuilds them.
+    """
+    import time
+    now = int(now_ms_value if now_ms_value is not None else time.time() * 1000)
+    cutoff = now - window_days * 24 * 60 * 60 * 1000
+    with connection() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS applied_migrations (name TEXT PRIMARY KEY)")
+        if conn.execute(
+            "SELECT 1 FROM applied_migrations WHERE name='card_bill_reread'"
+        ).fetchone():
+            return 0
+        conn.execute(
+            """DELETE FROM card_bill_evidence
+               WHERE source_type IN ('GMAIL','GMAIL_STATEMENT_PDF') AND observed_at>=?""",
+            (cutoff,),
+        )
+        queued = conn.execute(
+            """UPDATE gmail_messages SET status='PENDING'
+               WHERE status='PARSED' AND internal_date>=?
+                 AND LOWER(COALESCE(subject,'')) LIKE '%statement%'""",
+            (cutoff,),
+        ).rowcount
+        conn.execute("INSERT INTO applied_migrations(name) VALUES('card_bill_reread')")
+        return queued
