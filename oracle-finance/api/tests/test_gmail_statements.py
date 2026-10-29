@@ -381,3 +381,17 @@ def test_credit_card_statement_attachment_updates_bill_without_active_spend(monk
     assert statement_rows == 0
     assert attachment["status"] == "PARSED"
     assert attachment["transaction_count"] == 0
+
+
+def test_icici_statement_bill_amount_reads_the_backtick_rupee_sign():
+    from app.statement_sync import _extract_statement_bill_amount
+
+    # Text as extracted from a real ICICI statement PDF: the font maps the
+    # rupee sign to a backtick, and the summary row lists the other figures.
+    text = (
+        "STATEMENT SUMMARY\nTotal Amount due\n`2,088.00 = + + -\n"
+        "Minimum Amount due CREDIT SUMMARY\n`110.00\n"
+        "Credit Limit (Including cash) Available Credit (Including cash) Cash Limit\n"
+        "`3,80,000.00 `3,77,912.00 `38,000.00\n"
+    )
+    assert _extract_statement_bill_amount(text) == 208800
