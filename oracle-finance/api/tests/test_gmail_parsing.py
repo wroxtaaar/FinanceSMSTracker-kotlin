@@ -533,3 +533,39 @@ def test_axis_credit_card_spend_email_is_debit():
     assert transaction.accountType == "CREDIT_CARD"
     assert transaction.accountLast4 == "9206"
     assert evidence.direction == "DEBIT"
+
+
+def test_icici_statement_email_with_styled_html_and_masked_card_is_a_card_bill():
+    from app.gmail_parsing import parse_card_bill_email
+
+    style = 'style="font-family:Roboto,Arial;font-size:16px;color:#ffffff;padding:8px 0;margin:0;line-height:24px"'
+    html = (
+        "<style>.a{color:red}</style>"
+        f"<div {style}><span {style}>ICICI Bank Credit Card</span><span {style}>XX1012</span></div>"
+        f"<p {style}>Minimum Amount Due: &#8377;110.00</p>"
+        f"<p {style}>Total Amount Due:</p><p {style}><b {style}>&#8377;2,088.00</b></p>"
+    )
+    message = _message(
+        "icici-bill-1",
+        html,
+        subject="Amazon Pay ICICI Bank Credit Card Statement for the period September 29, 2026 to October 28, 2026",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": message["payload"]["headers"][0]["value"]},
+        {"name": "From", "value": "ICICI Bank <credit_cards@icici.bank.in>"},
+    ]
+
+    bill = parse_card_bill_email(message)
+
+    assert bill is not None
+    assert bill["amountMinor"] == 208800  # the total, not the 110.00 minimum
+    assert bill["bank"] == "ICICI"
+    assert bill["accountLast4"] == "1012"
+
+
+def test_statement_email_without_a_card_number_is_not_guessed():
+    from app.gmail_parsing import parse_card_bill_email
+
+    message = _message("no-card", "Your statement is ready. Total Amount Due: Rs. 2,088.00",
+                       subject="Your credit card statement")
+    assert parse_card_bill_email(message) is None

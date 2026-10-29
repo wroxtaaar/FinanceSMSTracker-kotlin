@@ -337,7 +337,10 @@ def parse_card_bill_email(message):
     headers=_headers(payload)
     subject=headers.get("subject","")
     sender=_email_sender(headers)
-    text=_decode(payload)
+    # Bank HTML puts tags and inline styles between a label and its value
+    # ("Total Amount Due:" ... "<b style=...>₹2,088.00"), so read the visible
+    # text, not the raw markup.
+    text=_plain_text(_decode(payload))
     combined=f"{subject}\n{text}"
     lower=combined.lower()
 
@@ -370,6 +373,14 @@ def parse_card_bill_email(message):
         card_match=re.search(
             r"(?i)\bending\s+(?:X{1,8}|\*{1,8})?\s*(\d{2,4})\b",
             subject,
+        )
+    if not card_match:
+        # "ICICI Bank Credit Card  XX1012": the card is only identified by a
+        # masked number straight after the words "Credit Card". The mask is
+        # required so ordinary sentences do not match.
+        card_match=re.search(
+            r"(?i)\bcredit\s+card\s*(?:no\.?|number)?\s*[:\-]?\s*(?:X{1,8}|\*{1,8}|[•·]{1,8})\s*(\d{2,4})\b",
+            combined,
         )
     if not card_match:
         return None
