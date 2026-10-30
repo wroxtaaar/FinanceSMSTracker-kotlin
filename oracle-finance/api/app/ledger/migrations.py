@@ -87,3 +87,31 @@ def migrate_card_bill_reread(window_days=45, now_ms_value=None):
         ).rowcount
         conn.execute("INSERT INTO applied_migrations(name) VALUES('card_bill_reread')")
         return queued
+
+
+def migrate_splitwise_salary_optout():
+    """One-time: keep the Splitwise value steady when SALARY credits became opt-out.
+
+    A salary credit used to lower Splitwise like any other credit. Treating it
+    as income would silently add back every salary already recorded. Shift the
+    baseline by the difference so the shown value is unchanged; only salary
+    received from now on stays out of it.
+    """
+    with connection() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS applied_migrations (name TEXT PRIMARY KEY)")
+        if conn.execute(
+            "SELECT 1 FROM applied_migrations WHERE name='splitwise_salary_optout'"
+        ).fetchone():
+            return False
+        for row in conn.execute(
+            """SELECT currency,baseline_ledger_minor FROM manual_splitwise_total
+               WHERE baseline_amount_minor IS NOT NULL AND baseline_ledger_minor IS NOT NULL"""
+        ).fetchall():
+            cur = row["currency"]
+            shift = _ledger_splitwise_total(conn, cur) - _ledger_splitwise_total(conn, cur, honor_salary=False)
+            conn.execute(
+                "UPDATE manual_splitwise_total SET baseline_ledger_minor=? WHERE currency=?",
+                (int(row["baseline_ledger_minor"]) + shift, cur),
+            )
+        conn.execute("INSERT INTO applied_migrations(name) VALUES('splitwise_salary_optout')")
+        return True

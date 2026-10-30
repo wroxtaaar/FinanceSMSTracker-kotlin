@@ -32,6 +32,7 @@ repair_duplicate_transactions()
 match_internal_transfers()
 migrate_foreign_currency_rows()
 migrate_splitwise_other_optout()
+migrate_splitwise_salary_optout()
 migrate_gmail_default_category()
 migrate_card_bill_reread()
 # Splitwise is a materialized view of the canonical bank/card ledger.

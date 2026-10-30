@@ -96,6 +96,28 @@ object MerchantParser {
             }
         }
 
+        // 3c. HDFC deposit layout: "deposited in HDFC Bank A/c XX9591 on 30-OCT-26
+        // for FT-A2AINT01-2061157915 - - XXXXXXXXXX2057 - WBS SALARY ACCOUNT.Avl bal ..."
+        // The payer/narration is the last readable segment of the "for ..." text.
+        if (merchant == null) {
+            val depositMatcher = Pattern.compile(
+                "deposited\\s+in\\s+.+?\\s+for\\s+(.+?)\\.?\\s*Avl\\s+bal",
+                Pattern.CASE_INSENSITIVE or Pattern.DOTALL
+            ).matcher(messageBody)
+            if (depositMatcher.find()) {
+                val narration = depositMatcher.group(1) ?: ""
+                val name = cleanMerchant(
+                    narration.split(" - ").map { it.trim() }.lastOrNull { it.isNotBlank() }
+                )
+                // Skip references and masked account numbers; keep only a name.
+                val looksLikeName = name.contains(' ') && name.any { it.isLetter() } &&
+                    !Regex("^[xX*0-9\\s-]+$").matches(name)
+                if (looksLikeName && isValidMerchant(name)) {
+                    merchant = name
+                }
+            }
+        }
+
         // 4. Merchant name after "to", "paid to", "sent to", "towards", "at"
         if (merchant == null) {
             val merchantMatcher = Pattern.compile("(?:to|paid\\s+to|sent\\s+to|towards|at)\\s+([a-zA-Z0-9\\s._-]+?)(?:\\s+(?:Ref\\b|UPI\\b|A/C\\b|on\\b|at\\b|via\\b|IMPS\\b|NEFT\\b|card\\b|ending\\b|\\*|\\d{2}-)|\\s*[\\r\\n]|$)", Pattern.CASE_INSENSITIVE).matcher(messageBody)

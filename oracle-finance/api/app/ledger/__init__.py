@@ -13,7 +13,7 @@ from .dedup import _duplicate_canonical_score, _identity_enrichment, _merchant_v
 from .transfers import _apply_balance_after_identity_enrichment, _ensure_internal_transfer_balance_adjustment, _internal_transfer_reason, _neutralize_internal_transfer_splitwise, _record_internal_transfer, apply_internal_transfer_candidates, is_internal_transfer_transaction, list_transfers, match_internal_transfers
 from .accounts import _auto_provision_bank_account, _resolve_canonical_row, add_receivable, apply_transaction_to_account, balances, repair_missing_balance_adjustments, set_balance, sync_card_bill, void_transaction
 from .foreign import _convert_foreign_transaction, foreign_amount_info, foreign_amount_map, migrate_foreign_currency_rows, set_foreign_inr_amount
-from .migrations import migrate_card_bill_reread, migrate_gmail_default_category, migrate_splitwise_other_optout
+from .migrations import migrate_card_bill_reread, migrate_gmail_default_category, migrate_splitwise_other_optout, migrate_splitwise_salary_optout
 from .ingest import sync_evidence, sync_transaction
 from .queries import add_review, list_review_queue, list_transactions, true_available
 
@@ -43,6 +43,7 @@ __all__ = [
     "migrate_card_bill_reread",
     "migrate_gmail_default_category",
     "migrate_splitwise_other_optout",
+    "migrate_splitwise_salary_optout",
     "normalize_reference",
     "now_ms",
     "re",

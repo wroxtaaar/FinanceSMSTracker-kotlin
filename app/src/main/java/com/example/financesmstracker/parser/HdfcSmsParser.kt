@@ -20,6 +20,7 @@ class HdfcSmsParser : SmsParser {
             ?: return ParserResult(isTransaction = false)
 
         val isCredit = lowerBody.contains("credited") || lowerBody.contains("received") ||
+                       lowerBody.contains("deposited") ||
                        lowerBody.contains("added") || lowerBody.contains("refund") ||
                        lowerBody.contains("reversal") || lowerBody.contains("cr")
         val isDebit = lowerBody.contains("debited") || lowerBody.contains("deducted") ||
@@ -45,7 +46,7 @@ class HdfcSmsParser : SmsParser {
             lowerBody.contains("neft") -> PaymentMethod.NEFT
             lowerBody.contains("imps") -> PaymentMethod.IMPS
             lowerBody.contains("rtgs") -> PaymentMethod.RTGS
-            lowerBody.contains("card") || lowerBody.contains("pos") || lowerBody.contains("ecom") -> PaymentMethod.CARD
+            lowerBody.contains("card") || Regex("\\bpos\\b").containsMatchIn(lowerBody) || lowerBody.contains("ecom") -> PaymentMethod.CARD
             lowerBody.contains("transfer") -> PaymentMethod.BANK_TRANSFER
             else -> PaymentMethod.UNKNOWN
         }

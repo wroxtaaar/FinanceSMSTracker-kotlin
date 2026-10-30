@@ -637,3 +637,61 @@ def test_gmail_default_category_migration_only_touches_recent_gmail_debits():
     assert cats["gmail:old"] == "OTHER"
     assert cats["sms:new"] == "OTHER"
     assert L.migrate_gmail_default_category() == 0
+
+
+def _bank_cash(account_id="hdfc"):
+    with connection() as conn:
+        return conn.execute("SELECT balance_minor FROM accounts WHERE id=?", (account_id,)).fetchone()[0]
+
+
+def test_salary_credit_raises_the_bank_but_stays_out_of_splitwise():
+    before_cash = _bank_cash()
+    before_splitwise = L.get_manual_splitwise_total("INR")
+
+    ingest_sms(Tx(id="sms:salary", amountMinor=10_187_900, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  paymentMethod="UNKNOWN", merchantOrPayee="WBS SALARY ACCOUNT",
+                  timestamp=T0 + 10**9, category="SALARY"))
+
+    assert _bank_cash() == before_cash + 10_187_900
+    assert L.get_manual_splitwise_total("INR") == before_splitwise
+
+
+def test_other_credits_still_lower_splitwise_and_a_salary_labelled_debit_still_counts():
+    ingest_sms(Tx(id="sms:repay", amountMinor=5_000, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9, category="TRANSFER"))
+    assert L.get_manual_splitwise_total("INR") == -5_000
+
+    ingest_sms(Tx(id="sms:odd", amountMinor=2_000, type="DEBIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9 + 1, category="SALARY"))
+    assert L.get_manual_splitwise_total("INR") == -3_000
+
+
+def test_changing_a_credit_to_salary_removes_its_splitwise_share():
+    ingest_sms(Tx(id="sms:late-salary", amountMinor=8_000, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9, category="TRANSFER"))
+    assert L.get_manual_splitwise_total("INR") == -8_000
+
+    ingest_sms(Tx(id="sms:late-salary", amountMinor=8_000, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9, category="SALARY"))
+    assert L.get_manual_splitwise_total("INR") == 0
+
+
+def test_salary_optout_migration_keeps_the_displayed_splitwise_value():
+    # A salary recorded before this rule lowered Splitwise like any credit.
+    ingest_sms(Tx(id="sms:old-salary", amountMinor=50_000, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9, category="SALARY"))
+    with connection() as conn:
+        conn.execute("DELETE FROM applied_migrations WHERE name='splitwise_salary_optout'")
+        old = L._ledger_splitwise_total(conn, "INR", honor_salary=False)  # pre-change ledger
+        conn.execute(
+            "UPDATE manual_splitwise_total SET baseline_amount_minor=100000, baseline_ledger_minor=? WHERE currency='INR'",
+            (old,),
+        )
+    L.rebuild_manual_splitwise_total()
+
+    assert L.migrate_splitwise_salary_optout() is True
+    assert L.get_manual_splitwise_total("INR") == 100_000          # shown value unchanged
+    ingest_sms(Tx(id="sms:new-salary", amountMinor=70_000, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9 + 5, category="SALARY"))
+    assert L.get_manual_splitwise_total("INR") == 100_000          # later salary stays out
+    assert L.migrate_splitwise_salary_optout() is False

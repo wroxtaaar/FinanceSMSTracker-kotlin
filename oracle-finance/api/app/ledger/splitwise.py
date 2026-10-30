@@ -4,12 +4,14 @@ from ..db import connection
 from .common import _resolve_transaction_row, is_provisional_row, now_ms
 
 
-def splitwise_delta(account_type, transaction_type, amount_minor, category=None):
+def splitwise_delta(account_type, transaction_type, amount_minor, category=None, exclude_salary=True):
     """Return the Splitwise effect implied by the final ledger movement.
 
     Splitwise is deliberately derived from the same ledger movement as the
     account balance, not from a second set of expense rules. The one category
     that matters is OTHER: the user's explicit "keep this out of Splitwise".
+    A SALARY credit is income, not someone settling a shared expense, so it
+    is kept out as well.
 
     Bank account:
       DEBIT  -> bank -X, so Splitwise +X
@@ -26,7 +28,10 @@ def splitwise_delta(account_type, transaction_type, amount_minor, category=None)
     account_type = str(account_type or "").strip().upper()
     transaction_type = str(transaction_type or "").strip().upper()
 
-    if str(category or "").strip().upper() == "OTHER":
+    category_name = str(category or "").strip().upper()
+    if category_name == "OTHER":
+        return 0
+    if exclude_salary and category_name == "SALARY" and transaction_type == "CREDIT":
         return 0
 
     if account_type in ("BANK_ACCOUNT", "CREDIT_CARD"):
@@ -83,7 +88,7 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
     return bool(inserted.rowcount)
 
 
-def _ledger_splitwise_total(conn, cur, honor_other=True):
+def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True):
     """Ledger-wide Splitwise sum of the canonical bank/card movements.
 
     Only active, canonical transactions that actually affect a bank/card
@@ -122,11 +127,15 @@ def _ledger_splitwise_total(conn, cur, honor_other=True):
             continue
         if is_provisional_row(row):
             continue
+        category = row["category"]
+        if not honor_other and str(category or "").strip().upper() == "OTHER":
+            category = None
         total += splitwise_delta(
             row["account_type"],
             row["type"],
             row["amount_minor"],
-            row["category"] if honor_other else None,
+            category,
+            exclude_salary=honor_salary,
         )
     return total
 

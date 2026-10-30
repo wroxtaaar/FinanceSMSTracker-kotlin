@@ -505,4 +505,34 @@ class SmsParserTest {
         assertEquals("Tahir confectionery", c10.merchantName)
         assertNull(c10.payeeId)
     }
+
+    @Test
+    fun testHdfcSalaryDepositFixture() {
+        val sms = "Update! INR 1,01,879.00 deposited in HDFC Bank A/c XX9591 on 30-OCT-26 for " +
+            "FT-A2AINT01-2061157915 -  - XXXXXXXXXX2057 - WBS SALARY ACCOUNT.Avl bal INR 1,17,521.18. " +
+            "Cheque deposits in A/C are subject to clearing"
+        val result = manager.parse("JM-HDFCBK-S", sms)
+        assertTrue(result.isTransaction)
+        // The deposit, not the available balance printed after it.
+        assertEquals(10187900L, result.amountPaise)
+        assertEquals(TransactionType.CREDIT, result.transactionType)
+        assertEquals(AccountType.BANK_ACCOUNT, result.accountType)
+        assertEquals("HDFC", result.bank)
+        assertEquals("9591", result.accountLastFour)
+        // "deposited" must not read as a POS/card payment, and the footer
+        // sentence must not become the merchant.
+        assertNotEquals(PaymentMethod.CARD, result.paymentMethod)
+        assertEquals("WBS SALARY ACCOUNT", result.merchantName)
+    }
+
+    @Test
+    fun testSalaryDepositIsCategorisedAsSalary() {
+        val sms = "Update! INR 1,01,879.00 deposited in HDFC Bank A/c XX9591 on 30-OCT-26 for " +
+            "FT-A2AINT01-2061157915 -  - XXXXXXXXXX2057 - WBS SALARY ACCOUNT.Avl bal INR 1,17,521.18."
+        val result = manager.parse("JM-HDFCBK-S", sms)
+        assertEquals(
+            "SALARY",
+            com.example.financesmstracker.categorizer.TransactionCategorizer.categorize(result, sms)
+        )
+    }
 }
