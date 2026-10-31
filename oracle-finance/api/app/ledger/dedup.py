@@ -211,130 +211,134 @@ def _duplicate_canonical_score(row):
     )
 
 
-def repair_duplicate_transactions():
-    """Collapse safe same-side duplicate ledger rows without touching transfers.
+def _is_card_bill_credit(row):
+    return (
+        str(row["account_type"]).strip().upper() == "CREDIT_CARD"
+        and str(row["type"]).strip().upper() == "CREDIT"
+    )
 
-    Exact-reference rows are reconciled first. Then an unreferenced row may
-    merge into a referenced same-side row only when there is exactly one
-    distinct reference candidate. This prevents incomplete rows from bridging
-    unrelated transactions.
-    """
-    with connection() as conn:
-        rows = conn.execute(
-            """SELECT * FROM transactions
-               WHERE status='ACTIVE' AND duplicate_of IS NULL
-               ORDER BY created_at, id"""
-        ).fetchall()
 
-        assigned = set()
-        repaired = 0
+def _is_mirror_id(transaction_id):
+    transaction_id = str(transaction_id)
+    return transaction_id.startswith("gmail:") or transaction_id.startswith("notification:")
 
-        def is_card_bill_credit(row):
-            return (
-                str(row["account_type"]).strip().upper() == "CREDIT_CARD"
-                and str(row["type"]).strip().upper() == "CREDIT"
+
+class _DuplicateRepair:
+    """One pass of same-side duplicate collapsing over the active ledger rows."""
+
+    def __init__(self, conn, rows):
+        self.conn = conn
+        self.rows = rows
+        self.assigned = set()
+        self.repaired = 0
+
+    def run(self):
+        self._collapse_referenced_groups()
+        self._collapse_unreferenced_rows()
+        return self.repaired
+
+    def _enrich_canonical(self, canonical, duplicate):
+        updates = {}
+        if not normalize_reference(canonical["reference"]) and normalize_reference(duplicate["reference"]):
+            updates["reference"] = normalize_reference(duplicate["reference"])
+        if not str(canonical["bank"] or "").strip() and str(duplicate["bank"] or "").strip():
+            updates["bank"] = duplicate["bank"]
+        if not str(canonical["account_last4"] or "").strip() and str(duplicate["account_last4"] or "").strip():
+            updates["account_last4"] = duplicate["account_last4"]
+        if (
+            (not canonical["merchant_or_payee"] or str(canonical["merchant_or_payee"]).strip() == "-")
+            and duplicate["merchant_or_payee"]
+            and str(duplicate["merchant_or_payee"]).strip() != "-"
+        ):
+            updates["merchant_or_payee"] = duplicate["merchant_or_payee"]
+
+        if updates:
+            assignments = ", ".join(f"{column}=?" for column in updates)
+            values = list(updates.values()) + [canonical["id"]]
+            self.conn.execute(
+                f"UPDATE transactions SET {assignments} WHERE id=?",
+                values,
             )
 
-        def enrich_canonical(canonical, duplicate):
-            updates = {}
-            if not normalize_reference(canonical["reference"]) and normalize_reference(duplicate["reference"]):
-                updates["reference"] = normalize_reference(duplicate["reference"])
-            if not str(canonical["bank"] or "").strip() and str(duplicate["bank"] or "").strip():
-                updates["bank"] = duplicate["bank"]
-            if not str(canonical["account_last4"] or "").strip() and str(duplicate["account_last4"] or "").strip():
-                updates["account_last4"] = duplicate["account_last4"]
-            if (
-                (not canonical["merchant_or_payee"] or str(canonical["merchant_or_payee"]).strip() == "-")
-                and duplicate["merchant_or_payee"]
-                and str(duplicate["merchant_or_payee"]).strip() != "-"
-            ):
-                updates["merchant_or_payee"] = duplicate["merchant_or_payee"]
+    def _repair_pair(self, canonical, duplicate):
+        conn = self.conn
+        self._enrich_canonical(canonical, duplicate)
 
-            if updates:
-                assignments = ", ".join(f"{column}=?" for column in updates)
-                values = list(updates.values()) + [canonical["id"]]
-                conn.execute(
-                    f"UPDATE transactions SET {assignments} WHERE id=?",
-                    values,
-                )
+        canonical_adjustment = conn.execute(
+            "SELECT account_id,delta_minor,applied_at FROM balance_adjustments WHERE transaction_id=?",
+            (canonical["id"],),
+        ).fetchone()
+        duplicate_adjustment = conn.execute(
+            "SELECT account_id,delta_minor,applied_at FROM balance_adjustments WHERE transaction_id=?",
+            (duplicate["id"],),
+        ).fetchone()
 
-        def repair_pair(canonical, duplicate):
-            nonlocal repaired
-            enrich_canonical(canonical, duplicate)
-
-            canonical_adjustment = conn.execute(
-                "SELECT account_id,delta_minor,applied_at FROM balance_adjustments WHERE transaction_id=?",
-                (canonical["id"],),
-            ).fetchone()
-            duplicate_adjustment = conn.execute(
-                "SELECT account_id,delta_minor,applied_at FROM balance_adjustments WHERE transaction_id=?",
+        if canonical_adjustment is None and duplicate_adjustment is not None:
+            # Move the already-applied bank adjustment to the canonical row,
+            # but still reverse any Splitwise contribution belonging to the
+            # duplicate. The old fast path marked the duplicate VOIDED
+            # directly, which left its Splitwise delta behind.
+            conn.execute(
+                "DELETE FROM balance_adjustments WHERE transaction_id=?",
                 (duplicate["id"],),
-            ).fetchone()
-
-            if canonical_adjustment is None and duplicate_adjustment is not None:
-                # Move the already-applied bank adjustment to the canonical row,
-                # but still reverse any Splitwise contribution belonging to the
-                # duplicate. The old fast path marked the duplicate VOIDED
-                # directly, which left its Splitwise delta behind.
-                conn.execute(
-                    "DELETE FROM balance_adjustments WHERE transaction_id=?",
-                    (duplicate["id"],),
-                )
-                conn.execute(
-                    """INSERT INTO balance_adjustments(transaction_id,account_id,delta_minor,applied_at)
-                       VALUES(?,?,?,?)""",
-                    (
-                        canonical["id"],
-                        duplicate_adjustment["account_id"],
-                        duplicate_adjustment["delta_minor"],
-                        duplicate_adjustment["applied_at"],
-                    ),
-                )
-
-                # The Splitwise value is derived from the ledger, and the
-                # duplicate drops out of it once voided below.
-                conn.execute(
-                    "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
-                    (duplicate["id"],),
-                )
-
-                conn.execute(
-                    "UPDATE transactions SET status='VOIDED', duplicate_of=? WHERE id=?",
-                    (canonical["id"], duplicate["id"]),
-                )
-                result_status = "VOIDED"
-            else:
-                result = _void_transaction_in_connection(
-                    conn,
-                    duplicate["id"],
-                    duplicate_of=canonical["id"],
-                )
-                result_status = result["status"]
-
-            if result_status != "VOIDED":
-                return
-
-            conn.execute(
-                "UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",
-                (canonical["id"], duplicate["id"]),
             )
             conn.execute(
-                "UPDATE review_queue SET transaction_id=? WHERE transaction_id=?",
+                """INSERT INTO balance_adjustments(transaction_id,account_id,delta_minor,applied_at)
+                   VALUES(?,?,?,?)""",
+                (
+                    canonical["id"],
+                    duplicate_adjustment["account_id"],
+                    duplicate_adjustment["delta_minor"],
+                    duplicate_adjustment["applied_at"],
+                ),
+            )
+
+            # The Splitwise value is derived from the ledger, and the
+            # duplicate drops out of it once voided below.
+            conn.execute(
+                "DELETE FROM splitwise_adjustments WHERE transaction_id=?",
+                (duplicate["id"],),
+            )
+
+            conn.execute(
+                "UPDATE transactions SET status='VOIDED', duplicate_of=? WHERE id=?",
                 (canonical["id"], duplicate["id"]),
             )
-            assigned.add(str(duplicate["id"]))
-            repaired += 1
+            result_status = "VOIDED"
+        else:
+            result = _void_transaction_in_connection(
+                conn,
+                duplicate["id"],
+                duplicate_of=canonical["id"],
+            )
+            result_status = result["status"]
 
+        if result_status != "VOIDED":
+            return
+
+        conn.execute(
+            "UPDATE evidence SET matched_transaction_id=? WHERE transaction_id=?",
+            (canonical["id"], duplicate["id"]),
+        )
+        conn.execute(
+            "UPDATE review_queue SET transaction_id=? WHERE transaction_id=?",
+            (canonical["id"], duplicate["id"]),
+        )
+        self.assigned.add(str(duplicate["id"]))
+        self.repaired += 1
+
+    def _collapse_referenced_groups(self):
+        """Rows sharing a normalized reference are reconciled first."""
         referenced_groups = {}
-        for row in rows:
-            if is_card_bill_credit(row):
+        for row in self.rows:
+            if _is_card_bill_credit(row):
                 continue
             reference = normalize_reference(row["reference"])
             if reference:
                 referenced_groups.setdefault(reference, []).append(row)
 
         for group in referenced_groups.values():
-            remaining = [row for row in group if str(row["id"]) not in assigned]
+            remaining = [row for row in group if str(row["id"]) not in self.assigned]
 
             while remaining:
                 canonical = max(remaining, key=_duplicate_canonical_score)
@@ -342,7 +346,7 @@ def repair_duplicate_transactions():
                     row for row in remaining
                     if str(row["id"]) != str(canonical["id"])
                     and _rows_are_duplicate(canonical, row)
-                    and not is_card_bill_credit(row)
+                    and not _is_card_bill_credit(row)
                 ]
 
                 if not duplicates:
@@ -353,57 +357,63 @@ def repair_duplicate_transactions():
                     continue
 
                 for duplicate in duplicates:
-                    repair_pair(canonical, duplicate)
+                    self._repair_pair(canonical, duplicate)
 
                 consumed = {str(canonical["id"])} | {str(row["id"]) for row in duplicates}
                 remaining = [
                     row for row in remaining
                     if str(row["id"]) not in consumed
                 ]
-                assigned.add(str(canonical["id"]))
+                self.assigned.add(str(canonical["id"]))
 
-        for row in rows:
-            if str(row["id"]) in assigned or normalize_reference(row["reference"]):
+    def _referenced_candidates(self, row):
+        """Referenced rows that look like `row`, plus their distinct references."""
+        candidates = []
+        candidate_refs = set()
+        for referenced in self.rows:
+            if str(referenced["id"]) == str(row["id"]) or str(referenced["id"]) in self.assigned:
                 continue
-            if is_card_bill_credit(row):
+            if _is_card_bill_credit(referenced):
                 continue
 
-            candidates = []
-            candidate_refs = set()
+            reference = normalize_reference(referenced["reference"])
+            if not reference:
+                continue
 
-            for referenced in rows:
-                if str(referenced["id"]) == str(row["id"]) or str(referenced["id"]) in assigned:
-                    continue
-                if is_card_bill_credit(referenced):
-                    continue
+            if _rows_are_duplicate(row, referenced):
+                candidates.append(referenced)
+                candidate_refs.add(reference)
+        return candidates, candidate_refs
 
-                reference = normalize_reference(referenced["reference"])
-                if not reference:
-                    continue
+    def _unreferenced_mirror_candidates(self, row):
+        return [
+            candidate for candidate in self.rows
+            if (
+                str(candidate["id"]) != str(row["id"])
+                and str(candidate["id"]) not in self.assigned
+                and not normalize_reference(candidate["reference"])
+                and not _is_card_bill_credit(candidate)
+                and _is_mirror_id(candidate["id"])
+                and _rows_are_duplicate(row, candidate)
+            )
+        ]
 
-                if _rows_are_duplicate(row, referenced):
-                    candidates.append(referenced)
-                    candidate_refs.add(reference)
+    def _collapse_unreferenced_rows(self):
+        """An unreferenced row may merge into exactly one distinct reference."""
+        for row in self.rows:
+            if str(row["id"]) in self.assigned or normalize_reference(row["reference"]):
+                continue
+            if _is_card_bill_credit(row):
+                continue
+
+            candidates, candidate_refs = self._referenced_candidates(row)
 
             # A mirror source can legitimately omit the reference. If
             # there is exactly one compatible cross-source mirror candidate,
             # it is still safe to collapse because amount/type/bank/account/
             # merchant identity are all checked by _rows_are_duplicate.
             if not candidate_refs:
-                mirror_candidates_without_ref = [
-                    candidate for candidate in rows
-                    if (
-                        str(candidate["id"]) != str(row["id"])
-                        and str(candidate["id"]) not in assigned
-                        and not normalize_reference(candidate["reference"])
-                        and not is_card_bill_credit(candidate)
-                        and (
-                            str(candidate["id"]).startswith("gmail:")
-                            or str(candidate["id"]).startswith("notification:")
-                        )
-                        and _rows_are_duplicate(row, candidate)
-                    )
-                ]
+                mirror_candidates_without_ref = self._unreferenced_mirror_candidates(row)
                 if len(mirror_candidates_without_ref) == 1:
                     candidates = mirror_candidates_without_ref
                     candidate_refs.add("__MIRROR_NO_REFERENCE__")
@@ -415,12 +425,10 @@ def repair_duplicate_transactions():
             # the only referenced candidate is a Gmail/notification mirror,
             # keep the local row canonical. Otherwise a later-arriving Gmail
             # reference could incorrectly become the ledger owner.
-            row_source = str(row["id"])
-            row_is_mirror = row_source.startswith("gmail:") or row_source.startswith("notification:")
+            row_is_mirror = _is_mirror_id(row["id"])
             mirror_candidates = [
                 candidate for candidate in candidates
-                if str(candidate["id"]).startswith("gmail:")
-                or str(candidate["id"]).startswith("notification:")
+                if _is_mirror_id(candidate["id"])
             ]
             if not row_is_mirror and mirror_candidates:
                 canonical = row
@@ -435,10 +443,25 @@ def repair_duplicate_transactions():
                 duplicates = [row]
 
             for duplicate in duplicates:
-                repair_pair(canonical, duplicate)
-            assigned.add(str(canonical["id"]))
+                self._repair_pair(canonical, duplicate)
+            self.assigned.add(str(canonical["id"]))
 
-        return repaired
+
+def repair_duplicate_transactions():
+    """Collapse safe same-side duplicate ledger rows without touching transfers.
+
+    Exact-reference rows are reconciled first. Then an unreferenced row may
+    merge into a referenced same-side row only when there is exactly one
+    distinct reference candidate. This prevents incomplete rows from bridging
+    unrelated transactions.
+    """
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT * FROM transactions
+               WHERE status='ACTIVE' AND duplicate_of IS NULL
+               ORDER BY created_at, id"""
+        ).fetchall()
+        return _DuplicateRepair(conn, rows).run()
 
 
 def _identity_enrichment(canonical, duplicate):

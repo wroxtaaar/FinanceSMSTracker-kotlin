@@ -294,6 +294,133 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
             )
 
 
+_BILL_SOURCE_PRIORITY = {
+    "GMAIL": 300,
+    "GMAIL_STATEMENT_PDF": 300,
+    "SMS": 200,
+    "GMAIL_NOTIFICATION": 100,
+}
+_SAME_STATEMENT_WINDOW_MS = 24 * 60 * 60 * 1000
+
+
+def _bill_priority(source_type):
+    return _BILL_SOURCE_PRIORITY.get(str(source_type).upper(), 0)
+
+
+def _upsert_bill_evidence(conn, bill, source_type, source_key, bank, last4, last2, amount, observed_at, confidence):
+    """Record the evidence row.
+
+    Re-reading the same source (same message/attachment) with a corrected
+    parser must replace its earlier amount; keeping the first value made a
+    mis-parsed bill permanent. A changed amount is re-applied.
+    """
+    conn.execute(
+        """INSERT INTO card_bill_evidence
+           (id,source_type,source_key,observed_at,amount_minor,currency,bank,
+            account_last4,account_last2,confidence,applied,created_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,0,?)
+           ON CONFLICT(source_type,source_key) DO UPDATE SET
+             observed_at=excluded.observed_at,
+             amount_minor=excluded.amount_minor,
+             bank=excluded.bank,
+             account_last4=excluded.account_last4,
+             account_last2=excluded.account_last2,
+             confidence=excluded.confidence,
+             applied=CASE WHEN card_bill_evidence.amount_minor IS excluded.amount_minor
+                          THEN card_bill_evidence.applied ELSE 0 END""",
+        (
+            f"card-bill:{source_type}:{source_key}",
+            source_type,
+            source_key,
+            observed_at,
+            amount,
+            bill.get("currency") or "INR",
+            bank,
+            last4,
+            last2,
+            confidence,
+            now_ms(),
+        ),
+    )
+
+
+def _find_bill_card(conn, bill, bank, last4, last2):
+    """Find the configured card.
+
+    Prefer a full last-4 match; fall back to a unique visible last-two suffix
+    from statement notifications.
+    """
+    account = None
+    if last4:
+        account = conn.execute(
+            """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at
+               FROM accounts
+               WHERE account_type='CREDIT_CARD' AND currency=?
+                 AND UPPER(TRIM(COALESCE(bank,'')))=?
+                 AND TRIM(COALESCE(last4,''))=?
+               ORDER BY updated_at DESC LIMIT 1""",
+            (bill.get("currency") or "INR", bank or "", last4),
+        ).fetchone()
+
+    if not account and last2:
+        candidates = conn.execute(
+            """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at,last4
+               FROM accounts
+               WHERE account_type='CREDIT_CARD' AND currency=?
+                 AND UPPER(TRIM(COALESCE(bank,'')))=?
+                 AND substr(TRIM(COALESCE(last4,'')),-2)=?
+               ORDER BY updated_at DESC""",
+            (bill.get("currency") or "INR", bank or "", last2),
+        ).fetchall()
+        if len(candidates) == 1:
+            account = candidates[0]
+    return account
+
+
+def _previous_applied_bill(conn, account, bill, bank, source_type, source_key, observed_at):
+    """The strongest already-applied evidence about the same statement, if any."""
+    previous = conn.execute(
+        """SELECT e.source_type,e.amount_minor,e.observed_at
+           FROM card_bill_evidence e
+           JOIN accounts a ON a.id=?
+           WHERE e.applied=1
+             AND NOT (e.source_type=? AND e.source_key=?)
+             AND e.currency=?
+             AND UPPER(TRIM(COALESCE(e.bank,'')))=?
+             AND (
+                  (e.account_last4 IS NOT NULL AND TRIM(e.account_last4)=TRIM(a.last4))
+                  OR (e.account_last2 IS NOT NULL AND substr(TRIM(COALESCE(a.last4,'')),-2)=TRIM(e.account_last2))
+             )
+           ORDER BY e.observed_at DESC
+           LIMIT 1""",
+        (account["id"], source_type, source_key, bill.get("currency") or "INR", bank or ""),
+    ).fetchone()
+
+    # A statement from a later billing cycle simply replaces the previous
+    # one: the totals differ every month and that is not a conflict. The
+    # priority/conflict rules only compare evidence about the same statement.
+    if previous and int(previous["observed_at"]) < observed_at - _SAME_STATEMENT_WINDOW_MS:
+        return None
+    return previous
+
+
+def _queue_bill_conflict(conn, account, bank, previous, amount, observed_at):
+    # Same-tier disagreement is a review condition. Do not silently choose
+    # one source.
+    review_id = "CARD_BILL_CONFLICT:" + account["id"] + ":" + str(observed_at)
+    conn.execute(
+        """INSERT OR IGNORE INTO review_queue
+           (id,kind,transaction_id,evidence_id,reason,status,created_at)
+           VALUES(?,?,NULL,NULL,?,'OPEN',?)""",
+        (
+            review_id,
+            "CARD_BILL_CONFLICT",
+            f"Card bill disagreement for {bank} {account['id']}: {previous['amount_minor']} vs {amount}",
+            now_ms(),
+        ),
+    )
+
+
 def sync_card_bill(bill):
     """Record bill evidence and apply only the strongest confirmed bill amount.
 
@@ -314,73 +441,15 @@ def sync_card_bill(bill):
     if not source_key or amount is None or amount < 0:
         return {"status":"IGNORED","reason":"missing_bill_amount_or_source"}
 
-    priority = {
-        "GMAIL": 300,
-        "GMAIL_STATEMENT_PDF": 300,
-        "SMS": 200,
-        "GMAIL_NOTIFICATION": 100,
-    }.get(source_type, 0)
+    priority = _bill_priority(source_type)
 
     with connection() as conn:
-        # Re-reading the same source (same message/attachment) with a corrected
-        # parser must replace its earlier amount; keeping the first value made
-        # a mis-parsed bill permanent. A changed amount is re-applied.
-        conn.execute(
-            """INSERT INTO card_bill_evidence
-               (id,source_type,source_key,observed_at,amount_minor,currency,bank,
-                account_last4,account_last2,confidence,applied,created_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,0,?)
-               ON CONFLICT(source_type,source_key) DO UPDATE SET
-                 observed_at=excluded.observed_at,
-                 amount_minor=excluded.amount_minor,
-                 bank=excluded.bank,
-                 account_last4=excluded.account_last4,
-                 account_last2=excluded.account_last2,
-                 confidence=excluded.confidence,
-                 applied=CASE WHEN card_bill_evidence.amount_minor IS excluded.amount_minor
-                              THEN card_bill_evidence.applied ELSE 0 END""",
-            (
-                f"card-bill:{source_type}:{source_key}",
-                source_type,
-                source_key,
-                observed_at,
-                amount,
-                bill.get("currency") or "INR",
-                bank,
-                last4,
-                last2,
-                confidence,
-                now_ms(),
-            ),
+        _upsert_bill_evidence(
+            conn, bill, source_type, source_key, bank, last4, last2,
+            amount, observed_at, confidence,
         )
 
-        # Find the configured card. Prefer a full last-4 match; fall back to
-        # a unique visible last-two suffix from statement notifications.
-        account = None
-        if last4:
-            account = conn.execute(
-                """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at
-                   FROM accounts
-                   WHERE account_type='CREDIT_CARD' AND currency=?
-                     AND UPPER(TRIM(COALESCE(bank,'')))=?
-                     AND TRIM(COALESCE(last4,''))=?
-                   ORDER BY updated_at DESC LIMIT 1""",
-                (bill.get("currency") or "INR", bank or "", last4),
-            ).fetchone()
-
-        if not account and last2:
-            candidates = conn.execute(
-                """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at,last4
-                   FROM accounts
-                   WHERE account_type='CREDIT_CARD' AND currency=?
-                     AND UPPER(TRIM(COALESCE(bank,'')))=?
-                     AND substr(TRIM(COALESCE(last4,'')),-2)=?
-                   ORDER BY updated_at DESC""",
-                (bill.get("currency") or "INR", bank or "", last2),
-            ).fetchall()
-            if len(candidates) == 1:
-                account = candidates[0]
-
+        account = _find_bill_card(conn, bill, bank, last4, last2)
         if not account:
             return {"status":"REVIEW","reason":"card_not_found","bank":bank,"last4":last4,"last2":last2}
 
@@ -396,37 +465,11 @@ def sync_card_bill(bill):
                 "sourceType":source_type,
             }
 
-        # Compare the strongest already-applied evidence for this exact card.
-        previous = conn.execute(
-            """SELECT e.source_type,e.amount_minor,e.observed_at
-               FROM card_bill_evidence e
-               JOIN accounts a ON a.id=?
-               WHERE e.applied=1
-                 AND NOT (e.source_type=? AND e.source_key=?)
-                 AND e.currency=?
-                 AND UPPER(TRIM(COALESCE(e.bank,'')))=?
-                 AND (
-                      (e.account_last4 IS NOT NULL AND TRIM(e.account_last4)=TRIM(a.last4))
-                      OR (e.account_last2 IS NOT NULL AND substr(TRIM(COALESCE(a.last4,'')),-2)=TRIM(e.account_last2))
-                 )
-               ORDER BY e.observed_at DESC
-               LIMIT 1""",
-            (account["id"], source_type, source_key, bill.get("currency") or "INR", bank or ""),
-        ).fetchone()
-
-        # A statement from a later billing cycle simply replaces the previous
-        # one: the totals differ every month and that is not a conflict. The
-        # priority/conflict rules only compare evidence about the same statement.
-        if previous and int(previous["observed_at"]) < observed_at - 24 * 60 * 60 * 1000:
-            previous = None
-
+        previous = _previous_applied_bill(
+            conn, account, bill, bank, source_type, source_key, observed_at
+        )
         if previous:
-            previous_priority = {
-                "GMAIL": 300,
-                "GMAIL_STATEMENT_PDF": 300,
-                "SMS": 200,
-                "GMAIL_NOTIFICATION": 100,
-            }.get(str(previous["source_type"]).upper(), 0)
+            previous_priority = _bill_priority(previous["source_type"])
 
             if amount != previous["amount_minor"] and priority < previous_priority:
                 return {
@@ -438,20 +481,7 @@ def sync_card_bill(bill):
                 }
 
             if amount != previous["amount_minor"] and priority == previous_priority:
-                # Same-tier disagreement is a review condition. Do not silently
-                # choose one source.
-                review_id = "CARD_BILL_CONFLICT:" + account["id"] + ":" + str(observed_at)
-                conn.execute(
-                    """INSERT OR IGNORE INTO review_queue
-                       (id,kind,transaction_id,evidence_id,reason,status,created_at)
-                       VALUES(?,?,NULL,NULL,?,'OPEN',?)""",
-                    (
-                        review_id,
-                        "CARD_BILL_CONFLICT",
-                        f"Card bill disagreement for {bank} {account['id']}: {previous['amount_minor']} vs {amount}",
-                        now_ms(),
-                    ),
-                )
+                _queue_bill_conflict(conn, account, bank, previous, amount, observed_at)
                 return {
                     "status":"REVIEW",
                     "reason":"same_priority_bill_conflict",
