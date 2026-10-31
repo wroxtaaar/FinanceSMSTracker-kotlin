@@ -235,7 +235,8 @@ class SmsReceiver : BroadcastReceiver() {
                                 sender = sender,
                                 receivedAt = timestamp,
                                 contentHash = smsHash,
-                                reason = reason
+                                reason = reason,
+                                preview = fullBody.trim().replace(Regex("\\s+"), " ").take(300)
                             )
                             repository.insertUnrecognizedSms(unrecognized)
                             SmsHandlingLog.record(context, sender, fullBody, "Sent to Review: $reason")

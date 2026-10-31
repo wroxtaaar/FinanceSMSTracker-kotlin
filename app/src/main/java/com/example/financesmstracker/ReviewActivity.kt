@@ -155,7 +155,8 @@ class ReviewActivity : AppCompatActivity() {
             setPadding(48, 8, 48, 8)
         }
 
-        val amount = addField(container, "Amount (₹)", "")
+        val guess = guessFromPreview(item.preview)
+        val amount = addField(container, "Amount (₹)", guess.amount)
         amount.inputType = android.text.InputType.TYPE_CLASS_NUMBER or
             android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
 
@@ -171,11 +172,12 @@ class ReviewActivity : AppCompatActivity() {
             PaymentMethod.values().map { it.name }
         )
         val bank = addField(container, "Bank", inferBank(item.sender))
-        val lastFour = addField(container, "Account / Card last 4 digits", "")
+        val lastFour = addField(container, "Account / Card last 4 digits", guess.lastFour)
         lastFour.inputType = android.text.InputType.TYPE_CLASS_NUMBER
         val merchant = addField(container, "Merchant / Payee (optional)", "")
         val reference = addField(container, "Reference (optional)", "")
-        val category = addField(container, "Category", "OTHER")
+        val category = addField(container, "Category", guess.category)
+        if (guess.credit) direction.setSelection(1)
 
         container.addView(TextView(this).apply {
             text = "Date: " + SimpleDateFormat(
@@ -189,7 +191,7 @@ class ReviewActivity : AppCompatActivity() {
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Create Transaction")
-            .setMessage("Enter the transaction details. The original SMS body is not stored by the app.")
+            .setMessage(item.preview?.let { "Message: $it" } ?: "Enter the transaction details. The message text was not saved for this older item.")
             .setView(scroll)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save", null)
@@ -258,6 +260,26 @@ class ReviewActivity : AppCompatActivity() {
             }
         }
         dialog.show()
+    }
+
+    private data class Guess(
+        val amount: String = "",
+        val credit: Boolean = false,
+        val lastFour: String = "",
+        val category: String = "OTHER"
+    )
+
+    /** Best-effort prefill from the saved message; the user can change every field. */
+    private fun guessFromPreview(text: String?): Guess {
+        if (text.isNullOrBlank()) return Guess()
+        val amount = Regex("(?:rs\\.?|inr|₹)\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)", RegexOption.IGNORE_CASE)
+            .find(text)?.groupValues?.get(1)?.replace(",", "") ?: ""
+        val lower = text.lowercase(Locale.ROOT)
+        val credit = listOf("credited", "deposited", "received", "refund").any { lower.contains(it) }
+        val last4 = Regex("(?:a/c|acct?|account|card)[^0-9a-z]{0,6}(?:no\\.?\\s*)?[x*]*\\s*([0-9]{4})\\b",
+            RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1) ?: ""
+        val category = if (credit && lower.contains("salary")) "SALARY" else "OTHER"
+        return Guess(amount, credit, last4, category)
     }
 
     private fun addField(container: LinearLayout, hint: String, value: String): EditText {

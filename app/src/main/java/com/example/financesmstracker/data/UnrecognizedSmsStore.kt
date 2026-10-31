@@ -16,6 +16,7 @@ internal class UnrecognizedSmsStore(
             put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_CONTENT_HASH, unrecognized.contentHash)
             put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_REASON, unrecognized.reason)
             put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS, unrecognized.status.name)
+            put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_PREVIEW, unrecognized.preview)
         }
 
         val rowId = db.insertWithOnConflict(
@@ -52,7 +53,8 @@ internal class UnrecognizedSmsStore(
                         receivedAt = it.getLong(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_RECEIVED_AT)),
                         contentHash = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_CONTENT_HASH)),
                         reason = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_REASON)),
-                        status = ReviewStatus.valueOf(it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS)))
+                        status = ReviewStatus.valueOf(it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS))),
+                        preview = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_PREVIEW))
                     )
                 )
             }
@@ -79,6 +81,7 @@ internal class UnrecognizedSmsStore(
         val db = dbHelper.writableDatabase
         val values = ContentValues().apply {
             put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS, status.name)
+            if (status != ReviewStatus.REVIEW) putNull(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_PREVIEW)
         }
         return db.update(
             FinanceDatabaseHelper.TABLE_UNRECOGNIZED_SMS,
@@ -105,7 +108,8 @@ internal class UnrecognizedSmsStore(
                     receivedAt = it.getLong(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_RECEIVED_AT)),
                     contentHash = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_CONTENT_HASH)),
                     reason = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_REASON)),
-                    status = ReviewStatus.valueOf(it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS)))
+                    status = ReviewStatus.valueOf(it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS))),
+                    preview = it.getString(it.getColumnIndexOrThrow(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_PREVIEW))
                 )
             }
         }

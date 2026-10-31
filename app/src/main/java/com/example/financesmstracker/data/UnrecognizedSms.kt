@@ -12,5 +12,6 @@ data class UnrecognizedSms(
     val receivedAt: Long,
     val contentHash: String,
     val reason: String,
-    val status: ReviewStatus = ReviewStatus.REVIEW
+    val status: ReviewStatus = ReviewStatus.REVIEW,
+    val preview: String? = null
 )

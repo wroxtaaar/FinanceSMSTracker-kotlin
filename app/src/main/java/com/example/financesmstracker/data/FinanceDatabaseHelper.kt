@@ -16,7 +16,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
 
     companion object {
         private const val DATABASE_NAME = "finance_tracker.db"
-        private const val DATABASE_VERSION = 7
+        private const val DATABASE_VERSION = 8
 
         const val TABLE_TRANSACTIONS = "transactions"
         const val COLUMN_ID = "id"
@@ -63,6 +63,7 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
         const val COLUMN_UNRECOGNIZED_CONTENT_HASH = "content_hash"
         const val COLUMN_UNRECOGNIZED_REASON = "reason"
         const val COLUMN_UNRECOGNIZED_STATUS = "status"
+        const val COLUMN_UNRECOGNIZED_PREVIEW = "preview"
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -126,7 +127,8 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
                 $COLUMN_UNRECOGNIZED_RECEIVED_AT INTEGER NOT NULL,
                 $COLUMN_UNRECOGNIZED_CONTENT_HASH TEXT UNIQUE NOT NULL,
                 $COLUMN_UNRECOGNIZED_REASON TEXT NOT NULL,
-                $COLUMN_UNRECOGNIZED_STATUS TEXT NOT NULL DEFAULT 'REVIEW'
+                $COLUMN_UNRECOGNIZED_STATUS TEXT NOT NULL DEFAULT 'REVIEW',
+                $COLUMN_UNRECOGNIZED_PREVIEW TEXT
             )
         """.trimIndent()
 
@@ -240,6 +242,13 @@ class FinanceDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABA
             db.execSQL(
                 "DELETE FROM $TABLE_SOURCE_EVIDENCE WHERE $COLUMN_EVIDENCE_SOURCE_TYPE = 'TRUECALLER'"
             )
+        }
+        if (oldVersion < 8) {
+            // Short on-device preview so Review can show what the message said.
+            // Cleared when the item is dismissed or resolved.
+            if (!columnExists(db, TABLE_UNRECOGNIZED_SMS, COLUMN_UNRECOGNIZED_PREVIEW)) {
+                db.execSQL("ALTER TABLE $TABLE_UNRECOGNIZED_SMS ADD COLUMN $COLUMN_UNRECOGNIZED_PREVIEW TEXT")
+            }
         }
     }
 }

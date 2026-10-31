@@ -29,7 +29,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
-        android:text="Resolve unmatched or ambiguous evidence and review financial SMS that could not be parsed."
+        android:text="Things the app could not sort out on its own. Nothing here is lost: if a section says "No ...", everything was handled automatically."
         android:textSize="14sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -94,6 +94,13 @@
                 android:text="Evidence needing a transaction match"
                 android:textStyle="bold" />
 
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="An e-mail or alert that proves a payment but could not be linked to one of your recorded transactions."
+                android:textSize="13sp" />
+
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/recyclerViewReviews"
                 android:layout_width="match_parent"
@@ -119,6 +126,13 @@
                 android:layout_marginTop="16dp"
                 android:text="Unrecognized financial SMS"
                 android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Bank-like messages the app did not turn into a transaction. Read the message, then tap Create Transaction to add it yourself, or Dismiss if it is not a payment."
+                android:textSize="13sp" />
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/recyclerViewUnrecognized"

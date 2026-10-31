@@ -231,6 +231,25 @@ class FinanceSyncClient(
         return put("/api/v1/transactions/" + android.net.Uri.encode(oracleId) + "/inr-amount", json.toString())
     }
 
+    data class SalaryShare(val amountMinor: Long, val shareMinor: Long)
+
+    /** How much of a salary credit counts toward Splitwise (fails if Oracle has no such salary row). */
+    fun fetchSalaryShare(oracleId: String): Result<SalaryShare> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return get("/api/v1/transactions/" + android.net.Uri.encode(oracleId) + "/splitwise-share").map { body ->
+            val json = JSONObject(body)
+            SalaryShare(json.getLong("amountMinor"), json.getLong("shareMinor"))
+        }
+    }
+
+    fun setSalaryShare(oracleId: String, shareMinor: Long): Result<String> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        val json = JSONObject().apply { put("shareMinor", shareMinor) }
+        return put("/api/v1/transactions/" + android.net.Uri.encode(oracleId) + "/splitwise-share", json.toString())
+    }
+
     fun fetchSummary(): Result<OracleLedgerSummary> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))

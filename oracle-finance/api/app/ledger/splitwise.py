@@ -4,14 +4,16 @@ from ..db import connection
 from .common import _resolve_transaction_row, is_provisional_row, now_ms
 
 
-def splitwise_delta(account_type, transaction_type, amount_minor, category=None, exclude_salary=True):
+def splitwise_delta(account_type, transaction_type, amount_minor, category=None, exclude_salary=True,
+                    salary_share_minor=None):
     """Return the Splitwise effect implied by the final ledger movement.
 
     Splitwise is deliberately derived from the same ledger movement as the
     account balance, not from a second set of expense rules. The one category
     that matters is OTHER: the user's explicit "keep this out of Splitwise".
     A SALARY credit is income, not someone settling a shared expense, so it
-    is kept out as well.
+    is kept out by default; the user can choose how much of a given salary
+    should count (salary_share_minor, capped at the credited amount).
 
     Bank account:
       DEBIT  -> bank -X, so Splitwise +X
@@ -32,7 +34,9 @@ def splitwise_delta(account_type, transaction_type, amount_minor, category=None,
     if category_name == "OTHER":
         return 0
     if exclude_salary and category_name == "SALARY" and transaction_type == "CREDIT":
-        return 0
+        if salary_share_minor is None or account_type != "BANK_ACCOUNT":
+            return 0
+        return -max(0, min(int(salary_share_minor), amount))
 
     if account_type in ("BANK_ACCOUNT", "CREDIT_CARD"):
         return amount if transaction_type == "DEBIT" else -amount if transaction_type == "CREDIT" else 0
@@ -99,7 +103,7 @@ def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True):
     rows = conn.execute(
         """SELECT id,amount_minor,currency,type,account_type,payment_method,
                   bank,merchant_or_payee,account_last4,reference,
-                  timestamp,category,confidence
+                  timestamp,category,confidence,splitwise_amount_minor
            FROM transactions
            WHERE status='ACTIVE'
              AND duplicate_of IS NULL
@@ -136,6 +140,7 @@ def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True):
             row["amount_minor"],
             category,
             exclude_salary=honor_salary,
+            salary_share_minor=row["splitwise_amount_minor"] if honor_salary else None,
         )
     return total
 
@@ -255,3 +260,53 @@ def splitwise_expense_for(transaction_id):
     with connection() as conn:
         row=conn.execute("SELECT * FROM splitwise_expenses WHERE transaction_id=?",(transaction_id,)).fetchone()
         return dict(row) if row else None
+
+
+def splitwise_share_info(transaction_id):
+    """How much of a salary credit counts toward Splitwise (None if not a salary credit)."""
+    with connection() as conn:
+        row = _resolve_transaction_row(conn, transaction_id)
+        if row is None or row["status"] != "ACTIVE":
+            return {"status": "NOT_FOUND", "transactionId": transaction_id}
+        if not _is_salary_credit(row):
+            return {"status": "NOT_SALARY", "transactionId": transaction_id}
+        return {
+            "status": "OK",
+            "transactionId": row["id"],
+            "amountMinor": int(row["amount_minor"]),
+            "shareMinor": int(row["splitwise_amount_minor"] or 0),
+        }
+
+
+def set_splitwise_share(transaction_id, share_minor):
+    """Choose how much of a salary credit counts toward Splitwise (0..amount)."""
+    share_minor = int(share_minor)
+    with connection() as conn:
+        row = _resolve_transaction_row(conn, transaction_id)
+        if row is None or row["status"] != "ACTIVE":
+            return {"status": "NOT_FOUND", "transactionId": transaction_id}
+        if not _is_salary_credit(row):
+            return {"status": "NOT_SALARY", "transactionId": transaction_id}
+        if share_minor < 0 or share_minor > int(row["amount_minor"]):
+            return {"status": "INVALID_AMOUNT", "transactionId": transaction_id}
+        previous = int(row["splitwise_amount_minor"] or 0)
+        conn.execute(
+            "UPDATE transactions SET splitwise_amount_minor=? WHERE id=?",
+            (share_minor, row["id"]),
+        )
+    rebuild_manual_splitwise_total(row["currency"])
+    return {
+        "status": "UPDATED",
+        "transactionId": row["id"],
+        "amountMinor": int(row["amount_minor"]),
+        "shareMinor": share_minor,
+        "previousShareMinor": previous,
+    }
+
+
+def _is_salary_credit(row):
+    return (
+        str(row["category"] or "").strip().upper() == "SALARY"
+        and str(row["type"] or "").strip().upper() == "CREDIT"
+        and str(row["account_type"] or "").strip().upper() == "BANK_ACCOUNT"
+    )

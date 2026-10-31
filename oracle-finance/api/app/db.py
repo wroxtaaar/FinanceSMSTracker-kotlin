@@ -246,6 +246,7 @@ def init_db():
             "orig_currency": "TEXT",
             "fx_rate": "REAL",
             "fx_exact": "INTEGER DEFAULT 0",
+            "splitwise_amount_minor": "INTEGER",
         }.items():
             if name not in transaction_columns:
                 conn.execute(f"ALTER TABLE transactions ADD COLUMN {name} {sql_type}")

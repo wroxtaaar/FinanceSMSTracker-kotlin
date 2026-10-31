@@ -125,6 +125,35 @@
                 android:text="Save exact ₹ amount" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/salaryShareSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/salaryShareSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textStyle="bold"
+                android:text="Salary in Splitwise" />
+
+            <EditText
+                android:id="@+id/salaryShareInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Amount of this salary to count in Splitwise (₹)"
+                android:inputType="numberDecimal" />
+
+            <Button
+                android:id="@+id/salaryShareSave"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Save Splitwise amount" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

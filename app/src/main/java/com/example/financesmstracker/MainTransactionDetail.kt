@@ -86,6 +86,61 @@ internal fun MainActivity.setupForeignAmountSection(dialogView: View, tx: Transa
     }
 }
 
+/**
+ * A salary credit stays out of Splitwise by default. This lets the user choose
+ * how much of it counts (0 up to the full amount); Oracle derives the total.
+ */
+internal fun MainActivity.setupSalaryShareSection(dialogView: View, tx: Transaction) {
+    if (tx.transactionType != TransactionType.CREDIT || !tx.category.equals("SALARY", ignoreCase = true)) return
+    val section = dialogView.findViewById<View>(R.id.salaryShareSection)
+    val summary = dialogView.findViewById<TextView>(R.id.salaryShareSummary)
+    val input = dialogView.findViewById<EditText>(R.id.salaryShareInput)
+    val save = dialogView.findViewById<Button>(R.id.salaryShareSave)
+    val oracleId = FinanceSyncBridge.oracleVoidId(
+        tx.id, repository.getSmsHashById(tx.id), OracleIds.scheme(this)
+    )
+
+    fun rupees(minor: Long) = String.format(Locale.US, "%.2f", minor / 100.0)
+
+    fun render(info: FinanceSyncClient.SalaryShare) {
+        section.visibility = View.VISIBLE
+        summary.text = "₹${rupees(info.shareMinor)} of this ₹${rupees(info.amountMinor)} salary counts in Splitwise"
+        input.setText(rupees(info.shareMinor))
+    }
+
+    oracleExecutor.execute {
+        val result = FinanceSyncClient(this@setupSalaryShareSection).fetchSalaryShare(oracleId)
+        runOnUiThread { result.onSuccess { render(it) } }
+    }
+
+    save.setOnClickListener {
+        val value = input.text.toString().trim().toBigDecimalOrNull()
+        if (value == null || value.signum() < 0) {
+            Toast.makeText(this, "Enter an amount (0 keeps the salary out of Splitwise)", Toast.LENGTH_SHORT).show()
+            return@setOnClickListener
+        }
+        val minor = value.movePointRight(2).setScale(0, java.math.RoundingMode.HALF_UP).toLong()
+        save.isEnabled = false
+        oracleExecutor.execute {
+            val client = FinanceSyncClient(this@setupSalaryShareSection)
+            val result = client.setSalaryShare(oracleId, minor)
+            val refreshed = if (result.isSuccess) client.fetchSalaryShare(oracleId).getOrNull() else null
+            runOnUiThread {
+                save.isEnabled = true
+                result.onSuccess {
+                    refreshed?.let { render(it) }
+                    Toast.makeText(this, "Splitwise amount saved", Toast.LENGTH_SHORT).show()
+                    loadOracleSummary()
+                }.onFailure { error ->
+                    Toast.makeText(
+                        this, "Could not save: " + (error.message ?: "Unavailable"), Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+}
+
 internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
     val dialogView = LayoutInflater.from(this)
         .inflate(R.layout.dialog_transaction_detail, null)
@@ -146,6 +201,7 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
         }
 
     setupForeignAmountSection(dialogView, tx)
+    setupSalaryShareSection(dialogView, tx)
 
     detailTextType.text =
         "Type: ${tx.transactionType.name}"

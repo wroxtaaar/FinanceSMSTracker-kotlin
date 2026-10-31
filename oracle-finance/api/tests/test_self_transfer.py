@@ -695,3 +695,37 @@ def test_salary_optout_migration_keeps_the_displayed_splitwise_value():
                   timestamp=T0 + 10**9 + 5, category="SALARY"))
     assert L.get_manual_splitwise_total("INR") == 100_000          # later salary stays out
     assert L.migrate_splitwise_salary_optout() is False
+
+
+def test_user_can_choose_how_much_of_a_salary_counts_toward_splitwise():
+    before_cash = _bank_cash()
+    ingest_sms(Tx(id="sms:share-salary", amountMinor=100_000, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9, category="SALARY"))
+    assert L.get_manual_splitwise_total("INR") == 0
+    assert L.splitwise_share_info("sms:share-salary")["shareMinor"] == 0
+
+    result = L.set_splitwise_share("sms:share-salary", 30_000)
+    assert result["status"] == "UPDATED" and result["previousShareMinor"] == 0
+    assert L.get_manual_splitwise_total("INR") == -30_000     # credit lowers Splitwise
+    assert _bank_cash() == before_cash + 100_000              # bank untouched
+
+    # Re-ingesting the same SMS must not reset the choice.
+    ingest_sms(Tx(id="sms:share-salary", amountMinor=100_000, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9, category="SALARY"))
+    assert L.get_manual_splitwise_total("INR") == -30_000
+
+    assert L.set_splitwise_share("sms:share-salary", 0)["status"] == "UPDATED"
+    assert L.get_manual_splitwise_total("INR") == 0
+
+
+def test_salary_share_is_validated_and_only_for_salary_credits():
+    ingest_sms(Tx(id="sms:share-salary2", amountMinor=10_000, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9, category="SALARY"))
+    assert L.set_splitwise_share("sms:share-salary2", 10_001)["status"] == "INVALID_AMOUNT"
+    assert L.set_splitwise_share("sms:share-salary2", -1)["status"] == "INVALID_AMOUNT"
+    assert L.set_splitwise_share("sms:nope", 1)["status"] == "NOT_FOUND"
+
+    ingest_sms(Tx(id="sms:share-other", amountMinor=5_000, type="CREDIT", bank="HDFC", accountLast4="2222",
+                  timestamp=T0 + 10**9 + 1, category="TRANSFER"))
+    assert L.set_splitwise_share("sms:share-other", 1_000)["status"] == "NOT_SALARY"
+    assert L.splitwise_share_info("sms:share-other")["status"] == "NOT_SALARY"

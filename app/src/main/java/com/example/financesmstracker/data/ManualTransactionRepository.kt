@@ -57,7 +57,7 @@ class ManualTransactionRepository(private val dbHelper: FinanceDatabaseHelper) {
             val evidenceId = db.insertWithOnConflict(FinanceDatabaseHelper.TABLE_SOURCE_EVIDENCE, null, evidence, SQLiteDatabase.CONFLICT_IGNORE)
             if (evidenceId == -1L) return null
 
-            val status = ContentValues().apply { put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS, ReviewStatus.RESOLVED.name) }
+            val status = ContentValues().apply { put(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS, ReviewStatus.RESOLVED.name); putNull(FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_PREVIEW) }
             val updated = db.update(FinanceDatabaseHelper.TABLE_UNRECOGNIZED_SMS, status,
                 FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_ID + " = ? AND " + FinanceDatabaseHelper.COLUMN_UNRECOGNIZED_STATUS + " = ?",
                 arrayOf(unrecognized.id.toString(), ReviewStatus.REVIEW.name))
