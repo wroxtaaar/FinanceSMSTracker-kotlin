@@ -34,7 +34,8 @@ jobs:
           test -s "$RUNNER_TEMP/finance-release.jks"
 
       - name: Run unit tests
-        run: bash ./gradlew test
+        run: |
+          bash ./gradlew test > /tmp/gt.txt 2>&1 || { echo "::error::$(grep -E '^(e: |.*FAILED|.*Test.*>)' /tmp/gt.txt | head -15 | tr '\n' '|')"; exit 1; }
 
       - name: Build signed debug APK
         env:
