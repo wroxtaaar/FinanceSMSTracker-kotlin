@@ -5,7 +5,7 @@ object TransactionCategories {
     val debit = listOf(
         "FOOD", "GROCERIES", "FUEL", "TRAVEL",
         "SUBSCRIPTION", "BILLS", "MEDICAL", "TRANSFER",
-        "SALARY", "OTHER"
+        "OTHER"
     )
 
     val credit = listOf("SALARY", "TRANSFER", "BILL_PAYMENT", "REFUND", "OTHER")
