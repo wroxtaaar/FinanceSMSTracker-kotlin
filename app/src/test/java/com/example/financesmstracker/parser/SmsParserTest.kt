@@ -535,4 +535,21 @@ class SmsParserTest {
             com.example.financesmstracker.categorizer.TransactionCategorizer.categorize(result, sms)
         )
     }
+
+    @Test
+    fun testIciciCardSpendIsAcceptedWithHighConfidence() {
+        val sms = "INR 1,854.00 spent using ICICI Bank Card XX1012 on 29-Oct-26 on AMAZON PAY IN E. " +
+            "Avl Limit: INR 3,47,728.19. If not you, call 1800 2662/SMS BLOCK 1012 to 9215676766."
+        val result = manager.parse("BP-ICICIT-S", sms)
+        assertTrue(result.isTransaction)
+        // The spend, not the available limit.
+        assertEquals(185400L, result.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(PaymentMethod.CARD, result.paymentMethod)
+        assertEquals(AccountType.CREDIT_CARD, result.accountType)
+        assertEquals("ICICI", result.bank)
+        assertEquals("1012", result.accountLastFour)
+        assertEquals("AMAZON PAY IN E", result.merchantName)
+        assertTrue(result.confidence >= 0.90f)
+    }
 }

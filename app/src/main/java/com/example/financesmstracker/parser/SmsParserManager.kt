@@ -4,6 +4,7 @@ class SmsParserManager {
     private val parsers = listOf(
         HdfcSmsParser(),
         AxisSmsParser(),
+        IciciSmsParser(),
         GenericSmsParser()
     )
 
