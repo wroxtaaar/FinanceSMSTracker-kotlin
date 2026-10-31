@@ -161,7 +161,7 @@ def test_statement_attachment_is_imported_once_and_updates_balance(monkeypatch):
 
     monkeypatch.setenv("HDFC_STATEMENT_SECRET", "fixture-secret")
     monkeypatch.setattr(
-        "app.statement_sync.parse_hdfc_statement",
+        "app.statement_sync.processing.parse_hdfc_statement",
         lambda pdf, key: (
             fake_metadata,
             fake_rows,
@@ -217,7 +217,7 @@ Statement period : August 29, 2026 to September 28, 2026
     assert metadata["currency"] == "INR"
 
     monkeypatch.setattr(
-        "app.statement_sync._pdf_text",
+        "app.statement_sync.common._pdf_text",
         lambda pdf_bytes, key: text,
     )
     metadata, rows = parse_icici_statement(b"fixture", "fixture-secret")
@@ -258,7 +258,7 @@ OFFUS EMI,INT NBR:02,00000144037257 (Ref# 09999999981002000704656)
  C 540.00
 l
 """
-    monkeypatch.setattr("app.statement_sync._pdf_text", lambda pdf, key: text)
+    monkeypatch.setattr("app.statement_sync.common._pdf_text", lambda pdf, key: text)
 
     metadata, rows = parse_hdfc_credit_card_statement(b"fixture", "fixture-secret")
 
@@ -341,16 +341,16 @@ def test_credit_card_statement_attachment_updates_bill_without_active_spend(monk
 
     monkeypatch.setenv("HDFC_STATEMENT_SECRET", "fixture-secret")
     monkeypatch.setattr(
-        "app.statement_sync.parse_hdfc_statement",
+        "app.statement_sync.processing.parse_hdfc_statement",
         lambda pdf, key: (fake_metadata, fake_rows),
     )
     monkeypatch.setattr(
-        "app.statement_sync._pdf_text",
+        "app.statement_sync.common._pdf_text",
         lambda pdf, key: "TOTAL AMOUNT DUE C5,238.00",
     )
     bill_calls = []
     monkeypatch.setattr(
-        "app.statement_sync.sync_card_bill",
+        "app.statement_sync.processing.sync_card_bill",
         lambda bill: bill_calls.append(bill) or {"status": "APPLIED"},
     )
 

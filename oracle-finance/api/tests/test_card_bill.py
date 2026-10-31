@@ -91,18 +91,18 @@ def test_reread_migration_clears_recent_bills_and_requeues_statement_mails_once(
 
 
 def test_bill_is_re_derived_from_an_already_parsed_pdf():
-    from app import statement_sync as ss
+    from app.statement_sync import common, processing as ss
 
     _card()
     calls = {"n": 0}
-    saved = (ss._parse_statement_pdf, ss._pdf_text, ss._statement_keys)
+    saved = (ss._parse_statement_pdf, common._pdf_text, ss._statement_keys)
     ss._statement_keys = lambda bank: ["k"]
     ss._parse_statement_pdf = lambda bank, b, key: (
         {"bank": "ICICI", "account_type": "CREDIT_CARD", "account_last4": "1012", "currency": "INR"}, [])
     def fake_text(b, key):
         calls["n"] += 1
         return "Total Amount due\n`2,088.00 = + + -"
-    ss._pdf_text = fake_text
+    common._pdf_text = fake_text
     try:
         message = {"id": "m1", "internalDate": str(T0)}
         ss._refresh_card_bill_from_parsed_pdf("ICICI", b"pdf", "att-1", message)
@@ -111,4 +111,4 @@ def test_bill_is_re_derived_from_an_already_parsed_pdf():
         ss._refresh_card_bill_from_parsed_pdf("ICICI", b"pdf", "att-1", message)
         assert calls["n"] == 1
     finally:
-        ss._parse_statement_pdf, ss._pdf_text, ss._statement_keys = saved
+        ss._parse_statement_pdf, common._pdf_text, ss._statement_keys = saved
