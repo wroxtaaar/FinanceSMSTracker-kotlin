@@ -86,9 +86,19 @@ class TransactionDuplicateRulesTest {
     }
 
     @Test
-    fun cardSpendOutsideFifteenMinutesIsNotPaired() {
+    fun cardSpendNotificationThirtySixMinutesAfterSmsIsStillOnePair() {
+        // SBI card: the SMS came at 17:51, the e-mail notification only at 18:27.
+        val sms = tx(1, "sms:1", bank = "SBI", last4 = "0065", amountPaise = 250_000L,
+            merchant = "RAJDHANISERVICESTATIO", payment = PaymentMethod.CARD)
+        val notification = tx(2, "notification:2", bank = "SBI", last4 = "0065",
+            amountPaise = 250_000L, timestamp = t0 + 36 * minute)
+        assertEquals(1, TransactionDuplicateRules.selectLoosePairs(listOf(sms, notification)).size)
+    }
+
+    @Test
+    fun cardSpendOutsideTwoHoursIsNotPaired() {
         val sms = tx(1, "sms:1", bank = "AXIS")
-        val notification = tx(2, "notification:2", timestamp = t0 + 16 * minute)
+        val notification = tx(2, "notification:2", timestamp = t0 + 121 * minute)
         assertTrue(TransactionDuplicateRules.selectLoosePairs(listOf(sms, notification)).isEmpty())
     }
 

@@ -5,6 +5,7 @@ class SmsParserManager {
         HdfcSmsParser(),
         AxisSmsParser(),
         IciciSmsParser(),
+        SbiCardSmsParser(),
         GenericSmsParser()
     )
 

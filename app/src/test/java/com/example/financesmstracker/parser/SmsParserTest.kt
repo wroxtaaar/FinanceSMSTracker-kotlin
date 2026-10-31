@@ -552,4 +552,19 @@ class SmsParserTest {
         assertEquals("AMAZON PAY IN E", result.merchantName)
         assertTrue(result.confidence >= 0.90f)
     }
+
+    @Test
+    fun testSbiCardSpendIsAcceptedWithHighConfidence() {
+        val sms = "Rs.2,500.00 spent on your SBI Credit Card ending 0065 at RAJDHANISERVICESTATIO " +
+            "on 31/10/26. Trxn. not done by you? Report at https://sbicard.com/Dispute"
+        val result = manager.parse("AX-SBICRD-S", sms)
+        assertTrue(result.isTransaction)
+        assertEquals(250000L, result.amountPaise)
+        assertEquals(TransactionType.DEBIT, result.transactionType)
+        assertEquals(AccountType.CREDIT_CARD, result.accountType)
+        assertEquals("SBI", result.bank)
+        assertEquals("0065", result.accountLastFour)
+        assertEquals("RAJDHANISERVICESTATIO", result.merchantName)
+        assertTrue(result.confidence >= 0.90f)
+    }
 }

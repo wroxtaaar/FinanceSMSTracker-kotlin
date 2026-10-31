@@ -503,7 +503,7 @@ class GmailNotificationListenerService : NotificationListenerService() {
             // Later SMS/Gmail evidence can reconcile against this row.
             val memoryKey = CategoryMemoryKey.from(parserResult)
             val rememberedCategory = memoryKey?.let { repository.getCategoryForMemoryKey(it) }
-            val category = rememberedCategory ?: TransactionCategorizer.categorize(parserResult, content)
+            val category = TransactionCategorizer.categorize(parserResult, content, rememberedCategory)
 
             val transaction = Transaction(
                 amountPaise = parsed.amountPaise,

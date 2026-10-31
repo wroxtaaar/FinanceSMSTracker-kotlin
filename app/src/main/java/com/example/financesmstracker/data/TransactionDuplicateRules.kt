@@ -19,6 +19,11 @@ object TransactionDuplicateRules {
     private const val STRICT_WINDOW_MILLIS = 2L * 60L * 1000L
     private const val MIRROR_WINDOW_MILLIS = 15L * 60L * 1000L
 
+    // A notification can reach the phone long after the bank's SMS (for
+    // example when the e-mail app syncs late). The card last-4 is the
+    // identity there, and selectLoosePairs only pairs unambiguous rows.
+    private const val NOTIFICATION_VS_SMS_WINDOW_MILLIS = 2L * 60L * 60L * 1000L
+
     /** Details a voided duplicate can hand to the canonical row. Null = leave as is. */
     data class Enrichment(
         val merchantName: String? = null,
@@ -141,7 +146,9 @@ object TransactionDuplicateRules {
     fun looseMirrorDuplicates(first: Transaction, second: Transaction): Boolean {
         if (!sameEventShape(first, second)) return false
         if (!paymentCompatible(first, second)) return false
-        if (abs(first.timestamp - second.timestamp) > MIRROR_WINDOW_MILLIS) return false
+        val crossSource = (kind(first) == Kind.REAL) != (kind(second) == Kind.REAL)
+        val window = if (crossSource) NOTIFICATION_VS_SMS_WINDOW_MILLIS else MIRROR_WINDOW_MILLIS
+        if (abs(first.timestamp - second.timestamp) > window) return false
         if (!merchantsCompatible(first.merchantName, second.merchantName)) return false
 
         val firstBank = normalizedBank(first.bank)

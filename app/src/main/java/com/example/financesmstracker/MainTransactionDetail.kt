@@ -245,11 +245,19 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
      *
      * Debits can use the complete category list.
      */
-    val availableCategories =
+    val baseCategories =
         if (tx.transactionType == TransactionType.CREDIT) {
             creditCategories
         } else {
             categories
+        }
+    // Show the stored category honestly even when it is no longer offered,
+    // instead of silently displaying the first entry of the list.
+    val availableCategories =
+        if (!tx.category.isNullOrBlank() && tx.category !in baseCategories) {
+            listOf(tx.category) + baseCategories
+        } else {
+            baseCategories
         }
 
     val spinnerAdapter = ArrayAdapter(

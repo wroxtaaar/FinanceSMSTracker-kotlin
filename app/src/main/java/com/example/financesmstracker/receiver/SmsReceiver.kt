@@ -130,7 +130,7 @@ class SmsReceiver : BroadcastReceiver() {
                     if (shouldCreateCanonicalTransaction) {
                         val memoryKey = CategoryMemoryKey.from(parserResult)
                         val rememberedCategory = memoryKey?.let { repository.getCategoryForMemoryKey(it) }
-                        val category = rememberedCategory ?: TransactionCategorizer.categorize(parserResult, fullBody)
+                        val category = TransactionCategorizer.categorize(parserResult, fullBody, rememberedCategory)
 
                         val transaction = Transaction(
                             amountPaise = parserResult.amountPaise,

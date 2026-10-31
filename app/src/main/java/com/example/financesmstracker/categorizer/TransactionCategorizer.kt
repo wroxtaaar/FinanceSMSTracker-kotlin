@@ -55,7 +55,11 @@ object TransactionCategorizer {
         /*
          * Remembered categories are allowed for DEBIT transactions.
          */
-        if (!rememberedCategory.isNullOrBlank()) {
+        // Only a category that is valid for a debit may be reused; a stale
+        // memory (for example a credit-only label) must not stick to debits.
+        if (!rememberedCategory.isNullOrBlank() &&
+            rememberedCategory in com.example.financesmstracker.data.TransactionCategories.debit
+        ) {
             return rememberedCategory
         }
 
