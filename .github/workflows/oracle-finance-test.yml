@@ -21,5 +21,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - run: |
-          pytest -q --tb=short > /tmp/pt.txt 2>&1 || { echo "::error::$(grep -E '^(FAILED|ERROR|E )' /tmp/pt.txt | head -15 | tr '\n' '|')"; exit 1; }
+      - run: pytest -q

@@ -1,5 +1,5 @@
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.gmail_imap import IMAPService
 from app.gmail_sync import parse_bank_email
@@ -43,15 +43,15 @@ def test_historical_imap_uses_requested_window_without_incremental_cursor():
     service.uidvalidity = "7"
     service.folder = "[Gmail]/All Mail"
     service.historical = True
-    service._last_synced_since = lambda: datetime(
-        2026, 10, 1, tzinfo=timezone.utc
-    )
+    # A cursor date that can never coincide with "30 days ago".
+    cursor = datetime.now(timezone.utc) - timedelta(days=2)
+    service._last_synced_since = lambda: cursor
 
     result = service._list_messages("newer_than:30d", 100)
 
     searches = service._imap.searches
     assert searches
-    assert all('SINCE "01-Oct-2026"' not in s for s in searches)
+    assert all(f'SINCE "{cursor.strftime("%d-%b-%Y")}"' not in s for s in searches)
     assert all("SINCE " in s for s in searches)
     assert any('FROM "alerts@axis.bank.in"' in s for s in searches)
     assert len(result["messages"]) == 2
