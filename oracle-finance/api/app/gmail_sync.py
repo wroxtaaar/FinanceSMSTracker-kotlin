@@ -185,8 +185,11 @@ def ingest_messages(service,query="newer_than:30d"):
         rebuild_manual_splitwise_total()
 
 
-def _ingest_messages(service,query="newer_than:30d"):
-    stats={
+_MESSAGE_LOG_LIMIT = 300
+
+
+def _new_stats():
+    return {
         "messagesScanned":0,
         "alreadyProcessed":0,
         "parsedTransactions":0,
@@ -207,13 +210,313 @@ def _ingest_messages(service,query="newer_than:30d"):
         "messageLog":[],
     }
 
-    def note(sender, subject, outcome):
-        if len(stats["messageLog"]) < 300:
-            stats["messageLog"].append({
-                "sender": str(sender or "")[:80],
-                "subject": str(subject or "")[:90],
-                "outcome": outcome,
-            })
+
+def _note(stats, sender, subject, outcome):
+    if len(stats["messageLog"]) < _MESSAGE_LOG_LIMIT:
+        stats["messageLog"].append({
+            "sender": str(sender or "")[:80],
+            "subject": str(subject or "")[:90],
+            "outcome": outcome,
+        })
+
+
+def _is_unlikely_bank_mail(item, stats):
+    """IMAP can cheaply return headers without downloading the full message.
+
+    On a first/manual scan this avoids fetching newsletters, promotions, OTPs,
+    etc. Only likely bank/transaction mail gets a full RFC822 fetch.
+    """
+    if item.get("from") is None:
+        return False
+    sender_preview = parseaddr(item.get("from", ""))[1].lower()
+    subject_preview = item.get("subject", "") or ""
+    sender_domain = sender_preview.rsplit("@", 1)[-1] if "@" in sender_preview else ""
+    known_bank_sender = any(
+        sender_domain == domain or sender_domain.endswith("." + domain)
+        for domains in _BANK_SENDER_DOMAINS.values()
+        for domain in domains
+    )
+    transaction_subject = bool(re.search(
+        r"(?i)transaction|debited|credited|payment|purchase|spent|withdraw",
+        subject_preview,
+    ))
+    if not known_bank_sender and not transaction_subject:
+        stats["ignoredCount"] += 1
+        _note(stats, sender_preview, subject_preview,
+              "Skipped: sender is not a known bank and the subject has no transaction words")
+        return True
+    return False
+
+
+def _previous_message_state(item, msg_id, statement_hint, stats):
+    """Look up how this message was handled before.
+
+    Returns (skip, existing). `skip` is True when the message must not be
+    processed again. A parsed message is terminal only while its evidence still
+    points at an active ledger transaction. This matters after a local-history
+    reset and after legacy repair work: the Gmail processing marker can survive
+    while the transaction that was created from it has been voided/removed. In
+    that case the message must be eligible for parsing again or a valid Axis
+    credit (or any other authoritative bank email) can be lost forever behind
+    the PARSED marker.
+    """
+    subject_preview = item.get("subject", "") or ""
+    with connection() as conn:
+        existing = conn.execute(
+            "SELECT status FROM gmail_messages WHERE id=?",
+            (msg_id,),
+        ).fetchone()
+
+        if existing and existing["status"] == "PARSED":
+            # Statement attachments are retried explicitly before the normal
+            # mailbox scan. Once that retry has marked the message PARSED, do
+            # not fetch/process the same attachment a second time in this pass.
+            if statement_hint:
+                stats["alreadyProcessed"] += 1
+                return True, existing
+
+            active_link = conn.execute(
+                """
+                SELECT 1
+                FROM evidence e
+                JOIN transactions t
+                  ON (
+                       t.id = e.transaction_id
+                       OR t.id = e.matched_transaction_id
+                     )
+                WHERE e.source_type='GMAIL'
+                  AND (
+                       e.source_id=?
+                       OR e.source_id LIKE 'imap:%:' || ?
+                     )
+                  AND t.status='ACTIVE'
+                  AND t.duplicate_of IS NULL
+                LIMIT 1
+                """,
+                (msg_id, msg_id),
+            ).fetchone()
+            if active_link:
+                stats["alreadyProcessed"] += 1
+                _note(stats, item.get("from"), subject_preview,
+                      "Already processed (its transaction exists)")
+                return True, existing
+
+            # The message was marked PARSED but no active transaction remains.
+            # Move it back to PENDING so the current parser gets a chance to
+            # recreate the authoritative transaction. Treat this as a fresh
+            # parse: the old PARSED marker must not hit the post-fetch
+            # terminal-message guard.
+            conn.execute(
+                "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
+                (msg_id,),
+            )
+            existing = None
+    return False, existing
+
+
+def _record_card_bill_email(message, stats):
+    bill_from_email = parse_card_bill_email(message)
+    if bill_from_email:
+        bill_result = sync_card_bill(bill_from_email)
+        stats.setdefault("cardBillDetected", 0)
+        stats["cardBillDetected"] += 1
+        stats.setdefault("cardBillResults", [])
+        stats["cardBillResults"].append(bill_result)
+
+
+def _record_statement_attachments(service, message, stats):
+    statement_stats = process_statement_attachments(service, message)
+    stats["statementAttachmentsScanned"] += statement_stats["attachmentsScanned"]
+    stats["statementAttachmentsParsed"] += statement_stats["attachmentsParsed"]
+    stats["statementTransactionsAdded"] += statement_stats["transactionsAdded"]
+    stats["statementTransactionsMatched"] += statement_stats["transactionsMatched"]
+    stats["statementErrors"].extend(statement_stats["errors"])
+    return statement_stats
+
+
+def _store_message_row(message, msg_id, parsed, statement_stats):
+    """Insert the gmail_messages row; returns (headers, sender)."""
+    with connection() as conn:
+        h=_headers(message.get("payload",{}))
+        sender=parseaddr(h.get("from",""))[1]
+        message_status = (
+            "PARSED"
+            if parsed or statement_stats["attachmentsParsed"] > 0
+            else "PENDING"
+        )
+        conn.execute(
+            """INSERT OR IGNORE INTO gmail_messages
+            (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
+            VALUES(?,?,?,?,?,?,?,?)""",
+            (
+                msg_id,
+                message.get("threadId"),
+                int(message.get("internalDate","0")),
+                sender,
+                h.get("subject"),
+                hashlib.sha256((msg_id+h.get("subject","")).encode()).hexdigest(),
+                message_status,
+                int(time.time()*1000),
+            ),
+        )
+    return h, sender
+
+
+def _set_message_status(msg_id, status):
+    with connection() as conn:
+        conn.execute(
+            "UPDATE gmail_messages SET status=? WHERE id=?",
+            (status, msg_id),
+        )
+
+
+def _handle_parsed_message(parsed, msg_id, sender, h, stats):
+    t,e=parsed
+    _set_message_status(msg_id, "PARSED")
+    sync_transaction(t)
+    sync_evidence(e)
+    stats["parsedTransactions"] += 1
+    stats["createdEvidence"] += 1
+    if t.bank == "AXIS" and t.type == "CREDIT":
+        stats["axisCredits"] += 1
+
+    # Gmail can be a second source for an SMS transaction. Delay its balance
+    # adjustment until after duplicate reconciliation so one real-world
+    # transaction never changes the balance twice.
+    reconcile_duplicate_transaction(t.id)
+    with connection() as conn:
+        row=conn.execute(
+            "SELECT * FROM transactions WHERE id=?",(t.id,)
+        ).fetchone()
+        _note(
+            stats, sender, h.get("subject"),
+            f"Read as {t.type} {t.amountMinor/100:.2f} {t.currency} "
+            f"{t.bank or '?'} {t.accountType} {t.accountLast4 or '?'}: "
+            + ("merged into an existing transaction (duplicate)"
+               if row and row["duplicate_of"] else "new transaction")
+        )
+        if row and row["duplicate_of"]:
+            stats["duplicateTransactions"] += 1
+        elif row:
+            # A Gmail transaction can be the only authoritative source (for
+            # example an Axis credit with no SMS). In that case it must affect
+            # Splitwise just like an SMS transaction. The adjustment is
+            # idempotent and can be reversed if a later SMS proves this Gmail
+            # row was a duplicate.
+            now = int(time.time() * 1000)
+            apply_transaction_to_account(conn, t, now)
+            apply_splitwise_contribution(conn, t, now)
+
+
+def _handle_unparsed_message(message, msg_id, sender, stats):
+    h=_headers(message.get("payload",{}))
+    combined=f"{h.get('subject','')}\\n{_decode(message.get('payload',{}))}"
+
+    # Only create a review for messages that actually resemble a bank/card
+    # transaction. Ordinary newsletters and unrelated mail are recorded as
+    # ignored evidence without flooding the review queue.
+    has_amount=bool(re.search(
+        r"(?i)(?:INR|Rs\\.?)[\\s₹]*[0-9][0-9,]*(?:\\.\\d{1,2})?",
+        combined,
+    ))
+    has_bank=_recognized_bank(combined,sender) is not None
+    has_financial_marker=bool(_TRANSACTION_SIGNAL.search(combined))
+    h_status="REVIEW" if has_amount and has_bank and has_financial_marker else "IGNORED"
+
+    e=SyncEvidenceModel(
+        id="gmail-evidence:"+msg_id,
+        sourceType="GMAIL",
+        sourceId=msg_id,
+        status="UNMATCHED",
+        observedAt=int(message.get("internalDate","0")),
+        transactionId=None,
+        amountMinor=None,
+        currency="INR",
+        direction=None,
+        bankProvider=None,
+        accountLast4=None,
+        reference=None,
+        contentHash=hashlib.sha256(combined.encode()).hexdigest(),
+        confidence=0.0,
+    )
+    sync_evidence(e)
+    _set_message_status(msg_id, h_status)
+
+    _note(
+        stats, sender, h.get("subject"),
+        "Looks like a bank e-mail but could not be read safely (sent to Review)"
+        if h_status == "REVIEW"
+        else "Not a transaction e-mail (no amount/bank/transaction wording)"
+    )
+    if h_status == "REVIEW":
+        stats["reviewCount"] += 1
+        add_review(
+            "GMAIL",
+            "bank-like email could not be parsed safely",
+            evidence_id=e.id,
+        )
+    else:
+        stats["ignoredCount"] += 1
+
+
+def _process_listed_message(service, item, retried_statement_message_ids, stats):
+    stats["messagesScanned"] += 1
+    msg_id=item["id"]
+
+    # A PENDING statement was already fetched and processed by the explicit
+    # retry pass. Do not process the same message again in the normal scan.
+    if msg_id in retried_statement_message_ids:
+        stats["alreadyProcessed"] += 1
+        return
+
+    if _is_unlikely_bank_mail(item, stats):
+        return
+
+    subject_preview = item.get("subject", "") or ""
+    statement_hint = bool(re.search(
+        r"(?i)\bstatement\b|\be[- ]?statement\b",
+        subject_preview,
+    ))
+
+    skip, existing = _previous_message_state(item, msg_id, statement_hint, stats)
+    if skip:
+        return
+
+    message=service.users().messages().get(
+        userId="me",id=msg_id,format="full"
+    ).execute()
+
+    _record_card_bill_email(message, stats)
+    statement_stats = _record_statement_attachments(service, message, stats)
+
+    # If this message was already fully processed and its statement
+    # attachments have now been checked, do not feed the statement
+    # notification itself back through the transaction parser.
+    if existing and existing["status"] == "PARSED":
+        stats["alreadyProcessed"] += 1
+        return
+
+    parsed=parse_bank_email(message)
+    h, sender = _store_message_row(message, msg_id, parsed, statement_stats)
+
+    # A statement email is not itself a transaction. When a PDF attachment is
+    # present, never feed the surrounding statement summary through the
+    # bank-alert transaction parser. A failed PDF stays PENDING so the next
+    # sync retries it.
+    if statement_hint and statement_stats["attachmentsScanned"] > 0:
+        _set_message_status(
+            msg_id, "PARSED" if statement_stats["attachmentsParsed"] > 0 else "PENDING"
+        )
+        return
+
+    if parsed:
+        _handle_parsed_message(parsed, msg_id, sender, h, stats)
+    else:
+        _handle_unparsed_message(message, msg_id, sender, stats)
+
+
+def _ingest_messages(service,query="newer_than:30d"):
+    stats=_new_stats()
 
     # These two repairs are cheap, database-only safety passes. Run them
     # on every sync so a long-lived API process also cleans up false rows that
@@ -240,273 +543,7 @@ def _ingest_messages(service,query="newer_than:30d"):
             stats["gmailDiagnostics"] = result["diagnostics"]
 
         for item in result.get("messages",[]):
-            stats["messagesScanned"] += 1
-            msg_id=item["id"]
-
-            # A PENDING statement was already fetched and processed by the
-            # explicit retry pass above. Do not process the same message again
-            # during the normal mailbox scan.
-            if msg_id in retried_statement_message_ids:
-                stats["alreadyProcessed"] += 1
-                continue
-
-            # IMAP can cheaply return headers without downloading the full
-            # message. On a first/manual scan this avoids fetching newsletters,
-            # promotions, OTPs, etc. Only likely bank/transaction mail gets a
-            # full RFC822 fetch.
-            if item.get("from") is not None:
-                sender_preview = parseaddr(item.get("from", ""))[1].lower()
-                subject_preview = item.get("subject", "") or ""
-                sender_domain = sender_preview.rsplit("@", 1)[-1] if "@" in sender_preview else ""
-                known_bank_sender = any(
-                    sender_domain == domain or sender_domain.endswith("." + domain)
-                    for domains in _BANK_SENDER_DOMAINS.values()
-                    for domain in domains
-                )
-                transaction_subject = bool(re.search(
-                    r"(?i)transaction|debited|credited|payment|purchase|spent|withdraw",
-                    subject_preview,
-                ))
-                if not known_bank_sender and not transaction_subject:
-                    stats["ignoredCount"] += 1
-                    note(sender_preview, subject_preview,
-                         "Skipped: sender is not a known bank and the subject has no transaction words")
-                    continue
-
-            subject_preview = item.get("subject", "") or ""
-            statement_hint = bool(re.search(
-                r"(?i)\bstatement\b|\be[- ]?statement\b",
-                subject_preview,
-            ))
-
-            with connection() as conn:
-                existing = conn.execute(
-                    "SELECT status FROM gmail_messages WHERE id=?",
-                    (msg_id,),
-                ).fetchone()
-
-                # A parsed message is terminal only while its evidence still
-                # points at an active ledger transaction. This matters after a
-                # local-history reset and after legacy repair work: the Gmail
-                # processing marker can survive while the transaction that was
-                # created from it has been voided/removed. In that case the
-                # message must be eligible for parsing again or a valid Axis
-                # credit (or any other authoritative bank email) can be lost
-                # forever behind the PARSED marker.
-                if existing and existing["status"] == "PARSED":
-                    # Statement attachments are retried explicitly before the
-                    # normal mailbox scan. Once that retry has marked the
-                    # message PARSED, do not fetch/process the same attachment
-                    # a second time in this pass.
-                    if statement_hint:
-                        stats["alreadyProcessed"] += 1
-                        continue
-
-                    active_link = conn.execute(
-                        """
-                        SELECT 1
-                        FROM evidence e
-                        JOIN transactions t
-                          ON (
-                               t.id = e.transaction_id
-                               OR t.id = e.matched_transaction_id
-                             )
-                        WHERE e.source_type='GMAIL'
-                          AND (
-                               e.source_id=?
-                               OR e.source_id LIKE 'imap:%:' || ?
-                             )
-                          AND t.status='ACTIVE'
-                          AND t.duplicate_of IS NULL
-                        LIMIT 1
-                        """,
-                        (msg_id, msg_id),
-                    ).fetchone()
-                    if active_link:
-                        stats["alreadyProcessed"] += 1
-                        note(item.get("from"), subject_preview,
-                             "Already processed (its transaction exists)")
-                        continue
-
-                    # The message was marked PARSED but no active transaction
-                    # remains. Move it back to PENDING so the current parser
-                    # gets a chance to recreate the authoritative transaction.
-                    conn.execute(
-                        "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
-                        (msg_id,),
-                    )
-                    # Treat this as a fresh parse below. The local variable
-                    # still contains the old PARSED marker and would otherwise
-                    # hit the post-fetch terminal-message guard.
-                    existing = None
-
-            message=service.users().messages().get(
-                userId="me",id=msg_id,format="full"
-            ).execute()
-
-            bill_from_email = parse_card_bill_email(message)
-            if bill_from_email:
-                bill_result = sync_card_bill(bill_from_email)
-                stats.setdefault("cardBillDetected", 0)
-                stats["cardBillDetected"] += 1
-                stats.setdefault("cardBillResults", [])
-                stats["cardBillResults"].append(bill_result)
-
-            statement_stats = process_statement_attachments(service, message)
-            stats["statementAttachmentsScanned"] += statement_stats["attachmentsScanned"]
-            stats["statementAttachmentsParsed"] += statement_stats["attachmentsParsed"]
-            stats["statementTransactionsAdded"] += statement_stats["transactionsAdded"]
-            stats["statementTransactionsMatched"] += statement_stats["transactionsMatched"]
-            stats["statementErrors"].extend(statement_stats["errors"])
-
-            # If this message was already fully processed and its statement
-            # attachments have now been checked, do not feed the statement
-            # notification itself back through the transaction parser.
-            if existing and existing["status"] == "PARSED":
-                stats["alreadyProcessed"] += 1
-                continue
-
-            parsed=parse_bank_email(message)
-
-            with connection() as conn:
-                h=_headers(message.get("payload",{}))
-                sender=parseaddr(h.get("from",""))[1]
-                message_status = (
-                    "PARSED"
-                    if parsed or statement_stats["attachmentsParsed"] > 0
-                    else "PENDING"
-                )
-                conn.execute(
-                    """INSERT OR IGNORE INTO gmail_messages
-                    (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)
-                    VALUES(?,?,?,?,?,?,?,?)""",
-                    (
-                        msg_id,
-                        message.get("threadId"),
-                        int(message.get("internalDate","0")),
-                        sender,
-                        h.get("subject"),
-                        hashlib.sha256((msg_id+h.get("subject","")).encode()).hexdigest(),
-                        message_status,
-                        int(time.time()*1000),
-                    ),
-                )
-
-            # A statement email is not itself a transaction. When a PDF
-            # attachment is present, never feed the surrounding statement
-            # summary through the bank-alert transaction parser. A failed PDF
-            # stays PENDING so the next sync retries it.
-            if statement_hint and statement_stats["attachmentsScanned"] > 0:
-                if statement_stats["attachmentsParsed"] > 0:
-                    with connection() as conn:
-                        conn.execute(
-                            "UPDATE gmail_messages SET status='PARSED' WHERE id=?",
-                            (msg_id,),
-                        )
-                else:
-                    with connection() as conn:
-                        conn.execute(
-                            "UPDATE gmail_messages SET status='PENDING' WHERE id=?",
-                            (msg_id,),
-                        )
-                continue
-
-            if parsed:
-                t,e=parsed
-                with connection() as conn:
-                    conn.execute(
-                        "UPDATE gmail_messages SET status='PARSED' WHERE id=?",
-                        (msg_id,),
-                    )
-                sync_transaction(t)
-                sync_evidence(e)
-                stats["parsedTransactions"] += 1
-                stats["createdEvidence"] += 1
-                if t.bank == "AXIS" and t.type == "CREDIT":
-                    stats["axisCredits"] += 1
-
-                # Gmail can be a second source for an SMS transaction. Delay
-                # its balance adjustment until after duplicate reconciliation
-                # so one real-world transaction never changes the balance twice.
-                reconcile_duplicate_transaction(t.id)
-                with connection() as conn:
-                    row=conn.execute(
-                        "SELECT * FROM transactions WHERE id=?",(t.id,)
-                    ).fetchone()
-                    note(
-                        sender, h.get("subject"),
-                        f"Read as {t.type} {t.amountMinor/100:.2f} {t.currency} "
-                        f"{t.bank or '?'} {t.accountType} {t.accountLast4 or '?'}: "
-                        + ("merged into an existing transaction (duplicate)"
-                           if row and row["duplicate_of"] else "new transaction")
-                    )
-                    if row and row["duplicate_of"]:
-                        stats["duplicateTransactions"] += 1
-                    elif row:
-                        # A Gmail transaction can be the only authoritative
-                        # source (for example an Axis credit with no SMS).
-                        # In that case it must affect Splitwise just like an
-                        # SMS transaction. The adjustment is idempotent and
-                        # can be reversed if a later SMS proves this Gmail row
-                        # was a duplicate.
-                        now = int(time.time() * 1000)
-                        apply_transaction_to_account(conn, t, now)
-                        apply_splitwise_contribution(conn, t, now)
-            else:
-                h=_headers(message.get("payload",{}))
-                combined=f"{h.get('subject','')}\\n{_decode(message.get('payload',{}))}"
-
-                # Only create a review for messages that actually resemble a
-                # bank/card transaction. Ordinary newsletters and unrelated
-                # mail are recorded as ignored evidence without flooding the
-                # review queue.
-                has_amount=bool(re.search(
-                    r"(?i)(?:INR|Rs\\.?)[\\s₹]*[0-9][0-9,]*(?:\\.\\d{1,2})?",
-                    combined,
-                ))
-                has_bank=_recognized_bank(combined,sender) is not None
-                has_financial_marker=bool(_TRANSACTION_SIGNAL.search(combined))
-                h_status="REVIEW" if has_amount and has_bank and has_financial_marker else "IGNORED"
-
-                e=SyncEvidenceModel(
-                    id="gmail-evidence:"+msg_id,
-                    sourceType="GMAIL",
-                    sourceId=msg_id,
-                    status="UNMATCHED",
-                    observedAt=int(message.get("internalDate","0")),
-                    transactionId=None,
-                    amountMinor=None,
-                    currency="INR",
-                    direction=None,
-                    bankProvider=None,
-                    accountLast4=None,
-                    reference=None,
-                    contentHash=hashlib.sha256(combined.encode()).hexdigest(),
-                    confidence=0.0,
-                )
-                sync_evidence(e)
-
-                with connection() as conn:
-                    conn.execute(
-                        "UPDATE gmail_messages SET status=? WHERE id=?",
-                        (h_status, msg_id),
-                    )
-
-                note(
-                    sender, h.get("subject"),
-                    "Looks like a bank e-mail but could not be read safely (sent to Review)"
-                    if h_status == "REVIEW"
-                    else "Not a transaction e-mail (no amount/bank/transaction wording)"
-                )
-                if h_status == "REVIEW":
-                    stats["reviewCount"] += 1
-                    add_review(
-                        "GMAIL",
-                        "bank-like email could not be parsed safely",
-                        evidence_id=e.id,
-                    )
-                else:
-                    stats["ignoredCount"] += 1
+            _process_listed_message(service, item, retried_statement_message_ids, stats)
 
         page_token=result.get("nextPageToken")
         if not page_token:
@@ -522,6 +559,5 @@ def _ingest_messages(service,query="newer_than:30d"):
     # though the matching bank debit already existed. Pair and neutralize
     # internal transfers here too.
     stats["internalTransfersMatched"] = match_internal_transfers()
-
 
     return stats
