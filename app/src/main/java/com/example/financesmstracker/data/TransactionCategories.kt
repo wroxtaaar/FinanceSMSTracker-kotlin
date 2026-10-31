@@ -8,5 +8,5 @@ object TransactionCategories {
         "SALARY", "OTHER"
     )
 
-    val credit = listOf("SALARY", "TRANSFER", "REFUND", "OTHER")
+    val credit = listOf("SALARY", "TRANSFER", "BILL_PAYMENT", "REFUND", "OTHER")
 }
