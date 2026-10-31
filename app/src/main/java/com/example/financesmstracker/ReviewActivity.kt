@@ -18,6 +18,7 @@ import com.example.financesmstracker.data.FinanceDatabaseHelper
 import com.example.financesmstracker.data.ManualTransactionRepository
 import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.data.ReviewStatus
+import com.example.financesmstracker.data.TransactionCategories
 import com.example.financesmstracker.data.TransactionRepository
 import com.example.financesmstracker.data.UnrecognizedSms
 import com.example.financesmstracker.data.TransactionConflict
@@ -169,15 +170,40 @@ class ReviewActivity : AppCompatActivity() {
         val paymentMethod = addSpinner(
             container,
             "Payment Method",
-            PaymentMethod.values().map { it.name }
+            listOf(
+                PaymentMethod.UPI, PaymentMethod.CARD,
+                PaymentMethod.BANK_TRANSFER, PaymentMethod.UNKNOWN
+            ).map { it.name }
         )
         val bank = addField(container, "Bank", inferBank(item.sender))
         val lastFour = addField(container, "Account / Card last 4 digits", guess.lastFour)
         lastFour.inputType = android.text.InputType.TYPE_CLASS_NUMBER
         val merchant = addField(container, "Merchant / Payee (optional)", "")
         val reference = addField(container, "Reference (optional)", "")
-        val category = addField(container, "Category", guess.category)
-        if (guess.credit) direction.setSelection(1)
+        container.addView(TextView(this).apply {
+            text = "Category"
+            setPadding(0, 10, 0, 2)
+        })
+        val category = Spinner(this)
+        container.addView(category)
+        fun showCategories(credit: Boolean, preferred: String?) {
+            val options = if (credit) TransactionCategories.credit else TransactionCategories.debit
+            category.adapter = ArrayAdapter(
+                this, android.R.layout.simple_spinner_dropdown_item, options
+            )
+            val index = options.indexOf(preferred)
+            category.setSelection(if (index >= 0) index else options.indexOf("OTHER"))
+        }
+        showCategories(guess.credit, guess.category)
+        direction.setSelection(if (guess.credit) 1 else 0)
+        direction.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long
+            ) {
+                showCategories(position == 1, category.selectedItem?.toString())
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
 
         container.addView(TextView(this).apply {
             text = "Date: " + SimpleDateFormat(
@@ -223,7 +249,7 @@ class ReviewActivity : AppCompatActivity() {
                     merchantName = merchant.text.toString(),
                     accountLastFour = lastFour.text.toString(),
                     reference = reference.text.toString(),
-                    category = category.text.toString()
+                    category = category.selectedItem.toString()
                 )
 
                 if (result == null) {

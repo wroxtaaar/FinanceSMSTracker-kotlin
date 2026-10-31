@@ -80,18 +80,9 @@ class MainActivity : AppCompatActivity() {
         getSharedPreferences("local_history_state", Context.MODE_PRIVATE)
     }
 
-    internal val categories = listOf(
-        "FOOD", "GROCERIES", "SHOPPING", "FUEL", "TRAVEL",
-        "SUBSCRIPTION", "BILLS", "MEDICAL", "TRANSFER", "ATM",
-        "SALARY", "REFUND", "OTHER"
-    )
+    internal val categories = com.example.financesmstracker.data.TransactionCategories.debit
 
-    internal val creditCategories = listOf(
-        "SALARY",
-        "TRANSFER",
-        "REFUND",
-        "OTHER"
-    )
+    internal val creditCategories = com.example.financesmstracker.data.TransactionCategories.credit
 
     internal val transactionDataChangedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
