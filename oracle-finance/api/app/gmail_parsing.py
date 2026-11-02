@@ -357,6 +357,8 @@ def parse_card_bill_email(message):
         if match:
             amount=int(round(float(match.group(1).replace(",",""))*100))
             break
+    if amount is None:
+        amount=_table_total_amount_due(combined)
     if amount is None or amount <= 0:
         return None
 
@@ -383,6 +385,12 @@ def parse_card_bill_email(message):
             combined,
         )
     if not card_match:
+        # "XXXX XXXX XXXX 0065" / "XXXX-XXXX-XXXX-XX65": a fully masked number.
+        card_match=re.search(
+            r"(?i)(?<![A-Za-z0-9])(?:(?:X{2,}|\*{2,}|[•·]{2,})[\s-]*){1,4}(\d{2,4})(?![0-9])",
+            combined,
+        )
+    if not card_match:
         return None
 
     visible=card_match.group(1)
@@ -400,6 +408,25 @@ def parse_card_bill_email(message):
         "accountLast2":last2,
         "confidence":0.99,
     }
+
+
+def _table_total_amount_due(combined):
+    """Total Amount Due when the labels and values sit in separate table cells.
+
+    Axis statements print a header row ("Total Amount Due INR | Minimum Amount
+    Due (INR) | Payment Due Date") and then a value row ("44445.93 Dr | 889 Dr |
+    21/11/2026"), so no currency sign precedes the number. The first value
+    after the labels is the total. A credit balance ("Cr") means nothing is
+    owed and is not treated as a bill.
+    """
+    match=re.search(
+        r"(?is)total\s+amount\s+due[^0-9]{0,200}?"
+        r"([0-9][0-9,]*\.[0-9]{1,2}|[0-9][0-9,]*)\s*(Dr|Cr)\b",
+        combined,
+    )
+    if not match or match.group(2).lower()=="cr":
+        return None
+    return int(round(float(match.group(1).replace(",",""))*100))
 
 
 def _gmail_default_category(transaction_type, combined):

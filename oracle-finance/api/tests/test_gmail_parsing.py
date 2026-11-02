@@ -569,3 +569,52 @@ def test_statement_email_without_a_card_number_is_not_guessed():
     message = _message("no-card", "Your statement is ready. Total Amount Due: Rs. 2,088.00",
                        subject="Your credit card statement")
     assert parse_card_bill_email(message) is None
+
+
+def _axis_statement_email(total, subject):
+    html = (
+        "<p>Dear Customer,</p><p>Please find enclosed your credit card statement for NOVEMBER 2026.</p>"
+        "<table><tr><th>Total Amount Due INR</th><th>Minimum Amount Due (INR)</th>"
+        "<th>Payment Due Date (DD-MM-YYYY)</th></tr>"
+        f"<tr><td>{total}</td><td>889 Dr</td><td>21/11/2026</td></tr></table>"
+    )
+    message = _message("axis-stmt", html, subject=subject)
+    message["payload"]["headers"][1]["value"] = "cc.statements@axis.bank.in"
+    return message
+
+
+def test_axis_statement_table_layout_is_a_card_bill():
+    from app.gmail_parsing import parse_card_bill_email
+
+    bill = parse_card_bill_email(_axis_statement_email(
+        "44445.93 Dr", "Airtel Axis Bank Rupay Credit Card ending XX06 - November 2026"))
+    assert bill["amountMinor"] == 4444593
+    assert bill["bank"] == "AXIS"
+    assert bill["accountLast2"] == "06"
+
+    bill = parse_card_bill_email(_axis_statement_email(
+        "179761.31 Dr", "Your Axis Bank Ace Credit Card Statement ending XX75 - November 2026"))
+    assert bill["amountMinor"] == 17976131
+    assert bill["accountLast2"] == "75"
+
+
+def test_axis_statement_with_a_credit_balance_is_not_a_bill():
+    from app.gmail_parsing import parse_card_bill_email
+
+    assert parse_card_bill_email(_axis_statement_email(
+        "120.00 Cr", "Axis Bank Ace Credit Card Statement ending XX75")) is None
+
+
+def test_fully_masked_card_number_identifies_an_sbi_statement():
+    from app.gmail_parsing import parse_card_bill_email
+
+    message = _message(
+        "sbi-stmt",
+        "<p>Statement for card XXXX XXXX XXXX 0065</p><p>Total Amount Due: Rs. 1,770.00</p>",
+        subject="Your BPCL SBI Card OCTANE Monthly Statement -Nov 2026",
+    )
+    message["payload"]["headers"][1]["value"] = "Statements@sbicard.com"
+    bill = parse_card_bill_email(message)
+    assert bill["amountMinor"] == 177000
+    assert bill["bank"] == "SBI"
+    assert bill["accountLast4"] == "0065"
