@@ -79,7 +79,10 @@ class SmsReceiver : BroadcastReceiver() {
                     // so phrases such as "Total amt ... Dr." can never become
                     // a fake DEBIT transaction.
                     val cardBill = CardBillStatementParser.parse(sender, fullBody)
-                    if (cardBill != null && trustStatus == SenderTrustStatus.TRUSTED) {
+                    // CRED relays the bank's bill alerts under its own sender id.
+                    val billSenderTrusted = trustStatus == SenderTrustStatus.TRUSTED ||
+                        sender.contains("CREDIN", ignoreCase = true)
+                    if (cardBill != null && billSenderTrusted) {
                         val billKey = "sms-card-bill:" + smsHash
                         FinanceSyncBridge.enqueueCardBill(
                             context,

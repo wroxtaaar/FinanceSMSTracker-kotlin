@@ -22,6 +22,9 @@ object CardBillStatementParser {
         """(?i)(?:credit\s+card\s+(?:no\.?|number|ending(?:\s+in)?)|card\s+(?:no\.?|number|ending(?:\s+in)?))[^0-9]{0,30}(?:X{1,8}|\*{1,8})?\s*(\d{2,4})\b"""
     )
 
+    // CRED style: "credit card bill for Axis Bank XXXX-1175 has been generated".
+    private val maskedCardRegex = Regex("""(?i)\b(?:X{2,8}|\*{2,8})[-\s]?(\d{4})\b""")
+
     private val bankRegexes = listOf(
         "HDFC" to Regex("""(?i)\bHDFC(?:\s+Bank)?\b"""),
         "AXIS" to Regex("""(?i)\bAxis(?:\s+Bank)?\b"""),
@@ -53,7 +56,7 @@ object CardBillStatementParser {
         if (amountPaise <= 0L) return null
 
         val bank = bankRegexes.firstOrNull { it.second.containsMatchIn(text) }?.first
-        val cardMatch = cardRegex.find(text)
+        val cardMatch = cardRegex.find(text) ?: maskedCardRegex.find(text)
         val visible = cardMatch?.groupValues?.getOrNull(1)
         if (visible.isNullOrBlank()) return null
 

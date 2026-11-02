@@ -103,4 +103,27 @@ class CardBillStatementParserTest {
         assertNull(result)
     }
 
+    @Test
+    fun parsesCredBillGeneratedSms() {
+        val result = CardBillStatementParser.parse(
+            "JK-CREDIN-S",
+            "Your credit card bill for Axis Bank XXXX-1175 has been generated.\n\n" +
+                "Total amount: INR 1,79,761.31\nDue date: November 21, 2026\n\n" +
+                "Tap on the link to pay: https://link.cred.club/CREDIN/link/G8My__30 and avoid late payment fees. - CRED"
+        )
+        assertNotNull(result)
+        assertEquals(17976131L, result!!.amountPaise)
+        assertEquals("AXIS", result.bank)
+        assertEquals("1175", result.accountLastFour)
+    }
+
+    @Test
+    fun credBillWithoutCardIsNotGuessed() {
+        val result = CardBillStatementParser.parse(
+            "AX-CREDIN-S",
+            "Update from CRED:\n\nYour credit card bill has been generated.\n\n" +
+                "Total amount: INR 325.80\nDue Date: January 21, 2026"
+        )
+        assertNull(result)
+    }
 }
