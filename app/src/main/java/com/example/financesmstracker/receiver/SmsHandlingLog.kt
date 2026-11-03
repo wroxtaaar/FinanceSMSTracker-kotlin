@@ -24,8 +24,21 @@ object SmsHandlingLog {
         body.replace(Regex("\\s+"), " ").trim().take(SNIPPET_LENGTH)
 
     /** Pure helper so the cap and ordering can be unit tested without Android. */
-    fun appendCapped(existing: List<Entry>, entry: Entry): List<Entry> =
-        (existing + entry).takeLast(MAX_ENTRIES)
+    fun appendCapped(existing: List<Entry>, entry: Entry): List<Entry> {
+        val all = existing + entry
+        // Each source keeps its own newest MAX_ENTRIES so a burst of SMS noise
+        // cannot push notification entries out (and vice versa).
+        val keep = all.filter { isNotification(it) == isNotification(entry) }.takeLast(MAX_ENTRIES).toSet()
+        return all.filter { isNotification(it) != isNotification(entry) || it in keep }
+    }
+
+    enum class Source { ALL, SMS, NOTIFICATION }
+
+    fun fromSource(entries: List<Entry>, source: Source): List<Entry> = when (source) {
+        Source.ALL -> entries
+        Source.SMS -> entries.filter { !isNotification(it) }
+        Source.NOTIFICATION -> entries.filter { isNotification(it) }
+    }
 
     enum class Section { ACCEPTED, REVIEW, OTHER }
 

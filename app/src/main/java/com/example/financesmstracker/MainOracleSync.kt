@@ -59,40 +59,69 @@ internal fun MainActivity.restoreHistoryFromServer() {
 }
 
 internal fun MainActivity.showSmsHandlingLog() {
-    val entries = SmsHandlingLog.read(this)
+    val allEntries = SmsHandlingLog.read(this)
     val gmailText = SmsHandlingLog.readGmailScan(this) ?: "No Gmail scan yet. Tap Sync Gmail."
-    fun count(section: SmsHandlingLog.Section) = SmsHandlingLog.inSection(entries, section).size
-    val tabs = listOf(
-        "Accepted (${count(SmsHandlingLog.Section.ACCEPTED)})" to { SmsHandlingLog.formatSection(entries, SmsHandlingLog.Section.ACCEPTED) },
-        "Review (${count(SmsHandlingLog.Section.REVIEW)})" to { SmsHandlingLog.formatSection(entries, SmsHandlingLog.Section.REVIEW) },
-        "Other (${count(SmsHandlingLog.Section.OTHER)})" to { SmsHandlingLog.formatSection(entries, SmsHandlingLog.Section.OTHER) },
-        "E-mail scan" to { gmailText }
-    )
+    var source = SmsHandlingLog.Source.ALL
     var current = 0
+    val sectionsInOrder = listOf(
+        "Accepted" to SmsHandlingLog.Section.ACCEPTED,
+        "Review" to SmsHandlingLog.Section.REVIEW,
+        "Other" to SmsHandlingLog.Section.OTHER
+    )
     val view = android.widget.TextView(this).apply {
         setTextIsSelectable(true)
         setPadding(48, 24, 48, 24)
         textSize = 13f
     }
-    fun currentText() = tabs[current].second()
-    val group = android.widget.RadioGroup(this).apply {
+    val tabGroup = android.widget.RadioGroup(this).apply {
         orientation = android.widget.LinearLayout.HORIZONTAL
         setPadding(24, 16, 24, 0)
     }
-    tabs.forEachIndexed { index, (label, _) ->
-        group.addView(android.widget.RadioButton(this).apply {
+    val tabButtons = mutableListOf<android.widget.RadioButton>()
+    fun entries() = SmsHandlingLog.fromSource(allEntries, source)
+    fun currentText(): String =
+        if (current >= sectionsInOrder.size) gmailText
+        else SmsHandlingLog.formatSection(entries(), sectionsInOrder[current].second)
+    fun refresh() {
+        val list = entries()
+        sectionsInOrder.forEachIndexed { i, (label, section) ->
+            tabButtons[i].text = "$label (${SmsHandlingLog.inSection(list, section).size})"
+        }
+        view.text = currentText()
+    }
+    (sectionsInOrder.map { it.first } + "E-mail scan").forEachIndexed { index, label ->
+        val button = android.widget.RadioButton(this).apply {
             id = android.view.View.generateViewId()
             text = label
             textSize = 12f
             isChecked = index == 0
-            setOnClickListener { current = index; view.text = currentText() }
+            setOnClickListener { current = index; refresh() }
+        }
+        tabButtons.add(button)
+        tabGroup.addView(button)
+    }
+    val sourceGroup = android.widget.RadioGroup(this).apply {
+        orientation = android.widget.LinearLayout.HORIZONTAL
+        setPadding(24, 0, 24, 8)
+    }
+    listOf(
+        "All" to SmsHandlingLog.Source.ALL,
+        "SMS" to SmsHandlingLog.Source.SMS,
+        "Notifications" to SmsHandlingLog.Source.NOTIFICATION
+    ).forEach { (label, value) ->
+        sourceGroup.addView(android.widget.RadioButton(this).apply {
+            id = android.view.View.generateViewId()
+            text = label
+            textSize = 12f
+            isChecked = value == source
+            setOnClickListener { source = value; refresh() }
         })
     }
-    view.text = currentText()
-    val scroll = android.widget.HorizontalScrollView(this).apply { addView(group) }
+    refresh()
     val container = android.widget.LinearLayout(this).apply {
         orientation = android.widget.LinearLayout.VERTICAL
-        addView(scroll)
+        addView(android.widget.HorizontalScrollView(this@showSmsHandlingLog).apply { addView(tabGroup) })
+        addView(android.widget.HorizontalScrollView(this@showSmsHandlingLog).apply { addView(sourceGroup) })
         addView(android.widget.ScrollView(this@showSmsHandlingLog).apply { addView(view) })
     }
     AlertDialog.Builder(this)
@@ -101,7 +130,7 @@ internal fun MainActivity.showSmsHandlingLog() {
         .setPositiveButton("Close", null)
         .setNeutralButton("Copy") { _, _ ->
             val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("SMS log", tabs[current].first + "\n\n" + currentText()))
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("SMS log", currentText()))
             Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
         }
         .setNegativeButton("Ledger audit") { _, _ -> showLedgerAudit() }

@@ -54,4 +54,16 @@ class SmsHandlingLogTest {
         assertTrue(SmsHandlingLog.formatSection(all, SmsHandlingLog.Section.ACCEPTED).contains("[SMS] HDFCBK"))
         assertEquals("Nothing here.", SmsHandlingLog.formatSection(emptyList(), SmsHandlingLog.Section.REVIEW))
     }
+
+    @Test
+    fun smsAndNotificationsKeepSeparateHistoriesAndFilter() {
+        var list = emptyList<SmsHandlingLog.Entry>()
+        list = SmsHandlingLog.appendCapped(list, SmsHandlingLog.Entry(0, "Gmail notification: A", "b", "Saved as X"))
+        repeat(SmsHandlingLog.MAX_ENTRIES + 10) {
+            list = SmsHandlingLog.appendCapped(list, SmsHandlingLog.Entry(it + 1L, "SMS", "b", "Ignored"))
+        }
+        assertEquals(1, SmsHandlingLog.fromSource(list, SmsHandlingLog.Source.NOTIFICATION).size)
+        assertEquals(SmsHandlingLog.MAX_ENTRIES, SmsHandlingLog.fromSource(list, SmsHandlingLog.Source.SMS).size)
+        assertEquals(SmsHandlingLog.MAX_ENTRIES + 1, SmsHandlingLog.fromSource(list, SmsHandlingLog.Source.ALL).size)
+    }
 }
