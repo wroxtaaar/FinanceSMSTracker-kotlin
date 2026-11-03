@@ -193,3 +193,27 @@ def test_pdf_rederive_migration_drops_only_recent_pdf_evidence_once():
         keys = {r[0] for r in conn.execute("SELECT source_key FROM card_bill_evidence").fetchall()}
     assert keys == {"old-pdf", "mail"}
     assert migrations.migrate_card_bill_pdf_rederive(now_ms_value=T0 + DAY) == 0
+
+
+def test_spend_after_the_statement_stays_in_active_spend_when_balance_is_raised():
+    from app.ledger import apply_transaction_to_account
+
+    class Spend:
+        id = "spend-1"; amountMinor = 1_079_600; currency = "INR"; type = "DEBIT"
+        paymentMethod = "CARD"; accountType = "CREDIT_CARD"; bank = "ICICI"
+        merchantOrPayee = "GPAY UTILIT"; accountLast4 = "1012"; reference = None
+        timestamp = T0 + DAY; category = "BILLS"; confidence = 0.99
+
+    set_balance("c1012", "ICICI Credit Card", "INR", "CREDIT_CARD", "ICICI", "1012", 0)
+    from app.ledger import sync_transaction
+    sync_transaction(Spend)
+    # Statement (before the spend) says 1,00,000 is billed; tracked outstanding is lower.
+    assert _bill("stmt", 10_000_000, observed=T0)["status"] == "APPLIED"
+    with connection() as conn:
+        row = conn.execute("SELECT balance_minor,bill_balance_minor FROM accounts WHERE id='c1012'").fetchone()
+    assert row["bill_balance_minor"] == 10_000_000
+    assert row["balance_minor"] == 10_000_000 + 1_079_600  # active spend = the later purchase
+    # Re-reading is stable.
+    _bill("stmt", 10_000_000, observed=T0)
+    with connection() as conn:
+        assert conn.execute("SELECT balance_minor FROM accounts WHERE id='c1012'").fetchone()[0] == 11_079_600
