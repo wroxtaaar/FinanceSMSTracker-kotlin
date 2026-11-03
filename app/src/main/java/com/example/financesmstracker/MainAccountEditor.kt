@@ -59,34 +59,15 @@ internal fun MainActivity.showManualAccountsDialog(
          * card credits/payments reduce Bill first.
          */
         val rows = accounts.map { account ->
-            // A credit card can legitimately have a negative net balance
-            // (for example, a refund/credit posted while the opening
-            // balance is zero). The old coerceIn(0, balance) call throws
-            // IllegalArgumentException when balance is negative because
-            // the lower bound becomes greater than the upper bound.
-            // Keep the editable Bill/Active buckets non-negative and show
-            // the negative amount separately as a credit balance.
-            val isCreditBalance = account.balanceMinor < 0L
-            val billMinor = if (isCreditBalance) {
-                0L
-            } else {
-                account.billBalanceMinor.coerceAtLeast(0L).coerceAtMost(account.balanceMinor)
-            }
-            val activeMinor = if (isCreditBalance) {
-                0L
-            } else {
-                (account.balanceMinor - billMinor).coerceAtLeast(0L)
-            }
-            val creditBalanceMinor = if (isCreditBalance) -account.balanceMinor else 0L
+            // Bill is never negative. Active Spend = outstanding - Bill and may be
+            // negative: paying more than the bill, or a refund, leaves a credit.
+            val billMinor = account.billBalanceMinor.coerceAtLeast(0L)
+            val activeMinor = account.balanceMinor - billMinor
 
             val label = TextView(this).apply {
                 text = buildString {
                     append(displayAccountName(account.name))
                     account.last4?.let { append(" ••••").append(it) }
-                    if (isCreditBalance) {
-                        append("\nCredit balance: ")
-                        append(formatDecimalMinor(creditBalanceMinor))
-                    }
                 }
                 textSize = 14f
                 setPadding(0, 10, 0, 4)
@@ -101,7 +82,8 @@ internal fun MainActivity.showManualAccountsDialog(
             }
 
             val activeInput = EditText(this).apply {
-                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or
+                    InputType.TYPE_NUMBER_FLAG_SIGNED
                 setSingleLine(true)
                 hint = "Active spend"
                 setText(formatDecimalMinor(activeMinor))
@@ -211,7 +193,7 @@ internal fun MainActivity.showManualAccountsDialog(
                         account.second.requestFocus()
                         return@setOnClickListener
                     }
-                    if (active == null || active < 0) {
+                    if (active == null) {
                         account.third.error = "Enter a valid active amount"
                         account.third.requestFocus()
                         return@setOnClickListener

@@ -185,8 +185,9 @@ def update_balance(account_id:str,payload:BalanceRequest,x_sync_token:str=Header
     require_token(x_sync_token)
     if account_id!=payload.id: raise HTTPException(400,"account id mismatch")
     if payload.accountType == "CREDIT_CARD" and payload.billBalanceMinor is not None:
-        if payload.billBalanceMinor < 0 or payload.billBalanceMinor > payload.balanceMinor:
-            raise HTTPException(400,"bill balance must be between 0 and current card outstanding")
+        # Active Spend (outstanding - bill) may be negative after an overpayment or refund.
+        if payload.billBalanceMinor < 0:
+            raise HTTPException(400,"bill balance cannot be negative")
     set_balance(
         payload.id,
         payload.name,

@@ -519,27 +519,6 @@ def sync_card_bill(bill):
              WHERE id=?""",
             (bill_value, now_ms(), account["id"]),
         )
-        # What is owed in total can never be less than the printed bill plus
-        # everything spent on the card after the statement date. If the
-        # tracked outstanding is lower, the statement is the better anchor;
-        # move the opening balance with it so the audit stays clean. Spends
-        # made after the statement stay in Active Spend (balance - bill).
-        after = conn.execute(
-            """SELECT COALESCE(SUM(ba.delta_minor),0) v
-               FROM balance_adjustments ba JOIN transactions t ON t.id=ba.transaction_id
-               WHERE ba.account_id=? AND t.timestamp>?""",
-            (account["id"], observed_at),
-        ).fetchone()["v"]
-        required = bill_value + max(int(after), 0)
-        shortfall = required - int(account["balance_minor"] or 0)
-        if shortfall > 0:
-            conn.execute(
-                """UPDATE accounts
-                   SET balance_minor=balance_minor+?,
-                       opening_balance_minor=COALESCE(opening_balance_minor,0)+?
-                 WHERE id=?""",
-                (shortfall, shortfall, account["id"]),
-            )
         conn.execute(
             """UPDATE card_bill_evidence
                SET applied=1
@@ -627,7 +606,7 @@ def set_balance(account_id,name,currency,account_type,bank,last4,balance_minor,b
                     else int(balance_minor)
                 )
             else:
-                bill_value = max(0, min(int(bill_balance_minor), int(balance_minor)))
+                bill_value = max(0, int(bill_balance_minor))  # Active Spend (balance - bill) may be negative: a credit
         else:
             bill_value = 0
 
