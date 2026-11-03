@@ -80,7 +80,71 @@ internal fun MainActivity.showSmsHandlingLog() {
             cm.setPrimaryClip(android.content.ClipData.newPlainText("SMS log", text))
             Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
         }
+        .setNegativeButton("Ledger audit") { _, _ -> showLedgerAudit() }
         .show()
+}
+
+internal fun formatLedgerAudit(body: String): String {
+    fun money(minor: Long) = String.format(java.util.Locale.US, "%.2f", minor / 100.0)
+    val json = org.json.JSONObject(body)
+    val out = StringBuilder("ACCOUNTS (drift = stored - opening - applied rows)\n")
+    val accounts = json.getJSONArray("accounts")
+    for (i in 0 until accounts.length()) {
+        val a = accounts.getJSONObject(i)
+        out.append("\n${a.optString("type")} ${a.optString("bank")} ${a.optString("last4")}\n")
+        out.append("  balance ${money(a.getLong("balanceMinor"))}  bill ${money(a.getLong("billBalanceMinor"))}\n")
+        out.append("  opening ${money(a.getLong("openingMinor"))} + applied ${money(a.getLong("appliedDeltaMinor"))}")
+        out.append(" (${a.getInt("appliedRows")} rows) = ${money(a.getLong("expectedMinor"))}\n")
+        out.append("  DRIFT ${money(a.getLong("driftMinor"))}  manualEditAt ${a.getLong("balanceReconciledAt")}\n")
+    }
+    val sw = json.getJSONObject("splitwise")
+    out.append("\nSPLITWISE shown ${money(sw.getLong("shownMinor"))}, ledger sum ${money(sw.getLong("ledgerSumMinor"))}\n")
+    val m = sw.optJSONObject("manual")
+    if (m != null) {
+        out.append("  baseline ${money(m.optLong("baseline_amount_minor"))} at ledger ${money(m.optLong("baseline_ledger_minor"))}, set at ${m.optLong("updated_at")}\n")
+    }
+    out.append("\nRECENT ROWS (newest first)\n")
+    val rows = json.getJSONArray("recentTransactions")
+    for (i in 0 until rows.length()) {
+        val r = rows.getJSONObject(i)
+        out.append("\n${r.optLong("timestamp")} ${r.optString("type")} ${money(r.optLong("amount_minor"))} ${r.optString("category")}\n")
+        out.append("  ${r.optString("bank")} ${r.optString("account_last4")} ${r.optString("merchant_or_payee")} [${r.optString("status")}]")
+        if (!r.isNull("duplicate_of")) out.append(" dup_of ${r.optString("duplicate_of")}")
+        out.append("\n  bank delta ${if (r.isNull("bank_delta")) "none" else money(r.optLong("bank_delta"))}")
+        out.append(", splitwise delta ${if (r.isNull("sw_delta")) "none" else money(r.optLong("sw_delta"))}\n")
+        out.append("  id ${r.optString("id")}\n")
+    }
+    return out.toString()
+}
+
+internal fun MainActivity.showLedgerAudit() {
+    Toast.makeText(this, "Loading audit...", Toast.LENGTH_SHORT).show()
+    oracleExecutor.execute {
+        val result = FinanceSyncClient(this@showLedgerAudit).fetchAudit().mapCatching { formatLedgerAudit(it) }
+        runOnUiThread {
+            result.onSuccess { text ->
+                val view = android.widget.TextView(this).apply {
+                    this.text = text
+                    setTextIsSelectable(true)
+                    setPadding(48, 24, 48, 24)
+                    textSize = 12f
+                    typeface = android.graphics.Typeface.MONOSPACE
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("Ledger audit (read-only)")
+                    .setView(android.widget.ScrollView(this).apply { addView(view) })
+                    .setPositiveButton("Close", null)
+                    .setNeutralButton("Copy") { _, _ ->
+                        val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("Ledger audit", text))
+                        Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+                    }
+                    .show()
+            }.onFailure { error ->
+                Toast.makeText(this, "Audit failed: " + (error.message ?: "Unavailable"), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 }
 
 internal fun MainActivity.showOracleSettingsDialog() {

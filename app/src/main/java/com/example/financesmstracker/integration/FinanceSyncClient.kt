@@ -250,6 +250,13 @@ class FinanceSyncClient(
         return put("/api/v1/transactions/" + android.net.Uri.encode(oracleId) + "/splitwise-share", json.toString())
     }
 
+    /** Read-only explanation of balances, drift and Splitwise composition (raw JSON). */
+    fun fetchAudit(recent: Int = 25): Result<String> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return get("/api/v1/audit?recent=$recent")
+    }
+
     fun fetchSummary(): Result<OracleLedgerSummary> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))

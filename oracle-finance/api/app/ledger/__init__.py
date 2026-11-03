@@ -15,11 +15,13 @@ from .accounts import _auto_provision_bank_account, _resolve_canonical_row, add_
 from .foreign import _convert_foreign_transaction, foreign_amount_info, foreign_amount_map, migrate_foreign_currency_rows, set_foreign_inr_amount
 from .migrations import migrate_card_bill_reread, migrate_gmail_default_category, migrate_splitwise_other_optout, migrate_splitwise_salary_optout
 from .ingest import sync_evidence, sync_transaction
+from .audit import ledger_audit
 from .queries import add_review, list_review_queue, list_transactions, true_available
 
 # `from app.ledger import *` (used by main.py) exports exactly the public names
 # ledger.py used to define, and none of the submodule names.
 __all__ = [
+    "ledger_audit",
     "add_receivable",
     "add_review",
     "apply_internal_transfer_candidates",

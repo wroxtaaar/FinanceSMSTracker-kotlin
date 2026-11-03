@@ -233,6 +233,10 @@ def get_receivables(currency:str="INR",x_sync_token:str=Header(default="")):
 def summary(currency:str="INR",x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return true_available(currency)
 
+@app.get("/api/v1/audit")
+def audit(recent:int=25,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return ledger_audit(recent)
+
 @app.get("/api/v1/transactions")
 def transactions(limit:int=100,x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return {"transactions":list_transactions(max(1,min(limit,1000)))}
