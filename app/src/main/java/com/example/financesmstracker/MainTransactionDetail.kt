@@ -141,6 +141,78 @@ internal fun MainActivity.setupSalaryShareSection(dialogView: View, tx: Transact
     }
 }
 
+/**
+ * A bank debit that paid one of the user's credit cards, when the card never
+ * sent its own confirmation. Marking it records the matching card credit (same
+ * amount and time, a "Credit Card Bill Payment"), which lowers the card's
+ * Bill, locks the bill against older statements, and pairs with this debit as
+ * a transfer between own accounts so Splitwise does not rise. Deleting the
+ * card credit undoes it.
+ */
+internal fun MainActivity.setupMarkCardPaymentButton(dialogView: View, tx: Transaction, dialog: AlertDialog) {
+    val button = dialogView.findViewById<Button>(R.id.buttonMarkCardPayment)
+    val eligible = tx.transactionType == TransactionType.DEBIT &&
+        tx.accountType == com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT &&
+        tx.currency.equals("INR", ignoreCase = true)
+    if (!eligible) return
+    button.visibility = View.VISIBLE
+    button.setOnClickListener {
+        button.isEnabled = false
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@setupMarkCardPaymentButton).fetchAccounts()
+            runOnUiThread {
+                button.isEnabled = true
+                val cards = result.getOrNull().orEmpty().filter { it.accountType == "CREDIT_CARD" }
+                if (cards.isEmpty()) {
+                    Toast.makeText(this, "No credit cards found. Check the Oracle connection.", Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                val labels = cards.map { "${it.name} ••${it.last4 ?: "?"}" }.toTypedArray()
+                AlertDialog.Builder(this)
+                    .setTitle("Which card did this pay?")
+                    .setItems(labels) { _, which ->
+                        val card = cards[which]
+                        val credit = Transaction(
+                            amountPaise = tx.amountPaise,
+                            currency = "INR",
+                            transactionType = TransactionType.CREDIT,
+                            paymentMethod = tx.paymentMethod,
+                            accountType = com.example.financesmstracker.parser.AccountType.CREDIT_CARD,
+                            bank = card.bank,
+                            merchantName = "Credit Card Bill Payment",
+                            payeeId = null,
+                            accountLastFour = card.last4,
+                            refNumber = tx.refNumber,
+                            timestamp = tx.timestamp,
+                            smsHash = "manual-card-payment:" + tx.id,
+                            category = "TRANSFER",
+                            parserConfidence = 1.0f
+                        )
+                        val rowId = repository.insertTransaction(credit)
+                        when {
+                            rowId == -1L -> Toast.makeText(this, "Already marked as a card payment", Toast.LENGTH_LONG).show()
+                            rowId == 0L -> Toast.makeText(this, "Not saved: older than your cleared history", Toast.LENGTH_LONG).show()
+                            else -> {
+                                repository.getTransactionById(rowId)?.let {
+                                    FinanceSyncBridge.enqueueCanonical(this, it, null)
+                                }
+                                dialog.dismiss()
+                                loadTransactions()
+                                Toast.makeText(
+                                    this,
+                                    "Recorded as a payment to ${card.name} ••${card.last4}. Delete that card credit to undo.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+    }
+}
+
 internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
     val dialogView = LayoutInflater.from(this)
         .inflate(R.layout.dialog_transaction_detail, null)
@@ -304,6 +376,8 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
         checkboxRememberPayee.visibility = View.GONE
         checkboxRememberPayee.isChecked = false
     }
+
+    setupMarkCardPaymentButton(dialogView, tx, dialog)
 
     buttonVoidTransaction.setOnClickListener {
         AlertDialog.Builder(this)

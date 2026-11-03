@@ -106,3 +106,29 @@ def test_splitwise_rule_migration_keeps_the_shown_value(tmp_path, monkeypatch):
     L.rebuild_manual_splitwise_total()
     assert L.get_manual_splitwise_total("INR") == 777_000
     assert migrations.migrate_splitwise_statement_rule() is False
+
+
+def test_manually_marked_card_payment_pairs_with_the_bank_debit(tmp_path, monkeypatch):
+    """The phone's 'this was a card bill payment' button creates this card credit."""
+    from types import SimpleNamespace
+    from app.db import connection
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "mark.db"))
+    db.init_db()
+    L.set_balance("hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "2222", 1_000_000)
+    L.set_balance("c8001", "ICICI Credit Card", "INR", "CREDIT_CARD", "ICICI", "8001", 300_000, 300_000)
+    L.set_manual_splitwise_total("INR", 0)
+    ts = 1_800_000_000_000
+    debit = sms_debit(bank="HDFC", last4="2222", ts=ts, id="sms:pay", amount=300_000, ref="RRN123456")
+    credit = SimpleNamespace(
+        id="manual-card-payment:7", amountMinor=300_000, currency="INR", type="CREDIT",
+        paymentMethod="UPI", accountType="CREDIT_CARD", bank="ICICI", merchantOrPayee="Credit Card Bill Payment",
+        accountLast4="8001", reference="RRN123456", timestamp=ts, category="TRANSFER", confidence=1.0)
+    for t in (debit, credit):
+        L.sync_transaction(t)
+    L.match_internal_transfers()
+    L.rebuild_manual_splitwise_total()
+    with connection() as conn:
+        card = conn.execute("SELECT balance_minor,bill_balance_minor,bill_locked_at FROM accounts WHERE id='c8001'").fetchone()
+    assert card["bill_balance_minor"] == 0 and card["balance_minor"] == 0
+    assert card["bill_locked_at"] > 0
+    assert L.get_manual_splitwise_total("INR") == 0
