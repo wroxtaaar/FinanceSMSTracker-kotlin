@@ -172,6 +172,20 @@ internal fun MainActivity.setupMarkCardPaymentButton(dialogView: View, tx: Trans
                     .setTitle("Which card did this pay?")
                     .setItems(labels) { _, which ->
                         val card = cards[which]
+                        val existing = com.example.financesmstracker.transfer.CardPaymentMatch.findExisting(
+                            candidates = repository.getTransactionsByAmount(tx.amountPaise),
+                            amountPaise = tx.amountPaise,
+                            last4 = card.last4,
+                            aroundMs = tx.timestamp
+                        )
+                        if (existing != null) {
+                            Toast.makeText(
+                                this,
+                                "That card already shows this payment (row ${existing.id}). Nothing added.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@setItems
+                        }
                         val credit = Transaction(
                             amountPaise = tx.amountPaise,
                             currency = "INR",

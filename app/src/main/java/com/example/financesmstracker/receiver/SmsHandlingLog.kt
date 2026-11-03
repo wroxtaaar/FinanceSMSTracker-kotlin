@@ -47,7 +47,7 @@ object SmsHandlingLog {
         val o = entry.outcome
         return when {
             o.startsWith("Saved as") || o.startsWith("Card payment saved") ||
-                o.startsWith("Matched an existing") -> Section.ACCEPTED
+                o.startsWith("Matched") -> Section.ACCEPTED
             o.startsWith("Sent to Review") || o.startsWith("ERROR") ||
                 o.startsWith("NOT SAVED") -> Section.REVIEW
             else -> Section.OTHER

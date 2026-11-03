@@ -272,6 +272,17 @@ class SmsReceiver : BroadcastReceiver() {
         val dbHelper = FinanceDatabaseHelper(context)
         val repository = TransactionRepository(dbHelper, context)
         try {
+            // The user may already have marked the paying bank debit as this
+            // card payment; recording the card's confirmation too would lower
+            // the Bill twice.
+            com.example.financesmstracker.transfer.CardPaymentMatch.findExisting(
+                candidates = repository.getTransactionsByAmount(parsed.amountPaise),
+                amountPaise = parsed.amountPaise,
+                last4 = parsed.cardLastFour,
+                aroundMs = timestamp,
+                onlyManual = true
+            )?.let { return "Matched the card payment you marked (row ${it.id}); no new row" }
+
             val evidence = SourceEvidence(
                 sourceType = SourceType.SMS,
                 sourceKey = "sms-card-bill-payment:" + smsHash,
