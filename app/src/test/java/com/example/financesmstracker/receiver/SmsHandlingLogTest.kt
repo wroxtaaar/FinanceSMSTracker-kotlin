@@ -36,4 +36,22 @@ class SmsHandlingLogTest {
             SmsHandlingLog.formatGmailScan("", emptyList())
         )
     }
+
+    @Test
+    fun entriesAreSortedIntoAcceptedReviewAndOtherSections() {
+        fun e(sender: String, outcome: String) = SmsHandlingLog.Entry(1L, sender, "b", outcome)
+        val saved = e("HDFCBK", "Saved as DEBIT BANK HDFC 5304 (row 1, X)")
+        val note = e("Gmail notification: Alert", "Saved as DEBIT CREDIT_CARD AXIS 1175 INR 1.00 (row 2, Y)")
+        val review = e("AXISBK", "Sent to Review: low confidence")
+        val failed = e("AXISBK", "ERROR: IOException: boom")
+        val noise = e("PROMO", "Ignored: not a financial message")
+        val dup = e("HDFCBK", "Skipped: duplicate (already stored)")
+        val all = listOf(saved, note, review, failed, noise, dup)
+        assertEquals(listOf(saved, note), SmsHandlingLog.inSection(all, SmsHandlingLog.Section.ACCEPTED))
+        assertEquals(listOf(review, failed), SmsHandlingLog.inSection(all, SmsHandlingLog.Section.REVIEW))
+        assertEquals(listOf(noise, dup), SmsHandlingLog.inSection(all, SmsHandlingLog.Section.OTHER))
+        assertTrue(SmsHandlingLog.formatSection(all, SmsHandlingLog.Section.ACCEPTED).contains("[Notification] Alert"))
+        assertTrue(SmsHandlingLog.formatSection(all, SmsHandlingLog.Section.ACCEPTED).contains("[SMS] HDFCBK"))
+        assertEquals("Nothing here.", SmsHandlingLog.formatSection(emptyList(), SmsHandlingLog.Section.REVIEW))
+    }
 }

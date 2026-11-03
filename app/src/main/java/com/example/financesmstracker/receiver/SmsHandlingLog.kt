@@ -27,6 +27,37 @@ object SmsHandlingLog {
     fun appendCapped(existing: List<Entry>, entry: Entry): List<Entry> =
         (existing + entry).takeLast(MAX_ENTRIES)
 
+    enum class Section { ACCEPTED, REVIEW, OTHER }
+
+    /** Where an entry belongs in the Logs screen, judged from what the app did with it. */
+    fun sectionOf(entry: Entry): Section {
+        val o = entry.outcome
+        return when {
+            o.startsWith("Saved as") || o.startsWith("Card payment saved") ||
+                o.startsWith("Matched an existing") -> Section.ACCEPTED
+            o.startsWith("Sent to Review") || o.startsWith("ERROR") ||
+                o.startsWith("NOT SAVED") -> Section.REVIEW
+            else -> Section.OTHER
+        }
+    }
+
+    fun isNotification(entry: Entry): Boolean = entry.sender.startsWith("Gmail notification:")
+
+    fun inSection(entries: List<Entry>, section: Section): List<Entry> =
+        entries.filter { sectionOf(it) == section }
+
+    /** Entries of one section, newest first, each tagged SMS or Notification. */
+    fun formatSection(entries: List<Entry>, section: Section): String {
+        val rows = inSection(entries, section)
+        if (rows.isEmpty()) return "Nothing here."
+        val fmt = SimpleDateFormat("dd MMM HH:mm:ss", Locale.US)
+        return rows.asReversed().joinToString("\n\n") {
+            val source = if (isNotification(it)) "Notification" else "SMS"
+            val sender = it.sender.removePrefix("Gmail notification: ")
+            "${fmt.format(Date(it.at))}  [$source] $sender\n${it.snippet}\n→ ${it.outcome}"
+        }
+    }
+
     fun format(entries: List<Entry>): String {
         if (entries.isEmpty()) return "No SMS handled yet."
         val fmt = SimpleDateFormat("dd MMM HH:mm:ss", Locale.US)

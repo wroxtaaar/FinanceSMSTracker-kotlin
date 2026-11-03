@@ -12,6 +12,7 @@ import android.widget.Toast
 import com.example.financesmstracker.integration.FinanceSyncClient
 import com.example.financesmstracker.integration.OracleIds
 import com.example.financesmstracker.integration.SyncSettings
+import com.example.financesmstracker.receiver.SmsHandlingLog
 
 /**
  * Account names from the server may carry the last four digits ("... 1175")
@@ -58,26 +59,49 @@ internal fun MainActivity.restoreHistoryFromServer() {
 }
 
 internal fun MainActivity.showSmsHandlingLog() {
-    val smsText = com.example.financesmstracker.receiver.SmsHandlingLog.format(
-        com.example.financesmstracker.receiver.SmsHandlingLog.read(this)
+    val entries = SmsHandlingLog.read(this)
+    val gmailText = SmsHandlingLog.readGmailScan(this) ?: "No Gmail scan yet. Tap Sync Gmail."
+    fun count(section: SmsHandlingLog.Section) = SmsHandlingLog.inSection(entries, section).size
+    val tabs = listOf(
+        "Accepted (${count(SmsHandlingLog.Section.ACCEPTED)})" to { SmsHandlingLog.formatSection(entries, SmsHandlingLog.Section.ACCEPTED) },
+        "Review (${count(SmsHandlingLog.Section.REVIEW)})" to { SmsHandlingLog.formatSection(entries, SmsHandlingLog.Section.REVIEW) },
+        "Other (${count(SmsHandlingLog.Section.OTHER)})" to { SmsHandlingLog.formatSection(entries, SmsHandlingLog.Section.OTHER) },
+        "E-mail scan" to { gmailText }
     )
-    val gmailText = com.example.financesmstracker.receiver.SmsHandlingLog.readGmailScan(this)
-        ?: "No Gmail scan yet. Tap Sync Gmail."
-    val text = "SMS handling (newest first)\n\n" + smsText +
-        "\n\n────────────\n\n" + gmailText
+    var current = 0
     val view = android.widget.TextView(this).apply {
-        this.text = text
         setTextIsSelectable(true)
         setPadding(48, 24, 48, 24)
         textSize = 13f
     }
+    fun currentText() = tabs[current].second()
+    val group = android.widget.RadioGroup(this).apply {
+        orientation = android.widget.LinearLayout.HORIZONTAL
+        setPadding(24, 16, 24, 0)
+    }
+    tabs.forEachIndexed { index, (label, _) ->
+        group.addView(android.widget.RadioButton(this).apply {
+            id = android.view.View.generateViewId()
+            text = label
+            textSize = 12f
+            isChecked = index == 0
+            setOnClickListener { current = index; view.text = currentText() }
+        })
+    }
+    view.text = currentText()
+    val scroll = android.widget.HorizontalScrollView(this).apply { addView(group) }
+    val container = android.widget.LinearLayout(this).apply {
+        orientation = android.widget.LinearLayout.VERTICAL
+        addView(scroll)
+        addView(android.widget.ScrollView(this@showSmsHandlingLog).apply { addView(view) })
+    }
     AlertDialog.Builder(this)
-        .setTitle("Logs: SMS and Gmail scan")
-        .setView(android.widget.ScrollView(this).apply { addView(view) })
+        .setTitle("Logs: SMS, notifications, e-mail")
+        .setView(container)
         .setPositiveButton("Close", null)
         .setNeutralButton("Copy") { _, _ ->
             val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("SMS log", text))
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("SMS log", tabs[current].first + "\n\n" + currentText()))
             Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
         }
         .setNegativeButton("Ledger audit") { _, _ -> showLedgerAudit() }
