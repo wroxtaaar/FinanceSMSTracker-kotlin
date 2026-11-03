@@ -92,13 +92,18 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
     return bool(inserted.rowcount)
 
 
-def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True):
+def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True, legacy_statement_rule=False):
     """Ledger-wide Splitwise sum of the canonical bank/card movements.
 
     Only active, canonical transactions that actually affect a bank/card
     balance are included. A bank/card transfer naturally cancels because its
     two ledger effects have opposite signs; only the OTHER category (explicit
     opt-out) is consulted.
+
+    Statement rows without a balance effect (dated at or before the account's
+    last manual balance edit) never count. The test must not depend on when the
+    row was stored: a later manual edit moves balance_reconciled_at forward and
+    would otherwise let those rows back in and shift Splitwise.
     """
     rows = conn.execute(
         """SELECT id,amount_minor,currency,type,account_type,payment_method,
@@ -116,7 +121,9 @@ def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True):
                                     AND TRIM(COALESCE(a.last4,''))=TRIM(COALESCE(transactions.account_last4,''))
                                     AND a.balance_reconciled_at>0
                                     AND transactions.timestamp<=a.balance_reconciled_at
-                                    AND transactions.created_at>a.balance_reconciled_at))""",
+                                    {created_clause}))""".format(
+            created_clause="AND transactions.created_at>a.balance_reconciled_at" if legacy_statement_rule else ""
+        ),
         (cur,),
     ).fetchall()
 

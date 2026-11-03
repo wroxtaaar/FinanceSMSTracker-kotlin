@@ -117,6 +117,33 @@ def migrate_splitwise_salary_optout():
         return True
 
 
+def migrate_splitwise_statement_rule():
+    """One-time: keep Splitwise steady when the statement-row exclusion became permanent.
+
+    Editing a bank balance again used to let earlier-excluded statement rows
+    back into the Splitwise sum. Shift the baseline by the difference between
+    the two rules so the value shown now does not move.
+    """
+    with connection() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS applied_migrations (name TEXT PRIMARY KEY)")
+        if conn.execute(
+            "SELECT 1 FROM applied_migrations WHERE name='splitwise_statement_rule'"
+        ).fetchone():
+            return False
+        for row in conn.execute(
+            """SELECT currency,baseline_ledger_minor FROM manual_splitwise_total
+               WHERE baseline_amount_minor IS NOT NULL AND baseline_ledger_minor IS NOT NULL"""
+        ).fetchall():
+            cur = row["currency"]
+            shift = _ledger_splitwise_total(conn, cur) - _ledger_splitwise_total(conn, cur, legacy_statement_rule=True)
+            conn.execute(
+                "UPDATE manual_splitwise_total SET baseline_ledger_minor=? WHERE currency=?",
+                (int(row["baseline_ledger_minor"]) + shift, cur),
+            )
+        conn.execute("INSERT INTO applied_migrations(name) VALUES('splitwise_statement_rule')")
+        return True
+
+
 def migrate_statement_reconciled_reversal():
     """One-time: undo statement rows replayed into an already-verified balance.
 

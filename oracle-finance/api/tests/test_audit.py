@@ -59,3 +59,50 @@ def test_migration_reverses_statement_rows_replayed_after_manual_edit(tmp_path, 
     assert migrations.migrate_statement_reconciled_reversal() == 1
     assert [a for a in L.balances() if a["id"] == "hdfc"][0]["balance_minor"] == 500_000
     assert migrations.migrate_statement_reconciled_reversal() == 0
+
+
+def test_editing_the_bank_balance_again_does_not_change_splitwise(tmp_path, monkeypatch):
+    import time
+    from app.db import connection
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "sw.db"))
+    db.init_db()
+    L.set_balance("hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "2222", 500_000)
+    L.set_manual_splitwise_total("INR", 0)
+    t = sms_debit(bank="HDFC", last4="2222", ts=int(time.time() * 1000) - 86_400_000,
+                  id="statement:old", amount=100_000)
+    L.sync_transaction(t)  # stored after the edit, dated before it: no balance effect
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 0
+    time.sleep(0.01)
+    L.set_balance("hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "2222", 450_000)  # second manual edit
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 0
+
+
+def test_splitwise_rule_migration_keeps_the_shown_value(tmp_path, monkeypatch):
+    import time
+    from app.ledger import migrations
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "swm.db"))
+    db.init_db()
+    L.set_balance("hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "2222", 500_000)
+    t = sms_debit(bank="HDFC", last4="2222", ts=int(time.time() * 1000) - 86_400_000,
+                  id="statement:old", amount=100_000)
+    L.sync_transaction(t)
+    time.sleep(0.01)
+    L.set_balance("hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "2222", 450_000)
+    # State left by the old bug: the row counted once the account was edited again,
+    # and the user typed the Splitwise total they wanted on top of it (baseline
+    # recorded under the legacy rule).
+    from app.db import connection
+    from app.ledger.splitwise import _ledger_splitwise_total
+    L.set_manual_splitwise_total("INR", 777_000)
+    with connection() as conn:
+        legacy = _ledger_splitwise_total(conn, "INR", legacy_statement_rule=True)
+        assert legacy != _ledger_splitwise_total(conn, "INR")
+        conn.execute("UPDATE manual_splitwise_total SET baseline_ledger_minor=?", (legacy,))
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") != 777_000  # the new rule alone would move it
+    assert migrations.migrate_splitwise_statement_rule() is True
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 777_000
+    assert migrations.migrate_splitwise_statement_rule() is False
