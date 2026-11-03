@@ -134,14 +134,15 @@ def test_a_rescan_overrides_a_manually_typed_bill():
     assert _bill_balance() == 208800
 
 
-def test_a_bill_larger_than_the_tracked_outstanding_leaves_a_negative_active_spend():
+def test_a_bill_larger_than_the_tracked_outstanding_raises_it_so_active_spend_is_zero():
     _card()
     assert _bill("att", 208800)["status"] == "APPLIED"
     with connection() as conn:
-        row = conn.execute("SELECT balance_minor,bill_balance_minor FROM accounts WHERE id='c1012'").fetchone()
-    # Nothing is forced up to the bill: Active Spend (balance - bill) is simply negative.
-    assert row["balance_minor"] == 0
+        row = conn.execute("SELECT balance_minor,bill_balance_minor,opening_balance_minor FROM accounts WHERE id='c1012'").fetchone()
+        applied = conn.execute("SELECT COALESCE(SUM(delta_minor),0) FROM balance_adjustments WHERE account_id='c1012'").fetchone()[0]
     assert row["bill_balance_minor"] == 208800
+    assert row["balance_minor"] == 208800  # active spend 0, not negative
+    assert row["balance_minor"] == row["opening_balance_minor"] + applied  # audit stays clean
 
 
 def _payment(ts, amount=100000):
@@ -209,3 +210,20 @@ def test_manual_save_keeps_a_negative_active_spend():
     with connection() as conn:
         row = conn.execute("SELECT balance_minor,bill_balance_minor FROM accounts WHERE id='c1012'").fetchone()
     assert (row["balance_minor"], row["bill_balance_minor"]) == (50_000, 200_000)  # active -1,500
+
+
+def test_spend_after_the_bill_stays_in_active_spend_when_balance_is_raised():
+    from types import SimpleNamespace
+    from app.ledger import sync_transaction
+
+    set_balance("c1012", "ICICI Credit Card", "INR", "CREDIT_CARD", "ICICI", "1012", 0)
+    sync_transaction(SimpleNamespace(
+        id="spend-1", amountMinor=1_079_600, currency="INR", type="DEBIT", paymentMethod="CARD",
+        accountType="CREDIT_CARD", bank="ICICI", merchantOrPayee="GPAY UTILIT", accountLast4="1012",
+        reference=None, timestamp=T0 + DAY, category="BILLS", confidence=0.99))
+    assert _bill("stmt", 10_000_000, observed=T0)["status"] == "APPLIED"
+    with connection() as conn:
+        assert conn.execute("SELECT balance_minor FROM accounts WHERE id='c1012'").fetchone()[0] == 11_079_600
+    _bill("stmt", 10_000_000, observed=T0)  # re-reading is stable
+    with connection() as conn:
+        assert conn.execute("SELECT balance_minor FROM accounts WHERE id='c1012'").fetchone()[0] == 11_079_600

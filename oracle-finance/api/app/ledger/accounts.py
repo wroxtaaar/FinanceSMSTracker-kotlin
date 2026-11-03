@@ -519,6 +519,29 @@ def sync_card_bill(bill):
              WHERE id=?""",
             (bill_value, now_ms(), account["id"]),
         )
+        # When a bill is read, what is owed in total cannot be less than the
+        # printed bill plus whatever was spent after the e-mail arrived. If the
+        # tracked outstanding is lower (spends the app never saw), raise it so
+        # Active Spend starts at the real post-bill spend instead of going
+        # negative. This only runs when a bill is applied: a later payment or
+        # refund can still take Active Spend negative, and a payment locks the
+        # bill against re-reading.
+        after = conn.execute(
+            """SELECT COALESCE(SUM(ba.delta_minor),0) v
+               FROM balance_adjustments ba JOIN transactions t ON t.id=ba.transaction_id
+               WHERE ba.account_id=? AND t.timestamp>?""",
+            (account["id"], observed_at),
+        ).fetchone()["v"]
+        required = bill_value + max(int(after), 0)
+        shortfall = required - int(account["balance_minor"] or 0)
+        if shortfall > 0:
+            conn.execute(
+                """UPDATE accounts
+                   SET balance_minor=balance_minor+?,
+                       opening_balance_minor=COALESCE(opening_balance_minor,0)+?
+                 WHERE id=?""",
+                (shortfall, shortfall, account["id"]),
+            )
         conn.execute(
             """UPDATE card_bill_evidence
                SET applied=1
