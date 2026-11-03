@@ -352,7 +352,7 @@ def parse_card_bill_email(message):
     # is unambiguous, so it wins over the looser patterns below, which can
     # reach past the header row and pick up an unrelated "Rs. 1500" (a fee).
     table=re.search(
-        r"(?is)total\s+amount\s+due[^0-9]{0,200}?([0-9][0-9,]*\.[0-9]{1,2}|[0-9][0-9,]*)\s*(Dr|Cr)\b",
+        r"(?is)total\s+(?:payment|amount)\s+due[^0-9]{0,200}?([0-9][0-9,]*\.[0-9]{1,2}|[0-9][0-9,]*)\s*(Dr|Cr)\b",
         combined,
     )
     if table and table.group(2).lower()=="cr":

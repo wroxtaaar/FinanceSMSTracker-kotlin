@@ -139,6 +139,15 @@ def _compact(value):
 
 def _extract_statement_bill_amount(text):
     normalized = re.sub(r"\s+", " ", text or "")
+    # Labelled table ("Total Payment Due | Minimum Payment Due" then
+    # "44,445.93 Dr | 889.00 Dr"): unambiguous, so it wins over the looser
+    # patterns, which can reach past the header and read an unrelated figure.
+    table = re.search(
+        r"(?is)total\s+(?:payment|amount)\s+due[^0-9]{0,200}?([0-9][0-9,]*\.[0-9]{1,2}|[0-9][0-9,]*)\s*(Dr|Cr)\b",
+        normalized,
+    )
+    if table:
+        return None if table.group(2).lower() == "cr" else _minor(table.group(1))
     patterns = (
         # ICICI's PDF font renders the rupee sign as a backtick (`2,088.00).
         r"(?is)total\s+amount\s+due.{0,180}?(?:INR|Rs\.?|₹|`|C)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",

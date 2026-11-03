@@ -558,40 +558,24 @@ def test_manual_reconciliation_blocks_late_historical_transactions_but_allows_ne
     assert row["balance_minor"] == 98500
 
 
-def test_manual_card_reconciliation_retains_bill_split_for_historical_statement():
+def test_statement_scan_overrides_a_manual_card_bill_unless_a_payment_locked_it():
     from app.ledger import sync_card_bill
 
-    set_balance(
-        "reconciliation-card",
-        "Reconciliation Card",
-        "INR",
-        "CREDIT_CARD",
-        "AXIS",
-        "3434",
-        50000,
-        30000,
-    )
+    set_balance("reconciliation-card", "Reconciliation Card", "INR", "CREDIT_CARD", "AXIS", "3434", 50000, 30000)
 
     result = sync_card_bill({
-        "sourceType": "GMAIL_STATEMENT_PDF",
-        "sourceKey": "historical-statement",
-        "timestamp": 1_000,
-        "amountMinor": 42000,
-        "currency": "INR",
-        "bank": "AXIS",
-        "accountLast4": "3434",
-        "confidence": 0.99,
+        "sourceType": "GMAIL_STATEMENT_PDF", "sourceKey": "historical-statement",
+        "timestamp": 1_000, "amountMinor": 42000, "currency": "INR",
+        "bank": "AXIS", "accountLast4": "3434", "confidence": 0.99,
     })
 
-    assert result["status"] == "RETAINED_MANUAL_RECONCILIATION"
-
+    assert result["status"] == "APPLIED"
     with connection() as conn:
         row = conn.execute(
             "SELECT balance_minor, bill_balance_minor FROM accounts WHERE id='reconciliation-card'"
         ).fetchone()
-
     assert row["balance_minor"] == 50000
-    assert row["bill_balance_minor"] == 30000
+    assert row["bill_balance_minor"] == 42000
 
 
 def test_axis_bank_alias_and_late_transaction_update_balance():

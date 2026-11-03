@@ -95,7 +95,7 @@ internal fun formatLedgerAudit(body: String): String {
         out.append("  balance ${money(a.getLong("balanceMinor"))}  bill ${money(a.getLong("billBalanceMinor"))}\n")
         out.append("  opening ${money(a.getLong("openingMinor"))} + applied ${money(a.getLong("appliedDeltaMinor"))}")
         out.append(" (${a.getInt("appliedRows")} rows) = ${money(a.getLong("expectedMinor"))}\n")
-        out.append("  DRIFT ${money(a.getLong("driftMinor"))}  manualEditAt ${a.getLong("balanceReconciledAt")}\n")
+        out.append("  DRIFT ${money(a.getLong("driftMinor"))}  manualEditAt ${a.getLong("balanceReconciledAt")}  billLockedAt ${a.optLong("billLockedAt")}\n")
     }
     val sw = json.getJSONObject("splitwise")
     out.append("\nSPLITWISE shown ${money(sw.getLong("shownMinor"))}, ledger sum ${money(sw.getLong("ledgerSumMinor"))}\n")
@@ -132,6 +132,14 @@ internal fun formatLedgerAudit(body: String): String {
             val e = a.getJSONObject(i)
             out.append("${e.optString("source_type")} ${e.optString("bank")} ${e.optString("account_last4")}/${e.optString("account_last2")} ")
             out.append("${if (e.isNull("amount_minor")) "none" else money(e.optLong("amount_minor"))} applied=${e.optInt("applied")} observed ${e.optLong("observed_at")} added ${e.optLong("created_at")}\n")
+        }
+    }
+    out.append("\nSTATEMENT PDFs (server)\n")
+    json.optJSONArray("attachments")?.let { a ->
+        for (i in 0 until a.length()) {
+            val g = a.getJSONObject(i)
+            out.append("${g.optLong("created_at")} ${g.optString("bank")} [${g.optString("status")}] ${g.optString("filename")} rows=${g.optInt("transaction_count")}\n")
+            if (!g.isNull("error")) out.append("  error: ${g.optString("error")}\n")
         }
     }
     out.append("\nRECENT GMAIL MESSAGES (server)\n")

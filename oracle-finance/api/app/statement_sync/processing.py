@@ -93,12 +93,6 @@ def _refresh_card_bill_from_parsed_pdf(bank, pdf_bytes, attachment_id, message):
     wrongly (or whose record was cleared) could never be corrected. This reads
     only the printed Total Amount Due; the statement rows are left alone.
     """
-    with connection() as conn:
-        if conn.execute(
-            "SELECT 1 FROM card_bill_evidence WHERE source_type='GMAIL_STATEMENT_PDF' AND source_key=?",
-            (attachment_id,),
-        ).fetchone():
-            return
     for key in _statement_keys(bank):
         try:
             metadata, _rows = _parse_statement_pdf(bank, pdf_bytes, key)
@@ -121,6 +115,32 @@ def _refresh_card_bill_from_parsed_pdf(bank, pdf_bytes, attachment_id, message):
             return
         except Exception:
             continue
+
+
+def _card_statement_fallback(bank, pdf_bytes, keys):
+    """(metadata, rows, key) for a credit-card PDF whose rows did not parse."""
+    for key in keys:
+        try:
+            text = common._pdf_text(pdf_bytes, key)
+        except Exception:
+            continue
+        if _extract_statement_bill_amount(text) is None:
+            continue
+        card = re.search(
+            r"(?<![A-Za-z0-9])(?:(?:X{2,}|\*{2,}|[•·]{2,})[\s-]*){1,4}(\d{2,4})(?![0-9])", text
+        )
+        if not card or "card" not in text.lower():
+            continue
+        digits = card.group(1)
+        return (
+            {
+                "bank": bank, "account_type": "CREDIT_CARD", "account_last4": digits.zfill(4),
+                "account_last2": digits[-2:], "currency": "INR", "opening_balance_minor": None,
+            },
+            [],
+            key,
+        )
+    return None
 
 
 def process_statement_attachments(service, message):
@@ -177,7 +197,12 @@ def process_statement_attachments(service, message):
                     parse_error = exc
 
             if parse_error is not None:
-                raise parse_error
+                # A card statement's rows are never imported, so a row-table
+                # layout we cannot read must not hide the printed bill.
+                fallback = _card_statement_fallback(bank, pdf_bytes, keys)
+                if fallback is None:
+                    raise parse_error
+                metadata, rows, key = fallback
 
             # A statement PDF is the strongest bill source when the email
             # body omitted the total. The transaction parser and bill parser

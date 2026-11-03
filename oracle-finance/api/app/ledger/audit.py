@@ -27,7 +27,7 @@ def ledger_audit(recent=25):
                 "appliedDeltaMinor": int(applied["v"]), "appliedRows": applied["n"],
                 "expectedMinor": expected,
                 "driftMinor": int(a["balance_minor"]) - expected,
-                "balanceReconciledAt": a["balance_reconciled_at"], "updatedAt": a["updated_at"],
+                "balanceReconciledAt": a["balance_reconciled_at"], "billLockedAt": a["bill_locked_at"], "updatedAt": a["updated_at"],
             })
         cols = """t.id, t.timestamp, t.created_at, t.type, t.amount_minor, t.category, t.bank,
                   t.account_type, t.account_last4, t.merchant_or_payee, t.status, t.duplicate_of,
@@ -50,6 +50,10 @@ def ledger_audit(recent=25):
         mails = conn.execute(
             "SELECT internal_date, sender, subject, status FROM gmail_messages ORDER BY internal_date DESC LIMIT 12").fetchall()
 
+        attachments = conn.execute(
+            "SELECT filename, bank, status, transaction_count, error, created_at "
+            "FROM gmail_attachments ORDER BY created_at DESC LIMIT 12").fetchall()
+
         def shape(r):
             d = dict(r)
             d["sw_delta"] = splitwise_delta(r["account_type"], r["type"], r["amount_minor"], r["category"],
@@ -62,6 +66,7 @@ def ledger_audit(recent=25):
             "transfers": [dict(r) for r in transfers],
             "billEvidence": [dict(r) for r in evidence],
             "recentMails": [dict(r) for r in mails],
+            "attachments": [dict(r) for r in attachments],
         }
         sw_sum = int(_ledger_splitwise_total(conn, "INR"))
         manual = conn.execute(

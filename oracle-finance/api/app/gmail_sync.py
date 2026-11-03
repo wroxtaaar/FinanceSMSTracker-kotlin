@@ -272,8 +272,17 @@ def _previous_message_state(item, msg_id, statement_hint, stats):
             # mailbox scan. Once that retry has marked the message PARSED, do
             # not fetch/process the same attachment a second time in this pass.
             if statement_hint:
-                stats["alreadyProcessed"] += 1
-                return True, existing
+                # Statements from the last 7 days are re-read on every sync so
+                # the printed bill can correct what the app holds (unless a
+                # bill payment has locked it). Older ones stay terminal.
+                row = conn.execute(
+                    "SELECT internal_date FROM gmail_messages WHERE id=?", (msg_id,)
+                ).fetchone()
+                age_ms = int(time.time() * 1000) - int((row["internal_date"] if row else 0) or 0)
+                if age_ms > 7 * 86_400_000:
+                    stats["alreadyProcessed"] += 1
+                    return True, existing
+                return False, existing
 
             active_link = conn.execute(
                 """

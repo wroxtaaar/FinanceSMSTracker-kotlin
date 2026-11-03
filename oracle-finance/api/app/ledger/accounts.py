@@ -298,11 +298,25 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
                  WHERE id=?""",
                 (t.amountMinor, account["id"])
             )
+            # A bill payment locks the bill: re-reading the statement it paid
+            # must not put the paid amount back. A later statement (observed
+            # after the payment) is a new cycle and still applies.
+            if _is_bill_payment(t):
+                conn.execute(
+                    "UPDATE accounts SET bill_locked_at=MAX(COALESCE(bill_locked_at,0),?) WHERE id=?",
+                    (min(event_at, now_ms()), account["id"]),
+                )
+
+
+def _is_bill_payment(t):
+    category = str(getattr(t, "category", "") or "").strip().upper()
+    merchant = str(getattr(t, "merchantOrPayee", "") or "").lower()
+    return category == "BILL_PAYMENT" or "bill payment" in merchant
 
 
 _BILL_SOURCE_PRIORITY = {
+    "GMAIL_STATEMENT_PDF": 400,
     "GMAIL": 300,
-    "GMAIL_STATEMENT_PDF": 300,
     "SMS": 200,
     "GMAIL_NOTIFICATION": 100,
 }
@@ -359,7 +373,7 @@ def _find_bill_card(conn, bill, bank, last4, last2):
     account = None
     if last4:
         account = conn.execute(
-            """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at
+            """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at,bill_locked_at,opening_balance_minor
                FROM accounts
                WHERE account_type='CREDIT_CARD' AND currency=?
                  AND UPPER(TRIM(COALESCE(bank,'')))=?
@@ -370,7 +384,7 @@ def _find_bill_card(conn, bill, bank, last4, last2):
 
     if not account and last2:
         candidates = conn.execute(
-            """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at,last4
+            """SELECT id,balance_minor,bill_balance_minor,balance_reconciled_at,bill_locked_at,opening_balance_minor,last4
                FROM accounts
                WHERE account_type='CREDIT_CARD' AND currency=?
                  AND UPPER(TRIM(COALESCE(bank,'')))=?
@@ -459,14 +473,15 @@ def sync_card_bill(bill):
         if not account:
             return {"status":"REVIEW","reason":"card_not_found","bank":bank,"last4":last4,"last2":last2}
 
-        # A manual card balance is a reconciliation point. Older statement
-        # evidence discovered later must not rewrite the manually verified
-        # Bill/Active Spend split. A statement observed after reconciliation
-        # is allowed to establish the new bill bucket.
-        reconciled_at = int(account["balance_reconciled_at"] or 0)
-        if reconciled_at and observed_at <= reconciled_at:
+        # A bill payment locks the bill. A statement observed on or before
+        # the payment is the one that was paid, so re-reading it must not
+        # override the paid-down bill; a newer statement still applies. A
+        # manual Cards edit does not lock: the next statement scan within the
+        # window puts the printed bill back.
+        locked_at = int(account["bill_locked_at"] or 0)
+        if locked_at and observed_at <= locked_at:
             return {
-                "status":"RETAINED_MANUAL_RECONCILIATION",
+                "status":"RETAINED_BILL_LOCKED",
                 "accountId":account["id"],
                 "sourceType":source_type,
             }
@@ -504,6 +519,18 @@ def sync_card_bill(bill):
              WHERE id=?""",
             (bill_value, now_ms(), account["id"]),
         )
+        # What is owed in total can never be less than the printed bill. If
+        # the tracked outstanding is lower, the statement is the better
+        # figure; move the opening balance with it so the audit stays clean.
+        shortfall = bill_value - int(account["balance_minor"] or 0)
+        if shortfall > 0:
+            conn.execute(
+                """UPDATE accounts
+                   SET balance_minor=balance_minor+?,
+                       opening_balance_minor=COALESCE(opening_balance_minor,0)+?
+                 WHERE id=?""",
+                (shortfall, shortfall, account["id"]),
+            )
         conn.execute(
             """UPDATE card_bill_evidence
                SET applied=1

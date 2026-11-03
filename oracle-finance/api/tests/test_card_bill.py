@@ -47,7 +47,7 @@ def test_a_newer_statement_replaces_the_previous_one_even_at_the_same_priority()
 
 def test_two_sources_disagreeing_about_the_same_statement_still_go_to_review():
     _card()
-    _bill("att", 100, observed=T0, source="GMAIL_STATEMENT_PDF")
+    _bill("att", 100, observed=T0, source="GMAIL")
     result = _bill("mail", 208800, observed=T0 + 60_000, source="GMAIL")
 
     assert result["status"] == "REVIEW"
@@ -107,8 +107,62 @@ def test_bill_is_re_derived_from_an_already_parsed_pdf():
         message = {"id": "m1", "internalDate": str(T0)}
         ss._refresh_card_bill_from_parsed_pdf("ICICI", b"pdf", "att-1", message)
         assert _bill_balance() == 208800
-        # Already recorded: no second parse.
+        # Re-read on every sync (idempotent): the printed bill keeps winning.
         ss._refresh_card_bill_from_parsed_pdf("ICICI", b"pdf", "att-1", message)
-        assert calls["n"] == 1
+        assert calls["n"] == 2
+        assert _bill_balance() == 208800
     finally:
         ss._parse_statement_pdf, common._pdf_text, ss._statement_keys = saved
+
+
+def test_the_statement_pdf_beats_the_email_body_for_the_same_statement():
+    _card()
+    _bill("mail", 150, observed=T0, source="GMAIL")
+    assert _bill("att", 208800, observed=T0 + 60_000, source="GMAIL_STATEMENT_PDF")["status"] == "APPLIED"
+    assert _bill_balance() == 208800
+    # ...and the e-mail cannot take it back on a later rescan.
+    assert _bill("mail", 150, observed=T0, source="GMAIL")["status"] == "RETAINED_LOWER_PRIORITY"
+    assert _bill_balance() == 208800
+
+
+def test_a_rescan_overrides_a_manually_typed_bill():
+    _card()
+    _bill("att", 208800, observed=T0)
+    set_balance("c1012", "ICICI Credit Card", "INR", "CREDIT_CARD", "ICICI", "1012", 300000, 5000)
+    assert _bill_balance() == 5000
+    assert _bill("att", 208800, observed=T0)["status"] == "APPLIED"
+    assert _bill_balance() == 208800
+
+
+def test_a_bill_larger_than_the_tracked_outstanding_raises_the_outstanding():
+    _card()
+    assert _bill("att", 208800)["status"] == "APPLIED"
+    with connection() as conn:
+        row = conn.execute("SELECT balance_minor,opening_balance_minor FROM accounts WHERE id='c1012'").fetchone()
+        applied = conn.execute("SELECT COALESCE(SUM(delta_minor),0) FROM balance_adjustments WHERE account_id='c1012'").fetchone()[0]
+    assert row["balance_minor"] == 208800
+    assert row["balance_minor"] == row["opening_balance_minor"] + applied
+
+
+def _payment(ts, amount=100000):
+    from types import SimpleNamespace
+    from app.ledger import sync_transaction
+    t = SimpleNamespace(
+        id=f"pay-{ts}", amountMinor=amount, currency="INR", type="CREDIT", paymentMethod="BANK_TRANSFER",
+        accountType="CREDIT_CARD", bank="ICICI", merchantOrPayee="Credit Card Bill Payment",
+        accountLast4="1012", reference=None, timestamp=ts, category="BILL_PAYMENT", confidence=0.95)
+    sync_transaction(t)
+
+
+def test_a_bill_payment_locks_the_bill_against_rescans_of_the_paid_statement():
+    import time
+    _card()
+    now = int(time.time() * 1000)
+    _bill("att", 208800, observed=now - 2 * DAY)
+    _payment(now - DAY)
+    assert _bill_balance() == 108800
+    assert _bill("att", 208800, observed=now - 2 * DAY)["status"] == "RETAINED_BILL_LOCKED"
+    assert _bill_balance() == 108800
+    # The next cycle's statement is newer than the payment, so it still applies.
+    assert _bill("next", 5000, observed=now)["status"] == "APPLIED"
+    assert _bill_balance() == 5000

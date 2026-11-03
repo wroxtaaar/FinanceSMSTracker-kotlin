@@ -165,6 +165,11 @@ def init_db():
         if "balance_reconciled_at" not in account_columns:
             conn.execute("ALTER TABLE accounts ADD COLUMN balance_reconciled_at INTEGER NOT NULL DEFAULT 0")
 
+        # A card bill payment locks the statement bill: statements observed on
+        # or before this moment can no longer overwrite it.
+        if "bill_locked_at" not in account_columns:
+            conn.execute("ALTER TABLE accounts ADD COLUMN bill_locked_at INTEGER NOT NULL DEFAULT 0")
+
         # Existing accounts predate the opening-balance field. Reconstruct the
         # opening snapshot from their current balance and already-applied
         # transaction adjustments so upgrades preserve the live balance.
