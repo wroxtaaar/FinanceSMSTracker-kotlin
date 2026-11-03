@@ -370,6 +370,17 @@ def parse_card_bill_email(message):
             break
     if amount is None:
         amount=_table_total_amount_due(combined)
+    if amount is None:
+        # Labels and values in separate cells with no currency sign before the
+        # value (SBI Card: "Total amount due (\u20b9) | Minimum amount due (\u20b9) |
+        # Payment due date" then "1,770.00 | 200.00 | 21-Nov-2026"). The labels
+        # hold no digits, so the first decimal figure after the label is the total.
+        plain=re.search(
+            r"(?is)total\s+amount\s+due[^0-9]{0,200}?([0-9][0-9,]*\.[0-9]{2})(?![0-9])",
+            combined,
+        )
+        if plain:
+            amount=int(round(float(plain.group(1).replace(",",""))*100))
     if amount is None or amount <= 0:
         return None
 

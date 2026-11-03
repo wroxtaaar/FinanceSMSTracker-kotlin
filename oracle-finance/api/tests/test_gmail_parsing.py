@@ -642,3 +642,21 @@ def test_sbi_card_sender_is_a_known_bank_and_not_skipped():
     item = {"from": "SBI Card <statements@sbicard.com>", "subject": "Your SBI Card Monthly Statement"}
     assert _is_unlikely_bank_mail(item, stats) is False
     assert stats["ignoredCount"] == 0
+
+
+def test_sbi_card_statement_email_with_plain_table_and_masked_card():
+    from app.gmail_parsing import parse_card_bill_email
+
+    html = (
+        "<p>Dear Cardholder</p><p>Attached herewith is the monthly statement of your SBI Credit Card "
+        "ending with XXXX XXXX XXXX XX65. Please note that your statement is password protected.</p>"
+        "<table><tr><td>Total amount due (&#8377;)</td><td>Minimum amount due (&#8377;)</td>"
+        "<td>Payment due date</td></tr>"
+        "<tr><td>1,770.00</td><td>200.00</td><td>21-Nov-2026</td></tr></table>"
+    )
+    message = _message("sbi-stmt", html, subject="Your BPCL SBI Card OCTANE Monthly Statement -Nov 2026")
+    message["payload"]["headers"][1]["value"] = "Statements@sbicard.com"
+    bill = parse_card_bill_email(message)
+    assert bill["amountMinor"] == 177000
+    assert bill["bank"] == "SBI"
+    assert bill["accountLast2"] == "65"

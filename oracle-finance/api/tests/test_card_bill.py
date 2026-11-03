@@ -166,3 +166,30 @@ def test_a_bill_payment_locks_the_bill_against_rescans_of_the_paid_statement():
     # The next cycle's statement is newer than the payment, so it still applies.
     assert _bill("next", 5000, observed=now)["status"] == "APPLIED"
     assert _bill_balance() == 5000
+
+
+def test_pdf_bill_extraction_ignores_years_and_reads_label_value_tables():
+    from app.statement_sync.common import _extract_statement_bill_amount as extract
+
+    # A year after the label must never be taken as the bill.
+    assert extract("Total Amount Due Statement Date 02 Nov 2026 Payment Due Date 21 Nov 2026") is None
+    # Label cells followed by value cells (no currency sign).
+    assert extract("Total Amount Due (Rs) Minimum Amount Due (Rs) Payment Due Date 1,770.00 200.00 21-Nov-2026") == 177000
+    # HDFC cards call it "Total Dues"; Indian digit grouping.
+    assert extract("Total Dues Minimum Amount Due 1,79,761.31 5,000.00") == 17976131
+    # Existing ICICI form still works.
+    assert extract("Total Amount due\n`2,088.00 = + + -") == 208800
+
+
+def test_pdf_rederive_migration_drops_only_recent_pdf_evidence_once():
+    from app.ledger import migrations
+
+    _card()
+    _bill("recent-pdf", 202600, observed=T0, source="GMAIL_STATEMENT_PDF")
+    _bill("old-pdf", 5000, observed=T0 - 30 * DAY, source="GMAIL_STATEMENT_PDF")
+    _bill("mail", 177000, observed=T0 + 1000, source="GMAIL")
+    assert migrations.migrate_card_bill_pdf_rederive(now_ms_value=T0 + DAY) == 1
+    with connection() as conn:
+        keys = {r[0] for r in conn.execute("SELECT source_key FROM card_bill_evidence").fetchall()}
+    assert keys == {"old-pdf", "mail"}
+    assert migrations.migrate_card_bill_pdf_rederive(now_ms_value=T0 + DAY) == 0

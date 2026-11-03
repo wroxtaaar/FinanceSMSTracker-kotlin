@@ -148,10 +148,15 @@ def _extract_statement_bill_amount(text):
     )
     if table:
         return None if table.group(2).lower() == "cr" else _minor(table.group(1))
+    # Amounts must carry two decimals: a bare number after the label can be a
+    # year ("2026") or a date part, which once became a bogus bill of 2026.00.
+    amount = r"([0-9]{1,3}(?:,[0-9]{2,3})*\.[0-9]{2}|[0-9]+\.[0-9]{2})(?![0-9])"
     patterns = (
         # ICICI's PDF font renders the rupee sign as a backtick (`2,088.00).
-        r"(?is)total\s+amount\s+due.{0,180}?(?:INR|Rs\.?|₹|`|C)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
-        r"(?is)total\s+amt\s*[:\-]?\s*(?:INR|Rs\.?|₹|`|C)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
+        r"(?is)total\s+(?:amount\s+due|dues).{0,180}?(?:INR|Rs\.?|\u20b9|`|C)\s*(?:Dr\.?|CR\.?|:)?\s*" + amount,
+        r"(?is)total\s+amt\s*[:\-]?\s*(?:INR|Rs\.?|\u20b9|`|C)\s*(?:Dr\.?|CR\.?|:)?\s*" + amount,
+        # Labels and values in separate cells (no digits between them).
+        r"(?is)total\s+(?:amount\s+due|dues)[^0-9]{0,200}?" + amount,
     )
     for pattern in patterns:
         match = re.search(pattern, normalized)

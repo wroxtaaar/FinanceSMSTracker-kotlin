@@ -148,3 +148,27 @@ def migrate_statement_reconciled_reversal():
             conn.execute("DELETE FROM balance_adjustments WHERE transaction_id=?", (r["transaction_id"],))
         conn.execute("INSERT INTO applied_migrations(name) VALUES('statement_reconciled_reversal')")
         return len(rows)
+
+
+def migrate_card_bill_pdf_rederive(now_ms_value=None):
+    """One-time: drop recent PDF bill evidence so it is read again.
+
+    PDF totals read before the amount rules were tightened could be wrong (a
+    year taken as the amount). That evidence outranks the e-mail total, so the
+    wrong figure would never be corrected. Statements from the last 8 days are
+    re-read on the next Gmail sync, which records the evidence afresh.
+    """
+    import time
+    now = int(now_ms_value if now_ms_value is not None else time.time() * 1000)
+    with connection() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS applied_migrations (name TEXT PRIMARY KEY)")
+        if conn.execute(
+            "SELECT 1 FROM applied_migrations WHERE name='card_bill_pdf_rederive_v2'"
+        ).fetchone():
+            return 0
+        removed = conn.execute(
+            "DELETE FROM card_bill_evidence WHERE source_type='GMAIL_STATEMENT_PDF' AND observed_at>=?",
+            (now - 8 * 86_400_000,),
+        ).rowcount
+        conn.execute("INSERT INTO applied_migrations(name) VALUES('card_bill_pdf_rederive_v2')")
+        return removed
