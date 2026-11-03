@@ -132,3 +132,41 @@ def test_manually_marked_card_payment_pairs_with_the_bank_debit(tmp_path, monkey
     assert card["bill_balance_minor"] == 0 and card["balance_minor"] == 0
     assert card["bill_locked_at"] > 0
     assert L.get_manual_splitwise_total("INR") == 0
+
+
+def _card_credit(tid, amount, ts, ref=None):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        id=tid, amountMinor=amount, currency="INR", type="CREDIT", paymentMethod="UPI",
+        accountType="CREDIT_CARD", bank="ICICI", merchantOrPayee="Credit Card Bill Payment",
+        accountLast4="8001", reference=ref, timestamp=ts, category="TRANSFER", confidence=1.0)
+
+
+def test_partial_payment_lowers_the_bill_by_what_was_paid_and_locks_it(tmp_path, monkeypatch):
+    from app.db import connection
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "partial.db"))
+    db.init_db()
+    L.set_balance("hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "2222", 1_000_000)
+    L.set_balance("c8001", "ICICI Credit Card", "INR", "CREDIT_CARD", "ICICI", "8001", 500_000, 300_000)
+    L.set_manual_splitwise_total("INR", 0)
+    ts = 1_800_000_000_000
+    L.sync_transaction(sms_debit(bank="HDFC", last4="2222", ts=ts, id="sms:pay", amount=100_000, ref="R1"))
+    L.sync_transaction(_card_credit("manual-card-payment:1", 100_000, ts, "R1"))
+    L.match_internal_transfers()
+    L.rebuild_manual_splitwise_total()
+    with connection() as conn:
+        card = conn.execute("SELECT balance_minor,bill_balance_minor,bill_locked_at FROM accounts WHERE id='c8001'").fetchone()
+    assert card["bill_balance_minor"] == 200_000      # 3000 bill - 1000 paid
+    assert card["balance_minor"] == 400_000           # active spend 2000 untouched
+    assert card["bill_locked_at"] > 0
+    assert L.get_manual_splitwise_total("INR") == 0   # own-bank payment is neutral
+
+
+def test_a_card_payment_made_by_someone_else_lowers_splitwise(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "friend.db"))
+    db.init_db()
+    L.set_balance("c8001", "ICICI Credit Card", "INR", "CREDIT_CARD", "ICICI", "8001", 500_000, 300_000)
+    L.set_manual_splitwise_total("INR", 500_000)
+    L.sync_transaction(_card_credit("sms:friend-paid", 200_000, 1_800_000_000_000))
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 300_000
