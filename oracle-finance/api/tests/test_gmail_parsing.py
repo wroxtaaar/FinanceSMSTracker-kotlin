@@ -660,3 +660,23 @@ def test_sbi_card_statement_email_with_plain_table_and_masked_card():
     assert bill["amountMinor"] == 177000
     assert bill["bank"] == "SBI"
     assert bill["accountLast2"] == "65"
+
+
+def test_icici_8001_statement_email_reads_total_and_full_card():
+    from app.gmail_parsing import parse_card_bill_email
+
+    html = (
+        "<h1>Credit Card Statement</h1><p>Payment due</p><p>by November 20, 2026</p>"
+        "<div><span>ICICI Bank Credit Card</span><span>XX8001</span></div>"
+        "<p>Minimum Amount Due: &#8377;3,064.49</p>"
+        "<p>Total Amount Due:</p><p><b>&#8377;3,064.49</b></p>"
+    )
+    message = _message("icici-8001", html, subject="Your ICICI Bank Credit Card Statement for the period")
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "Your ICICI Bank Credit Card Statement for the period"},
+        {"name": "From", "value": "ICICI Bank <credit_cards@icici.bank.in>"},
+    ]
+    bill = parse_card_bill_email(message)
+    assert bill["amountMinor"] == 306449
+    assert bill["bank"] == "ICICI"
+    assert bill["accountLast4"] == "8001"

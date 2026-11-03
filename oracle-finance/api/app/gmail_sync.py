@@ -324,6 +324,9 @@ def _previous_message_state(item, msg_id, statement_hint, stats):
 
 
 def _record_card_bill_email(message, stats):
+    h=_headers(message.get("payload",{}))
+    sender=parseaddr(h.get("from",""))[1]
+    subject=h.get("subject","")
     bill_from_email = parse_card_bill_email(message)
     if bill_from_email:
         bill_result = sync_card_bill(bill_from_email)
@@ -331,6 +334,14 @@ def _record_card_bill_email(message, stats):
         stats["cardBillDetected"] += 1
         stats.setdefault("cardBillResults", [])
         stats["cardBillResults"].append(bill_result)
+        card = bill_from_email.get("accountLast4") or ("..." + str(bill_from_email.get("accountLast2") or "?"))
+        detail = bill_result.get("reason") or bill_result.get("status")
+        _note(stats, sender, subject,
+              "Card bill {:.2f} for {} {}: {}".format(
+                  (bill_from_email.get("amountMinor") or 0) / 100.0,
+                  bill_from_email.get("bank"), card, detail))
+    elif re.search(r"(?i)\bstatement\b", subject or ""):
+        _note(stats, sender, subject, "Statement e-mail: no bill amount or card found in the text")
 
 
 def _record_statement_attachments(service, message, stats):
@@ -340,6 +351,13 @@ def _record_statement_attachments(service, message, stats):
     stats["statementTransactionsAdded"] += statement_stats["transactionsAdded"]
     stats["statementTransactionsMatched"] += statement_stats["transactionsMatched"]
     stats["statementErrors"].extend(statement_stats["errors"])
+    if statement_stats["attachmentsScanned"] or statement_stats["errors"]:
+        h=_headers(message.get("payload",{}))
+        errors="; ".join(str(e.get("error", e))[:120] for e in statement_stats["errors"][:2])
+        _note(stats, parseaddr(h.get("from",""))[1], h.get("subject",""),
+              "Statement PDF: {} read, {} parsed{}".format(
+                  statement_stats["attachmentsScanned"], statement_stats["attachmentsParsed"],
+                  (", error: " + errors) if errors else ""))
     return statement_stats
 
 
