@@ -287,7 +287,7 @@ def process_statement_attachments(service, message):
                         ).fetchone()
                         if adjustment is None:
                             account = conn.execute(
-                                """SELECT id FROM accounts
+                                """SELECT id,balance_reconciled_at FROM accounts
                                    WHERE account_type=? AND currency=?
                                      AND UPPER(TRIM(COALESCE(bank,'')))=?
                                      AND TRIM(COALESCE(last4,''))=?
@@ -299,7 +299,8 @@ def process_statement_attachments(service, message):
                                     (transaction.accountLast4 or "").strip(),
                                 ),
                             ).fetchone()
-                            if account:
+                            reconciled_at = int(account["balance_reconciled_at"] or 0) if account else 0
+                            if account and not (reconciled_at and transaction.timestamp <= reconciled_at):
                                 delta = (
                                     -transaction.amountMinor
                                     if transaction.accountType == "BANK_ACCOUNT"

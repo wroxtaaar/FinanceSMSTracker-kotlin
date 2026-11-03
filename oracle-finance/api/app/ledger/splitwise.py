@@ -108,7 +108,15 @@ def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True):
            WHERE status='ACTIVE'
              AND duplicate_of IS NULL
              AND currency=?
-             AND account_type IN ('BANK_ACCOUNT','CREDIT_CARD')""",
+             AND account_type IN ('BANK_ACCOUNT','CREDIT_CARD')
+             AND NOT (id LIKE 'statement:%'
+                      AND NOT EXISTS (SELECT 1 FROM balance_adjustments b WHERE b.transaction_id=transactions.id)
+                      AND EXISTS (SELECT 1 FROM accounts a
+                                  WHERE a.account_type=transactions.account_type
+                                    AND TRIM(COALESCE(a.last4,''))=TRIM(COALESCE(transactions.account_last4,''))
+                                    AND a.balance_reconciled_at>0
+                                    AND transactions.timestamp<=a.balance_reconciled_at
+                                    AND transactions.created_at>a.balance_reconciled_at))""",
         (cur,),
     ).fetchall()
 

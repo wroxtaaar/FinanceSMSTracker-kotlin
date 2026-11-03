@@ -618,3 +618,16 @@ def test_fully_masked_card_number_identifies_an_sbi_statement():
     assert bill["amountMinor"] == 177000
     assert bill["bank"] == "SBI"
     assert bill["accountLast4"] == "0065"
+
+
+def test_axis_statement_table_total_wins_over_a_later_rupee_figure():
+    from app.gmail_parsing import parse_card_bill_email
+
+    # Same table, followed by prose that mentions a fee in rupees.
+    extra = _message("axis-fee", (
+        "<table><tr><th>Total Amount Due INR</th><th>Minimum Amount Due (INR)</th></tr>"
+        "<tr><td>44445.93 Dr</td><td>889 Dr</td></tr></table>"
+        "<p>A late payment fee of Rs. 1500 applies after the due date.</p>"),
+        subject="Airtel Axis Bank Rupay Credit Card ending XX06 - November 2026")
+    extra["payload"]["headers"][1]["value"] = "cc.statements@axis.bank.in"
+    assert parse_card_bill_email(extra)["amountMinor"] == 4444593

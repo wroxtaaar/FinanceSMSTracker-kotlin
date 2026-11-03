@@ -115,3 +115,36 @@ def migrate_splitwise_salary_optout():
             )
         conn.execute("INSERT INTO applied_migrations(name) VALUES('splitwise_salary_optout')")
         return True
+
+
+def migrate_statement_reconciled_reversal():
+    """One-time: undo statement rows replayed into an already-verified balance.
+
+    A statement imported after a manual balance edit used to be applied row by
+    row, double counting days the edited balance already covered. Reverse the
+    balance effect of exactly those rows (statement rows dated on or before the
+    account's last manual edit but stored after it). Splitwise follows, since
+    statement rows without a balance effect no longer count toward it.
+    """
+    with connection() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS applied_migrations (name TEXT PRIMARY KEY)")
+        if conn.execute(
+            "SELECT 1 FROM applied_migrations WHERE name='statement_reconciled_reversal'"
+        ).fetchone():
+            return 0
+        rows = conn.execute(
+            """SELECT ba.transaction_id, ba.account_id, ba.delta_minor
+               FROM balance_adjustments ba
+               JOIN transactions t ON t.id = ba.transaction_id
+               JOIN accounts a ON a.id = ba.account_id
+               WHERE t.id LIKE 'statement:%'
+                 AND a.balance_reconciled_at > 0
+                 AND t.timestamp <= a.balance_reconciled_at
+                 AND t.created_at > a.balance_reconciled_at"""
+        ).fetchall()
+        for r in rows:
+            conn.execute("UPDATE accounts SET balance_minor=balance_minor-? WHERE id=?",
+                         (r["delta_minor"], r["account_id"]))
+            conn.execute("DELETE FROM balance_adjustments WHERE transaction_id=?", (r["transaction_id"],))
+        conn.execute("INSERT INTO applied_migrations(name) VALUES('statement_reconciled_reversal')")
+        return len(rows)

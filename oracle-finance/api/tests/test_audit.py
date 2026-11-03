@@ -21,3 +21,41 @@ def test_audit_explains_balances_and_changes_nothing(tmp_path, monkeypatch):
     assert out["recentTransactions"][0]["bank_delta"] == -250_000
     assert out["splitwise"]["ledgerSumMinor"] == 250_000
     assert out["splitwise"]["shownMinor"] == 250_000
+
+
+def test_old_statement_rows_do_not_change_a_manually_set_balance(tmp_path, monkeypatch):
+    import time
+    from app.db import connection
+    from app.ledger import migrations
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "stmt.db"))
+    db.init_db()
+    L.set_balance("hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "2222", 500_000)
+    L.set_manual_splitwise_total("INR", 0)
+    old = int(time.time() * 1000) - 5 * 86_400_000
+    t = sms_debit(bank="HDFC", last4="2222", ts=old, id="statement:abc", amount=100_000)
+    L.sync_transaction(t)
+    with connection() as conn:
+        L.apply_transaction_to_account(conn, t, int(time.time() * 1000))
+    L.rebuild_manual_splitwise_total()
+    assert [a for a in L.balances() if a["id"] == "hdfc"][0]["balance_minor"] == 500_000
+    assert L.get_manual_splitwise_total("INR") == 0
+
+
+def test_migration_reverses_statement_rows_replayed_after_manual_edit(tmp_path, monkeypatch):
+    import time
+    from app.db import connection
+    from app.ledger import migrations
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "mig.db"))
+    db.init_db()
+    L.set_balance("hdfc", "HDFC", "INR", "BANK_ACCOUNT", "HDFC", "2222", 500_000)
+    L.set_manual_splitwise_total("INR", 0)
+    now = int(time.time() * 1000)
+    t = sms_debit(bank="HDFC", last4="2222", ts=now - 86_400_000, id="statement:old", amount=100_000)
+    L.sync_transaction(t)
+    with connection() as conn:  # simulate the old behaviour: replayed with a delta
+        acc = conn.execute("SELECT id FROM accounts WHERE last4='2222'").fetchone()["id"]
+        conn.execute("INSERT INTO balance_adjustments VALUES('statement:old',?,-100000,?)", (acc, now))
+        conn.execute("UPDATE accounts SET balance_minor=400000")
+    assert migrations.migrate_statement_reconciled_reversal() == 1
+    assert [a for a in L.balances() if a["id"] == "hdfc"][0]["balance_minor"] == 500_000
+    assert migrations.migrate_statement_reconciled_reversal() == 0

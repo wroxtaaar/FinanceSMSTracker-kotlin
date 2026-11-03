@@ -256,6 +256,12 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
     if reconciled_at and event_at <= reconciled_at:
         if created_at <= reconciled_at:
             return
+        # Statement rows are history by nature: a statement imported after a
+        # manual balance edit describes days the verified balance already
+        # covers, so it must never be replayed into it (the "late e-mail"
+        # exception above is for single alerts, not whole statements).
+        if str(t.id).startswith("statement:"):
+            return
         if event_at < min_plausible_event_ms:
             return
 

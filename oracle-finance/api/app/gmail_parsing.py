@@ -348,11 +348,22 @@ def parse_card_bill_email(message):
         return None
 
     amount=None
+    # A labelled table ("Total Amount Due | Minimum ..." then "44445.93 Dr | ...")
+    # is unambiguous, so it wins over the looser patterns below, which can
+    # reach past the header row and pick up an unrelated "Rs. 1500" (a fee).
+    table=re.search(
+        r"(?is)total\s+amount\s+due[^0-9]{0,200}?([0-9][0-9,]*\.[0-9]{1,2}|[0-9][0-9,]*)\s*(Dr|Cr)\b",
+        combined,
+    )
+    if table and table.group(2).lower()=="cr":
+        return None
+    if table:
+        amount=int(round(float(table.group(1).replace(",",""))*100))
     amount_patterns=(
         r"(?is)total\s+amount\s+due.{0,160}?(?:INR|Rs\.?|₹)\s*(?:\(?INR\)?\s*)?(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
         r"(?is)total\s+amt\s*[:\-]?\s*(?:INR|Rs\.?|₹)\s*(?:Dr\.?|CR\.?|:)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
     )
-    for pattern in amount_patterns:
+    for pattern in () if amount is not None else amount_patterns:
         match=re.search(pattern, combined)
         if match:
             amount=int(round(float(match.group(1).replace(",",""))*100))
