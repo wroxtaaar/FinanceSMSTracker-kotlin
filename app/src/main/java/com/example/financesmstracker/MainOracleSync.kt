@@ -103,16 +103,43 @@ internal fun formatLedgerAudit(body: String): String {
     if (m != null) {
         out.append("  baseline ${money(m.optLong("baseline_amount_minor"))} at ledger ${money(m.optLong("baseline_ledger_minor"))}, set at ${m.optLong("updated_at")}\n")
     }
-    out.append("\nRECENT ROWS (newest first)\n")
-    val rows = json.getJSONArray("recentTransactions")
-    for (i in 0 until rows.length()) {
-        val r = rows.getJSONObject(i)
-        out.append("\n${r.optLong("timestamp")} ${r.optString("type")} ${money(r.optLong("amount_minor"))} ${r.optString("category")}\n")
-        out.append("  ${r.optString("bank")} ${r.optString("account_last4")} ${r.optString("merchant_or_payee")} [${r.optString("status")}]")
-        if (!r.isNull("duplicate_of")) out.append(" dup_of ${r.optString("duplicate_of")}")
-        out.append("\n  bank delta ${if (r.isNull("bank_delta")) "none" else money(r.optLong("bank_delta"))}")
-        out.append(", splitwise delta ${if (r.isNull("sw_delta")) "none" else money(r.optLong("sw_delta"))}\n")
-        out.append("  id ${r.optString("id")}\n")
+    fun rowsSection(title: String, key: String) {
+        out.append("\n$title\n")
+        val rows = json.optJSONArray(key) ?: return
+        for (i in 0 until rows.length()) {
+            val r = rows.getJSONObject(i)
+            out.append("\n${r.optLong("timestamp")} (added ${r.optLong("created_at")}) ${r.optString("type")} ${money(r.optLong("amount_minor"))} ${r.optString("category")}\n")
+            out.append("  ${r.optString("bank")} ${r.optString("account_last4")} ${r.optString("merchant_or_payee")} [${r.optString("status")}]")
+            if (!r.isNull("duplicate_of")) out.append(" dup_of ${r.optString("duplicate_of")}")
+            out.append("\n  bank delta ${if (r.isNull("bank_delta")) "none" else money(r.optLong("bank_delta"))}")
+            out.append(", splitwise ${money(r.optLong("sw_delta"))}\n  id ${r.optString("id")}\n")
+        }
+    }
+    rowsSection("RECENT CREDITS (by when added)", "recentCredits")
+    rowsSection("LARGEST ACTIVE ROWS", "largestRows")
+    rowsSection("RECENTLY ADDED ROWS", "recentlyCreated")
+    rowsSection("RECENT ROWS BY DATE", "recentTransactions")
+    out.append("\nOWN-ACCOUNT TRANSFERS\n")
+    json.optJSONArray("transfers")?.let { a ->
+        for (i in 0 until a.length()) {
+            val t = a.getJSONObject(i)
+            out.append("${money(t.optLong("amount_minor"))} ${t.optString("status")} ${t.optString("reason")} added ${t.optLong("created_at")}\n  ${t.optString("debit_transaction_id")} -> ${t.optString("credit_transaction_id")}\n")
+        }
+    }
+    out.append("\nCARD BILL EVIDENCE (newest first)\n")
+    json.optJSONArray("billEvidence")?.let { a ->
+        for (i in 0 until a.length()) {
+            val e = a.getJSONObject(i)
+            out.append("${e.optString("source_type")} ${e.optString("bank")} ${e.optString("account_last4")}/${e.optString("account_last2")} ")
+            out.append("${if (e.isNull("amount_minor")) "none" else money(e.optLong("amount_minor"))} applied=${e.optInt("applied")} observed ${e.optLong("observed_at")} added ${e.optLong("created_at")}\n")
+        }
+    }
+    out.append("\nRECENT GMAIL MESSAGES (server)\n")
+    json.optJSONArray("recentMails")?.let { a ->
+        for (i in 0 until a.length()) {
+            val g = a.getJSONObject(i)
+            out.append("${g.optLong("internal_date")} [${g.optString("status")}] ${g.optString("sender")} | ${g.optString("subject")}\n")
+        }
     }
     return out.toString()
 }
