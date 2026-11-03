@@ -631,3 +631,14 @@ def test_axis_statement_table_total_wins_over_a_later_rupee_figure():
         subject="Airtel Axis Bank Rupay Credit Card ending XX06 - November 2026")
     extra["payload"]["headers"][1]["value"] = "cc.statements@axis.bank.in"
     assert parse_card_bill_email(extra)["amountMinor"] == 4444593
+
+
+def test_sbi_card_sender_is_a_known_bank_and_not_skipped():
+    from app.gmail_parsing import _recognized_bank
+    from app.gmail_sync import _is_unlikely_bank_mail
+
+    assert _recognized_bank("Your statement", "statements@sbicard.com") == "SBI"
+    stats = {"ignoredCount": 0, "notes": []}
+    item = {"from": "SBI Card <statements@sbicard.com>", "subject": "Your SBI Card Monthly Statement"}
+    assert _is_unlikely_bank_mail(item, stats) is False
+    assert stats["ignoredCount"] == 0

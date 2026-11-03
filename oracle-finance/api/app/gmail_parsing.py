@@ -63,7 +63,7 @@ _BANK_SENDER_DOMAINS = {
     "HDFC": ("hdfcbank.net", "hdfcbank.bank.in"),
     "AXIS": ("axisbank.com", "axis.bank.in"),
     "ICICI": ("icicibank.com", "icici.bank.in"),
-    "SBI": ("sbi.co.in", "sbi.bank.in"),
+    "SBI": ("sbi.co.in", "sbi.bank.in", "sbicard.com"),
     "HSBC": ("hsbc.co.in", "hsbc.com", "hsbc.bank.in"),
     "INDUSIND": ("indusind.com", "indusind.bank.in"),
 }

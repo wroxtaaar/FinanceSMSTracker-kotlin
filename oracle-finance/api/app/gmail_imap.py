@@ -331,7 +331,7 @@ class IMAPService:
     def _last_synced_since(self):
         """Return a small overlap window based on the newest stored Gmail email.
 
-        IMAP SINCE is date-based, so keep a two-day overlap. This makes the
+        IMAP SINCE is date-based, so keep a seven-day overlap (already-stored mail is skipped). This makes the
         incremental scan resilient to a short outage while avoiding a full
         mailbox scan on every manual check.
         """
@@ -353,7 +353,7 @@ class IMAPService:
             if max_date <= 0:
                 return fallback
             latest = datetime.fromtimestamp(max_date / 1000, tz=timezone.utc)
-            return latest - timedelta(days=2)
+            return latest - timedelta(days=7)
         except Exception:
             # Mail fetching must remain usable even if the optional cursor
             # lookup is unavailable during startup/migration.
