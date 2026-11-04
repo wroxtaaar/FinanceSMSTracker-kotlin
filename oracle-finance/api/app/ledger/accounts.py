@@ -441,6 +441,89 @@ def _queue_bill_conflict(conn, account, bank, previous, amount, observed_at):
     )
 
 
+def _blocked_bill_result(conn, account, bill, bank, source_type, source_key, amount, observed_at):
+    """Why this bill must not be applied, as the API result, or None if it may be.
+
+    A bill payment locks the bill: a statement observed on or before the
+    payment is the one that was paid, so re-reading it must not override the
+    paid-down bill; a newer statement still applies. A manual Cards edit does
+    not lock: the next statement scan within the window puts the printed bill
+    back. Otherwise a weaker source cannot overwrite a stronger one, and two
+    equally strong sources that disagree go to Review.
+    """
+    locked_at = int(account["bill_locked_at"] or 0)
+    if locked_at and observed_at <= locked_at:
+        return {
+            "status": "RETAINED_BILL_LOCKED",
+            "accountId": account["id"],
+            "sourceType": source_type,
+        }
+
+    previous = _previous_applied_bill(conn, account, bill, bank, source_type, source_key, observed_at)
+    if not previous or amount == previous["amount_minor"]:
+        return None
+
+    priority = _bill_priority(source_type)
+    previous_priority = _bill_priority(previous["source_type"])
+    if priority < previous_priority:
+        return {
+            "status": "RETAINED_LOWER_PRIORITY",
+            "accountId": account["id"],
+            "currentBillMinor": previous["amount_minor"],
+            "receivedBillMinor": amount,
+            "sourceType": source_type,
+        }
+    if priority == previous_priority:
+        _queue_bill_conflict(conn, account, bank, previous, amount, observed_at)
+        return {
+            "status": "REVIEW",
+            "reason": "same_priority_bill_conflict",
+            "accountId": account["id"],
+        }
+    return None
+
+
+def _raise_outstanding_to_bill(conn, account, bill_value, observed_at):
+    """What is owed in total cannot be less than the printed bill plus what was
+    spent after the e-mail arrived.
+
+    If the tracked outstanding is lower (spends the app never saw), raise it so
+    Active Spend starts at the real post-bill spend instead of going negative.
+    This only runs when a bill is applied: a later payment or refund can still
+    take Active Spend negative, and a payment locks the bill against re-reading.
+    """
+    after = conn.execute(
+        """SELECT COALESCE(SUM(ba.delta_minor),0) v
+           FROM balance_adjustments ba JOIN transactions t ON t.id=ba.transaction_id
+           WHERE ba.account_id=? AND t.timestamp>?""",
+        (account["id"], observed_at),
+    ).fetchone()["v"]
+    required = bill_value + max(int(after), 0)
+    shortfall = required - int(account["balance_minor"] or 0)
+    if shortfall > 0:
+        conn.execute(
+            """UPDATE accounts
+               SET balance_minor=balance_minor+?,
+                   opening_balance_minor=COALESCE(opening_balance_minor,0)+?
+             WHERE id=?""",
+            (shortfall, shortfall, account["id"]),
+        )
+
+
+def _apply_bill(conn, account, bill_value, observed_at, source_type, source_key):
+    # The bill is a separate statement/debt bucket. It is not capped by the
+    # signed live card balance, which follows the invariant sign convention.
+    conn.execute(
+        "UPDATE accounts SET bill_balance_minor=?, updated_at=? WHERE id=?",
+        (bill_value, now_ms(), account["id"]),
+    )
+    _raise_outstanding_to_bill(conn, account, bill_value, observed_at)
+    conn.execute(
+        "UPDATE card_bill_evidence SET applied=1 WHERE source_type=? AND source_key=?",
+        (source_type, source_key),
+    )
+
+
 def sync_card_bill(bill):
     """Record bill evidence and apply only the strongest confirmed bill amount.
 
@@ -459,9 +542,7 @@ def sync_card_bill(bill):
     observed_at = int(bill.get("timestamp") or now_ms())
     confidence = float(bill.get("confidence") or 0.0)
     if not source_key or amount is None or amount < 0:
-        return {"status":"IGNORED","reason":"missing_bill_amount_or_source"}
-
-    priority = _bill_priority(source_type)
+        return {"status": "IGNORED", "reason": "missing_bill_amount_or_source"}
 
     with connection() as conn:
         _upsert_bill_evidence(
@@ -471,89 +552,20 @@ def sync_card_bill(bill):
 
         account = _find_bill_card(conn, bill, bank, last4, last2)
         if not account:
-            return {"status":"REVIEW","reason":"card_not_found","bank":bank,"last4":last4,"last2":last2}
+            return {"status": "REVIEW", "reason": "card_not_found", "bank": bank, "last4": last4, "last2": last2}
 
-        # A bill payment locks the bill. A statement observed on or before
-        # the payment is the one that was paid, so re-reading it must not
-        # override the paid-down bill; a newer statement still applies. A
-        # manual Cards edit does not lock: the next statement scan within the
-        # window puts the printed bill back.
-        locked_at = int(account["bill_locked_at"] or 0)
-        if locked_at and observed_at <= locked_at:
-            return {
-                "status":"RETAINED_BILL_LOCKED",
-                "accountId":account["id"],
-                "sourceType":source_type,
-            }
-
-        previous = _previous_applied_bill(
-            conn, account, bill, bank, source_type, source_key, observed_at
+        blocked = _blocked_bill_result(
+            conn, account, bill, bank, source_type, source_key, amount, observed_at
         )
-        if previous:
-            previous_priority = _bill_priority(previous["source_type"])
+        if blocked:
+            return blocked
 
-            if amount != previous["amount_minor"] and priority < previous_priority:
-                return {
-                    "status":"RETAINED_LOWER_PRIORITY",
-                    "accountId":account["id"],
-                    "currentBillMinor":previous["amount_minor"],
-                    "receivedBillMinor":amount,
-                    "sourceType":source_type,
-                }
-
-            if amount != previous["amount_minor"] and priority == previous_priority:
-                _queue_bill_conflict(conn, account, bank, previous, amount, observed_at)
-                return {
-                    "status":"REVIEW",
-                    "reason":"same_priority_bill_conflict",
-                    "accountId":account["id"],
-                }
-
-        # Bill balance is a separate statement/debt bucket. It must not be
-        # capped by the signed live card balance because the live card balance
-        # follows the application's invariant sign convention.
-        bill_value = amount
-        conn.execute(
-            """UPDATE accounts
-               SET bill_balance_minor=?, updated_at=?
-             WHERE id=?""",
-            (bill_value, now_ms(), account["id"]),
-        )
-        # When a bill is read, what is owed in total cannot be less than the
-        # printed bill plus whatever was spent after the e-mail arrived. If the
-        # tracked outstanding is lower (spends the app never saw), raise it so
-        # Active Spend starts at the real post-bill spend instead of going
-        # negative. This only runs when a bill is applied: a later payment or
-        # refund can still take Active Spend negative, and a payment locks the
-        # bill against re-reading.
-        after = conn.execute(
-            """SELECT COALESCE(SUM(ba.delta_minor),0) v
-               FROM balance_adjustments ba JOIN transactions t ON t.id=ba.transaction_id
-               WHERE ba.account_id=? AND t.timestamp>?""",
-            (account["id"], observed_at),
-        ).fetchone()["v"]
-        required = bill_value + max(int(after), 0)
-        shortfall = required - int(account["balance_minor"] or 0)
-        if shortfall > 0:
-            conn.execute(
-                """UPDATE accounts
-                   SET balance_minor=balance_minor+?,
-                       opening_balance_minor=COALESCE(opening_balance_minor,0)+?
-                 WHERE id=?""",
-                (shortfall, shortfall, account["id"]),
-            )
-        conn.execute(
-            """UPDATE card_bill_evidence
-               SET applied=1
-             WHERE source_type=? AND source_key=?""",
-            (source_type, source_key),
-        )
-
+        _apply_bill(conn, account, amount, observed_at, source_type, source_key)
         return {
-            "status":"APPLIED",
-            "accountId":account["id"],
-            "billBalanceMinor":bill_value,
-            "sourceType":source_type,
+            "status": "APPLIED",
+            "accountId": account["id"],
+            "billBalanceMinor": amount,
+            "sourceType": source_type,
         }
 
 
