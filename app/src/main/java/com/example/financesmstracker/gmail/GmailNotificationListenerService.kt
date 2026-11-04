@@ -143,21 +143,13 @@ class GmailNotificationListenerService : NotificationListenerService() {
                 NotificationLogRedactor.redact(sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT))
         )
 
-        val extras = sbn.notification.extras
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
-        val titleBig = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
-        val summary = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()
-        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
-            ?.joinToString("\n") { it.toString() }
+        val content = NotificationContent.from(sbn.notification.extras)
+        val title = content.title
 
-        NotificationAccessHelper.recordGmailNotification(applicationContext, title, text ?: bigText ?: textLines)
-        Log.i(TAG, "Gmail notification received: title=" + NotificationLogRedactor.redact(title) + " text=" + NotificationLogRedactor.redact(text ?: bigText ?: textLines))
+        NotificationAccessHelper.recordGmailNotification(applicationContext, title, content.preview)
+        Log.i(TAG, "Gmail notification received: title=" + NotificationLogRedactor.redact(title) + " text=" + NotificationLogRedactor.redact(content.preview))
 
-        val payloadText = listOfNotNull(title, titleBig, text, bigText, subText, summary, textLines)
-            .joinToString("\n")
+        val payloadText = content.payload
 
         // Statement emails are a separate evidence type. The notification
         // may contain the card identity and statement wording but no amount
@@ -233,18 +225,10 @@ class GmailNotificationListenerService : NotificationListenerService() {
     }
 
     private fun processCardBillNotificationSafely(sbn: StatusBarNotification) {
-        val extras = sbn.notification.extras
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
-        val titleBig = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
-        val summary = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()
-        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
-            ?.joinToString("\n") { it.toString() }
+        val content = NotificationContent.from(sbn.notification.extras)
+        val title = content.title
 
-        val payloadText = listOfNotNull(title, titleBig, text, bigText, subText, summary, textLines)
-            .joinToString("\n")
+        val payloadText = content.payload
 
         if (CardBillPaymentNotificationParser.parse(title, payloadText, null, null) == null) {
             Log.d(TAG, "CRED notification is not a supported card bill payment")
@@ -360,19 +344,11 @@ class GmailNotificationListenerService : NotificationListenerService() {
             return
         }
 
-        val extras = sbn.notification.extras
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
-        val titleBig = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
-        val summary = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()
-        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
-            ?.joinToString("\n") { it.toString() }
+        val content = NotificationContent.from(sbn.notification.extras)
+        val title = content.title
 
-        NotificationAccessHelper.recordGmailNotification(applicationContext, title, text ?: bigText ?: textLines)
-        val payloadText = listOfNotNull(title, titleBig, text, bigText, subText, summary, textLines)
-            .joinToString("\n")
+        NotificationAccessHelper.recordGmailNotification(applicationContext, title, content.preview)
+        val payloadText = content.payload
 
         if (GmailNotificationParser.parse(title, payloadText, null, null) == null) {
             NotificationAccessHelper.recordGmailNotificationParsed(

@@ -9,6 +9,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.example.financesmstracker.integration.FinanceSyncClient
 import com.example.financesmstracker.integration.OracleAccount
+import com.example.financesmstracker.util.MoneyInput
 
 internal fun MainActivity.loadOracleAccountsForManualEdit(accountType: String) {
     oracleExecutor.execute {
@@ -33,11 +34,7 @@ internal fun MainActivity.showManualAccountsDialog(
     accounts: List<OracleAccount>,
     accountType: String
 ) {
-    val title = if (accountType == "BANK_ACCOUNT") {
-        "Edit Bank Accounts"
-    } else {
-        "Credit Cards"
-    }
+    val title = if (accountType == "BANK_ACCOUNT") "Edit Bank Accounts" else "Credit Cards"
 
     if (accounts.isEmpty()) {
         AlertDialog.Builder(this)
@@ -48,243 +45,176 @@ internal fun MainActivity.showManualAccountsDialog(
         return
     }
 
-    if (accountType == "CREDIT_CARD") {
-        /*
-         * Credit cards have two separate buckets:
-         *   Bill         = statement bill still to be paid.
-         *   Active Spend = transactions after that statement.
-         *
-         * The Oracle ledger still keeps one live outstanding balance,
-         * which is Bill + Active Spend. Card debits increase Active Spend;
-         * card credits/payments reduce Bill first.
-         */
-        val rows = accounts.map { account ->
-            // Bill is never negative. Active Spend = outstanding - Bill and may be
-            // negative: paying more than the bill, or a refund, leaves a credit.
-            val billMinor = account.billBalanceMinor.coerceAtLeast(0L)
-            val activeMinor = account.balanceMinor - billMinor
+    if (accountType == "CREDIT_CARD") showCreditCardsDialog(accounts, title) else showBankAccountsDialog(accounts, title)
+}
 
-            val label = TextView(this).apply {
-                text = buildString {
-                    append(displayAccountName(account.name))
-                    account.last4?.let { append(" ••••").append(it) }
-                }
-                textSize = 14f
-                setPadding(0, 10, 0, 4)
+private fun MainActivity.accountLabel(account: OracleAccount, topPadding: Int, bottomPadding: Int) =
+    TextView(this).apply {
+        text = buildString {
+            append(displayAccountName(account.name))
+            account.last4?.let { append(" ••••").append(it) }
+        }
+        textSize = 14f
+        setPadding(0, topPadding, 0, bottomPadding)
+    }
+
+private fun MainActivity.amountInput(hint: String, valueMinor: Long, signed: Boolean = false) =
+    EditText(this).apply {
+        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or
+            (if (signed) InputType.TYPE_NUMBER_FLAG_SIGNED else 0)
+        setSingleLine(true)
+        this.hint = hint
+        setText(formatDecimalMinor(valueMinor))
+        selectAll()
+    }
+
+private fun MainActivity.dialogContent(build: LinearLayout.() -> Unit) = ScrollView(this).apply {
+    isFillViewport = true
+    addView(LinearLayout(this@dialogContent).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(48, 0, 48, 0)
+        build()
+    })
+}
+
+/**
+ * Save every row on the Oracle executor, stop at the first failure, then report.
+ * [save] is called once per row with a client; the dialog closes only on success.
+ */
+private fun <T> MainActivity.saveRows(
+    dialog: AlertDialog,
+    rows: List<T>,
+    successMessage: String,
+    failureMessage: String,
+    save: (FinanceSyncClient, T) -> Result<*>
+) {
+    dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+    oracleExecutor.execute {
+        var failure: Throwable? = null
+        val client = FinanceSyncClient(this@saveRows)
+        for (row in rows) {
+            val result = save(client, row)
+            if (result.isFailure) {
+                failure = result.exceptionOrNull()
+                break
             }
-
-            val billInput = EditText(this).apply {
-                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                setSingleLine(true)
-                hint = "Bill"
-                setText(formatDecimalMinor(billMinor))
-                selectAll()
+        }
+        runOnUiThread {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+            if (failure == null) {
+                dialog.dismiss()
+                loadOracleSummary()
+                Toast.makeText(this@saveRows, successMessage, Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(
+                    this@saveRows,
+                    failureMessage + (failure?.message ?: "Unavailable"),
+                    Toast.LENGTH_LONG
+                ).show()
             }
+        }
+    }
+}
 
-            val activeInput = EditText(this).apply {
-                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or
-                    InputType.TYPE_NUMBER_FLAG_SIGNED
-                setSingleLine(true)
-                hint = "Active spend"
-                setText(formatDecimalMinor(activeMinor))
-                selectAll()
-            }
+/**
+ * Credit cards have two separate buckets:
+ *   Bill         = statement bill still to be paid.
+ *   Active Spend = transactions after that statement.
+ *
+ * The Oracle ledger still keeps one live outstanding balance, which is
+ * Bill + Active Spend. Card debits increase Active Spend; card credits and
+ * payments reduce Bill first.
+ */
+private class CardRow(val account: OracleAccount, val bill: EditText, val active: EditText)
 
-            val columns = LinearLayout(this).apply {
+private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, title: String) {
+    val rows = accounts.map { account ->
+        // Bill is never negative. Active Spend = outstanding - Bill and may be
+        // negative: paying more than the bill, or a refund, leaves a credit.
+        val billMinor = account.billBalanceMinor.coerceAtLeast(0L)
+        CardRow(
+            account,
+            amountInput("Bill", billMinor),
+            amountInput("Active spend", account.balanceMinor - billMinor, signed = true)
+        )
+    }
+
+    val scrollView = dialogContent {
+        addView(LinearLayout(this@showCreditCardsDialog).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(
+                TextView(this@showCreditCardsDialog).apply { text = "Bill"; textSize = 12f },
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            addView(
+                TextView(this@showCreditCardsDialog).apply { text = "Active Spend"; textSize = 12f },
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = 12 }
+            )
+        })
+        rows.forEach { row ->
+            addView(accountLabel(row.account, 10, 4))
+            addView(LinearLayout(this@showCreditCardsDialog).apply {
                 orientation = LinearLayout.HORIZONTAL
-                val lp = LinearLayout.LayoutParams(
+                layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
-                billInput.layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    1f
-                ).apply {
-                    marginEnd = 6
-                }
-                activeInput.layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    1f
-                ).apply {
-                    marginStart = 6
-                }
-                addView(billInput)
-                addView(activeInput)
-                layoutParams = lp
-            }
-
-            Triple(account, billInput, activeInput).also {
-                it
-            }.let { row ->
-                arrayOf(label, columns, row)
-            }
+                row.bill.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { marginEnd = 6 }
+                row.active.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { marginStart = 6 }
+                addView(row.bill)
+                addView(row.active)
+            })
         }
-
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 0, 48, 0)
-
-            val header = LinearLayout(this@showManualAccountsDialog).apply {
-                orientation = LinearLayout.HORIZONTAL
-
-                val billHeader = TextView(this@showManualAccountsDialog).apply {
-                    text = "Bill"
-                    textSize = 12f
-                }
-                val activeHeader = TextView(this@showManualAccountsDialog).apply {
-                    text = "Active Spend"
-                    textSize = 12f
-                }
-
-                addView(
-                    billHeader,
-                    LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f
-                    )
-                )
-                addView(
-                    activeHeader,
-                    LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f
-                    ).apply { marginStart = 12 }
-                )
-            }
-            addView(header)
-
-            rows.forEach { row ->
-                @Suppress("UNCHECKED_CAST")
-                val label = row[0] as TextView
-                val columns = row[1] as LinearLayout
-                addView(label)
-                addView(columns)
-            }
-        }
-
-        val scrollView = ScrollView(this).apply {
-            isFillViewport = true
-            addView(content)
-        }
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(scrollView)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Save", null)
-            .create()
-
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val values = mutableListOf<Triple<OracleAccount, Long, Long>>()
-
-                rows.forEach { row ->
-                    @Suppress("UNCHECKED_CAST")
-                    val account = row[2] as Triple<OracleAccount, EditText, EditText>
-                    val bill = account.second.text.toString().trim().replace(",", "").toDoubleOrNull()
-                    val active = account.third.text.toString().trim().replace(",", "").toDoubleOrNull()
-
-                    if (bill == null || bill < 0) {
-                        account.second.error = "Enter a valid bill amount"
-                        account.second.requestFocus()
-                        return@setOnClickListener
-                    }
-                    if (active == null) {
-                        account.third.error = "Enter a valid active amount"
-                        account.third.requestFocus()
-                        return@setOnClickListener
-                    }
-
-                    val billMinor = kotlin.math.round(bill * 100.0).toLong()
-                    val activeMinor = kotlin.math.round(active * 100.0).toLong()
-                    values += Triple(account.first, billMinor, activeMinor)
-                }
-
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
-
-                oracleExecutor.execute {
-                    var failure: Throwable? = null
-
-                    for ((account, billMinor, activeMinor) in values) {
-                        val saveResult = FinanceSyncClient(this@showManualAccountsDialog)
-                            .updateAccountBalance(
-                                account = account,
-                                balanceMinor = billMinor + activeMinor,
-                                billBalanceMinor = billMinor
-                            )
-
-                        if (saveResult.isFailure) {
-                            failure = saveResult.exceptionOrNull()
-                            break
-                        }
-                    }
-
-                    runOnUiThread {
-                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-
-                        if (failure == null) {
-                            dialog.dismiss()
-                            loadOracleSummary()
-                            Toast.makeText(
-                                this@showManualAccountsDialog,
-                                "Credit card amounts updated",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        } else {
-                            Toast.makeText(
-                                this@showManualAccountsDialog,
-                                "Could not update credit cards: " + (failure?.message ?: "Unavailable"),
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    }
-                }
-            }
-        }
-
-        dialog.show()
-        return
     }
 
-    // Bank accounts keep the original single current-balance editor.
-    val accountInputs = accounts.map { account ->
-        val label = TextView(this).apply {
-            text = buildString {
-                append(displayAccountName(account.name))
-                account.last4?.let { append(" ••••").append(it) }
+    val dialog = AlertDialog.Builder(this)
+        .setTitle(title)
+        .setView(scrollView)
+        .setNegativeButton("Cancel", null)
+        .setPositiveButton("Save", null)
+        .create()
+
+    dialog.setOnShowListener {
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val values = mutableListOf<Triple<OracleAccount, Long, Long>>()
+            for (row in rows) {
+                val bill = MoneyInput.parseMinor(row.bill.text.toString())
+                val active = MoneyInput.parseMinor(row.active.text.toString(), allowNegative = true)
+                if (bill == null) {
+                    row.bill.error = "Enter a valid bill amount"
+                    row.bill.requestFocus()
+                    return@setOnClickListener
+                }
+                if (active == null) {
+                    row.active.error = "Enter a valid active amount"
+                    row.active.requestFocus()
+                    return@setOnClickListener
+                }
+                values += Triple(row.account, bill, active)
             }
-            textSize = 14f
-            setPadding(0, 8, 0, 2)
+            saveRows(dialog, values, "Credit card amounts updated", "Could not update credit cards: ") { client, (account, bill, active) ->
+                client.updateAccountBalance(
+                    account = account,
+                    balanceMinor = bill + active,
+                    billBalanceMinor = bill
+                )
+            }
         }
-
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setSingleLine(true)
-            hint = "Current balance"
-            setText(formatDecimalMinor(account.balanceMinor))
-            selectAll()
-        }
-
-        Triple(account, label, input)
     }
+    dialog.show()
+}
 
-    val content = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(48, 0, 48, 0)
+/** Bank accounts keep the single current-balance editor. */
+private fun MainActivity.showBankAccountsDialog(accounts: List<OracleAccount>, title: String) {
+    val inputs = accounts.map { it to amountInput("Current balance", it.balanceMinor) }
 
-        accountInputs.forEach { (_, label, input) ->
-            addView(label)
+    val scrollView = dialogContent {
+        inputs.forEach { (account, input) ->
+            addView(accountLabel(account, 8, 2))
             addView(input)
         }
-    }
-
-    val scrollView = ScrollView(this).apply {
-        isFillViewport = true
-        addView(content)
     }
 
     val dialog = AlertDialog.Builder(this)
@@ -298,55 +228,19 @@ internal fun MainActivity.showManualAccountsDialog(
     dialog.setOnShowListener {
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val values = mutableListOf<Pair<OracleAccount, Long>>()
-
-            for ((account, _, input) in accountInputs) {
-                val amount = input.text.toString().trim().replace(",", "").toDoubleOrNull()
-                if (amount == null || amount < 0) {
+            for ((account, input) in inputs) {
+                val amount = MoneyInput.parseMinor(input.text.toString())
+                if (amount == null) {
                     input.error = "Enter a valid amount"
                     input.requestFocus()
                     return@setOnClickListener
                 }
-
-                values += account to kotlin.math.round(amount * 100.0).toLong()
+                values += account to amount
             }
-
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
-
-            oracleExecutor.execute {
-                var failure: Throwable? = null
-
-                for ((account, balanceMinor) in values) {
-                    val saveResult = FinanceSyncClient(this@showManualAccountsDialog)
-                        .updateAccountBalance(account, balanceMinor)
-
-                    if (saveResult.isFailure) {
-                        failure = saveResult.exceptionOrNull()
-                        break
-                    }
-                }
-
-                runOnUiThread {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-
-                    if (failure == null) {
-                        dialog.dismiss()
-                        loadOracleSummary()
-                        Toast.makeText(
-                            this@showManualAccountsDialog,
-                            "Account balances updated",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    } else {
-                        Toast.makeText(
-                            this@showManualAccountsDialog,
-                            "Could not update accounts: " + (failure?.message ?: "Unavailable"),
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
+            saveRows(dialog, values, "Account balances updated", "Could not update accounts: ") { client, (account, balance) ->
+                client.updateAccountBalance(account, balance)
             }
         }
     }
-
     dialog.show()
 }
