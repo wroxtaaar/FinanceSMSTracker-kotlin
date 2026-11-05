@@ -60,11 +60,12 @@ class SmsReceiver : BroadcastReceiver() {
                     // digits and a received payment, so it is accepted from an unknown
                     // (non-personal) sender id too; only personal numbers are refused.
                     if (cardBillPayment != null && trustStatus != SenderTrustStatus.UNTRUSTED) {
-                        val paymentOutcome = processCardBillPayment(
+                        val paymentOutcome = CardBillPaymentRecorder.record(
                             context = context,
                             timestamp = timestamp,
                             smsHash = smsHash,
-                            parsed = cardBillPayment
+                            parsed = cardBillPayment,
+                            onlyMatchMarked = true
                         )
                         SmsHandlingLog.record(context, sender, fullBody, paymentOutcome)
                         val updateIntent = Intent(ACTION_TRANSACTION_DATA_CHANGED).apply {
@@ -262,99 +263,4 @@ class SmsReceiver : BroadcastReceiver() {
             }
         }
     }
-
-    private fun processCardBillPayment(
-        context: Context,
-        timestamp: Long,
-        smsHash: String,
-        parsed: com.example.financesmstracker.parser.CardBillPaymentSms
-    ): String {
-        val dbHelper = FinanceDatabaseHelper(context)
-        val repository = TransactionRepository(dbHelper, context)
-        try {
-            // The user may already have marked the paying bank debit as this
-            // card payment; recording the card's confirmation too would lower
-            // the Bill twice.
-            com.example.financesmstracker.transfer.CardPaymentMatch.findExisting(
-                candidates = repository.getTransactionsByAmount(parsed.amountPaise),
-                amountPaise = parsed.amountPaise,
-                last4 = parsed.cardLastFour,
-                aroundMs = timestamp,
-                onlyManual = true
-            )?.let { return "Matched the card payment you marked (row ${it.id}); no new row" }
-
-            val evidence = SourceEvidence(
-                sourceType = SourceType.SMS,
-                sourceKey = "sms-card-bill-payment:" + smsHash,
-                receivedAt = timestamp,
-                amountPaise = parsed.amountPaise,
-                currency = "INR",
-                direction = "CREDIT",
-                bankProvider = parsed.cardBank,
-                accountLastFour = parsed.cardLastFour,
-                reference = parsed.reference,
-                contentHash = smsHash,
-                confidence = parsed.confidence,
-                status = EvidenceStatus.MATCHED
-            )
-
-            val evidenceId = repository.insertSourceEvidence(evidence)
-            if (evidenceId == -1L) {
-                Log.d(TAG, "Duplicate card bill payment SMS skipped: " + smsHash)
-                return "Skipped: card payment SMS already recorded"
-            }
-
-            val transaction = Transaction(
-                amountPaise = parsed.amountPaise,
-                currency = "INR",
-                transactionType = TransactionType.CREDIT,
-                paymentMethod = parsed.paymentMethod,
-                accountType = com.example.financesmstracker.parser.AccountType.CREDIT_CARD,
-                bank = parsed.cardBank,
-                merchantName = "Credit Card Bill Payment",
-                payeeId = null,
-                accountLastFour = parsed.cardLastFour,
-                refNumber = parsed.reference,
-                timestamp = timestamp,
-                smsHash = "card-bill-payment:" + smsHash,
-                category = "TRANSFER",
-                parserConfidence = parsed.confidence
-            )
-
-            val rowId = repository.insertTransaction(transaction)
-            if (rowId == -1L) {
-                Log.d(TAG, "Card bill payment transaction already exists")
-                return "Skipped: card payment row already exists"
-            }
-            if (rowId == 0L) {
-                return "NOT SAVED: older than your cleared local history"
-            }
-
-            repository.resolveEvidenceToTransaction(evidenceId, rowId)?.let {
-                FinanceSyncBridge.enqueueEvidence(context, it)
-            }
-
-            repository.getTransactionById(rowId)?.let { canonical ->
-                FinanceSyncBridge.enqueueCanonical(
-                    context = context,
-                    transaction = canonical,
-                    evidence = repository.getSourceEvidenceById(evidenceId)
-                )
-            }
-
-            Log.i(
-                TAG,
-                "CARD_BILL_PAYMENT_SMS_SAVED -> card=" + parsed.cardBank + "-" + parsed.cardLastFour +
-                    ", amount=" + parsed.amountPaise +
-                    ", method=" + parsed.paymentMethod +
-                    ", ref=" + parsed.reference
-            )
-            val saved = repository.getTransactionById(rowId)
-            return "Card payment saved: CREDIT ${parsed.cardBank} card ${parsed.cardLastFour} " +
-                "(row $rowId, now ${saved?.accountType ?: "?"}/${saved?.transactionType ?: "?"} ${saved?.merchantName ?: "-"})"
-        } finally {
-            dbHelper.close()
-        }
-    }
-
 }

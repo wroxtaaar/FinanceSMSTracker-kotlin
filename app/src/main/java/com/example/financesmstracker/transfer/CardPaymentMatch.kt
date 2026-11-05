@@ -20,15 +20,19 @@ object CardPaymentMatch {
         amountPaise: Long,
         last4: String?,
         aroundMs: Long,
-        onlyManual: Boolean = false
+        onlyManual: Boolean = false,
+        bank: String? = null
     ): Transaction? {
         val digits = last4?.trim().orEmpty()
-        if (digits.isEmpty()) return null
+        val issuer = bank?.trim().orEmpty()
+        // A message that names no card digits can only be matched by issuer.
+        if (digits.isEmpty() && issuer.isEmpty()) return null
         return candidates.firstOrNull {
             it.transactionType == TransactionType.CREDIT &&
                 it.accountType == AccountType.CREDIT_CARD &&
                 it.amountPaise == amountPaise &&
-                it.accountLastFour?.trim() == digits &&
+                (if (digits.isNotEmpty()) it.accountLastFour?.trim() == digits
+                else it.bank?.trim().equals(issuer, ignoreCase = true)) &&
                 abs(it.timestamp - aroundMs) <= WINDOW_MS &&
                 (!onlyManual || it.smsHash.startsWith(MANUAL_PREFIX))
         }

@@ -54,7 +54,8 @@ object SmsHandlingLog {
         }
     }
 
-    fun isNotification(entry: Entry): Boolean = entry.sender.startsWith("Gmail notification:")
+    fun isNotification(entry: Entry): Boolean =
+        entry.sender.startsWith("Gmail notification:") || entry.sender.startsWith("Messages notification:")
 
     fun inSection(entries: List<Entry>, section: Section): List<Entry> =
         entries.filter { sectionOf(it) == section }
@@ -66,7 +67,7 @@ object SmsHandlingLog {
         val fmt = SimpleDateFormat("dd MMM HH:mm:ss", Locale.US)
         return rows.asReversed().joinToString("\n\n") {
             val source = if (isNotification(it)) "Notification" else "SMS"
-            val sender = it.sender.removePrefix("Gmail notification: ")
+            val sender = it.sender.removePrefix("Gmail notification: ").removePrefix("Messages notification: ")
             "${fmt.format(Date(it.at))}  [$source] $sender\n${it.snippet}\n→ ${it.outcome}"
         }
     }

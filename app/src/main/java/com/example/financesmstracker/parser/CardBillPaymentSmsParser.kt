@@ -11,7 +11,8 @@ import java.math.RoundingMode
 data class CardBillPaymentSms(
     val amountPaise: Long,
     val cardBank: String,
-    val cardLastFour: String,
+    /** Null when the message names the issuer but not the card (resolved later if only one card fits). */
+    val cardLastFour: String?,
     val paymentMethod: PaymentMethod,
     val reference: String?,
     val confidence: Float = 0.98f
@@ -23,7 +24,7 @@ object CardBillPaymentSmsParser {
     )
 
     private val cardWithBankRegex = Regex(
-        """(?i)\b(SBI|AXIS|HDFC|ICICI|INDUSIND|HSBC|KOTAK)(?:\s+BANK)?\s+(?:CREDIT\s+CARD|CARD)\b.{0,40}?(?:NO\.?|NUMBER|ENDING(?:\s+IN)?|XX+|X{2,}|\*{2,})?\s*[- ]?([0-9]{2,4})\b"""
+        """(?i)\b(SBI|AXIS|HDFC|ICICI|INDUSIND|HSBC|KOTAK)(?:\s+BANK)?\s+(?:CREDIT\s+CARD|CARD)\b[^.0-9₹]{0,40}?(?:NO\.?|NUMBER|ENDING(?:\s+IN)?|XX+|X{2,}|\*{2,})?\s*[- ]?([0-9]{2,4})\b"""
     )
 
     private val cardSuffixRegex = Regex(
@@ -69,7 +70,6 @@ object CardBillPaymentSmsParser {
         val bankAndCard = cardWithBankRegex.find(text)
         val lastFour = bankAndCard?.groupValues?.getOrNull(2)
             ?: cardSuffixRegex.find(text)?.groupValues?.getOrNull(1)
-            ?: return null
 
         val bank = bankAndCard?.groupValues?.getOrNull(1)?.let(::normalizePaymentBank)
             ?: bankRegexes.firstOrNull { it.second.containsMatchIn(text) }?.first

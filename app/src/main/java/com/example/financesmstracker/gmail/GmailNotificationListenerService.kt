@@ -112,6 +112,14 @@ class GmailNotificationListenerService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        if (sbn.packageName == MessagesCardPaymentNotifications.PACKAGE) {
+            notificationExecutor.execute {
+                runCatching { MessagesCardPaymentNotifications.handle(applicationContext, sbn) }
+                    .onFailure { Log.e(TAG, "Messages card payment notification failed", it) }
+            }
+            return
+        }
+
         if (sbn.packageName != GMAIL_PACKAGE && sbn.packageName != CRED_PACKAGE) return
 
         if (sbn.packageName == CRED_PACKAGE) {

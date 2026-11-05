@@ -170,3 +170,21 @@ def test_a_card_payment_made_by_someone_else_lowers_splitwise(tmp_path, monkeypa
     L.sync_transaction(_card_credit("sms:friend-paid", 200_000, 1_800_000_000_000))
     L.rebuild_manual_splitwise_total()
     assert L.get_manual_splitwise_total("INR") == 300_000
+
+
+def test_card_payment_naming_only_the_issuer_goes_to_the_one_card_that_owes(tmp_path, monkeypatch):
+    """SBI confirmations say 'your SBI Credit Card' without digits."""
+    from app.db import connection
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "issuer.db"))
+    db.init_db()
+    L.set_balance("sbi-card-0065", "SBI Credit Card", "INR", "CREDIT_CARD", "SBI", "0065", 177_000, 177_000)
+    L.set_balance("sbi-card-7345", "SBI Credit Card", "INR", "CREDIT_CARD", "SBI", "7345", 0, 0)
+    credit = _card_credit("sms:sbi-paid", 177_010, 1_800_000_000_000)
+    credit.bank, credit.accountLast4, credit.paymentMethod = "SBI", None, "BANK_TRANSFER"
+    L.sync_transaction(credit)
+    with connection() as conn:
+        paid = conn.execute("SELECT balance_minor,bill_balance_minor FROM accounts WHERE id='sbi-card-0065'").fetchone()
+        other = conn.execute("SELECT balance_minor FROM accounts WHERE id='sbi-card-7345'").fetchone()
+    assert paid["bill_balance_minor"] == 0
+    assert paid["balance_minor"] == -10      # 1770.10 paid against 1770.00: a 10 paise credit
+    assert other["balance_minor"] == 0

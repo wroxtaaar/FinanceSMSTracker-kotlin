@@ -39,4 +39,12 @@ class CardPaymentMatchTest {
         assertNull(CardPaymentMatch.findExisting(listOf(issuer), 100_000, "8001", t0, onlyManual = true))
         assertEquals(2L, CardPaymentMatch.findExisting(listOf(issuer), 100_000, "8001", t0)?.id)
     }
+
+    @Test
+    fun aConfirmationWithoutCardDigitsMatchesByIssuer() {
+        val issuer = credit(3, "card-bill-payment:x")
+        assertEquals(3L, CardPaymentMatch.findExisting(listOf(issuer), 100_000, null, t0, bank = "icici")?.id)
+        assertNull(CardPaymentMatch.findExisting(listOf(issuer), 100_000, null, t0, bank = "SBI"))
+        assertNull(CardPaymentMatch.findExisting(listOf(issuer), 100_000, null, t0))
+    }
 }

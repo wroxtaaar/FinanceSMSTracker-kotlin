@@ -206,7 +206,10 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
         account is None
         and not last4
         and bank
-        and str(getattr(t, "paymentMethod", "") or "").strip().upper() == "UNKNOWN"
+        and (
+            str(getattr(t, "paymentMethod", "") or "").strip().upper() == "UNKNOWN"
+            or _is_bill_payment(t)
+        )
     ):
         fallback = conn.execute(
             """
@@ -222,6 +225,12 @@ def apply_transaction_to_account(conn, t, applied_at, transaction_created_at=Non
             row for row in fallback
             if _normalize_account_bank(row["bank"]) == bank
         ]
+        # A bill payment can only go to a card that owes something, which
+        # settles the issuer with several cards when just one of them does.
+        if len(bank_matches) > 1 and _is_bill_payment(t) and t.accountType == "CREDIT_CARD":
+            owing = [row for row in bank_matches if int(row["balance_minor"] or 0) > 0]
+            if len(owing) == 1:
+                bank_matches = owing
         if len(bank_matches) == 1:
             account = bank_matches[0]
 
