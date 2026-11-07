@@ -57,6 +57,139 @@ def _same_amount(first, second):
     )
 
 
+_MIRROR_PREFIXES = ("gmail:", "notification:")
+_SAME_SOURCE_WINDOW_MS = 120_000
+_GMAIL_WINDOW_MS = 24 * 60 * 60 * 1000
+_NOTIFICATION_WINDOW_MS = 15 * 60 * 1000
+_PAIR_WINDOW_MS = 2 * 60 * 60 * 1000
+
+
+def _bank(row):
+    return _normalize_account_bank(row["bank"])
+
+
+def _last4(row):
+    return str(row["account_last4"] or "").strip()
+
+
+def _upper(row, key):
+    return str(row[key]).strip().upper()
+
+
+def _is_mirror(row):
+    return str(row["id"]).startswith(_MIRROR_PREFIXES)
+
+
+def _is_gmail(row):
+    return str(row["id"]).startswith("gmail:")
+
+
+def _apart_ms(first, second):
+    return abs(int(first["timestamp"]) - int(second["timestamp"]))
+
+
+def _banks_conflict(first, second):
+    return bool(_bank(first) and _bank(second) and _bank(first) != _bank(second))
+
+
+def _last4_conflict(first, second):
+    return bool(_last4(first) and _last4(second) and _last4(first) != _last4(second))
+
+
+def _same_side(first, second):
+    """Same direction on the same kind of account."""
+    return (
+        _upper(first, "type") == _upper(second, "type")
+        and _upper(first, "account_type") == _upper(second, "account_type")
+    )
+
+
+def _payment_methods_conflict(first, second):
+    methods = [str(row["payment_method"] or "").strip().upper() for row in (first, second)]
+    return all(methods) and "UNKNOWN" not in methods and methods[0] != methods[1]
+
+
+def _same_account_identity(first, second, cross_source):
+    """Same bank, or, for a notification/e-mail mirror that lacks the bank,
+    the same account last-4 against a real row."""
+    if _bank(first) and _bank(second):
+        return True
+    return bool(cross_source and _last4(first) and _last4(first) == _last4(second))
+
+
+def _same_source_kind_window(first, second):
+    """Two rows from the same kind of source (both mirrors or both real)."""
+    first_ref = normalize_reference(first["reference"])
+    second_ref = normalize_reference(second["reference"])
+    if not _last4(first) and not _last4(second):
+        # An Axis-style credit has no SMS and often no last-4: the bank e-mail
+        # carries the reference, the instant notification does not. That e-mail
+        # + notification pair (and only that pair, with the reference on exactly
+        # one side and the same bank) is one event.
+        kinds = {_mirror_kind(first["id"]), _mirror_kind(second["id"])}
+        if (
+            kinds == {"gmail", "notification"}
+            and (first_ref is None) != (second_ref is None)
+            and _bank(first)
+            and _bank(second)
+        ):
+            return _apart_ms(first, second) <= _NOTIFICATION_WINDOW_MS
+        return False
+    return _apart_ms(first, second) <= _SAME_SOURCE_WINDOW_MS
+
+
+def _cross_source_window(first, second):
+    """A notification/e-mail mirror against a real SMS/bank row."""
+    if not _last4(first) or _last4(first) != _last4(second):
+        return False
+
+    merchants_missing = any(
+        not value or value == "-"
+        for value in (
+            str(first["merchant_or_payee"] or "").strip(),
+            str(second["merchant_or_payee"] or "").strip(),
+        )
+    )
+    both_unreferenced = (
+        (normalize_reference(first["reference"]) is None)
+        == (normalize_reference(second["reference"]) is None)
+    )
+    if merchants_missing and both_unreferenced:
+        # Neither side has a reference or merchant (typical card spend: the SMS
+        # and the notification both carry only amount + last-4). Accept the pair
+        # only inside a short window; repair_duplicate_transactions also needs
+        # exactly one candidate, so two real same-amount purchases never merge.
+        # An e-mail can be stamped well away from the SMS, so allow 24h for it
+        # in either arrival order. (A reference on exactly one side already
+        # makes bank + account + amount + direction + time identity strong
+        # enough, so that case skips this short window.)
+        window = _GMAIL_WINDOW_MS if _is_gmail(first) or _is_gmail(second) else _NOTIFICATION_WINDOW_MS
+        return _apart_ms(first, second) <= window
+
+    window = _GMAIL_WINDOW_MS if _is_gmail(first) or _is_gmail(second) else _PAIR_WINDOW_MS
+    return _apart_ms(first, second) <= window
+
+
+def _duplicate_without_reference(first, second):
+    if not _same_amount(first, second) or not _same_side(first, second):
+        return False
+
+    cross_source = _is_mirror(first) != _is_mirror(second)
+    if not _same_account_identity(first, second, cross_source):
+        return False
+    if _payment_methods_conflict(first, second):
+        return False
+    if not _merchant_values_compatible(
+        str(first["merchant_or_payee"] or "").strip(),
+        str(second["merchant_or_payee"] or "").strip(),
+    ):
+        return False
+
+    if not cross_source:
+        return _same_source_kind_window(first, second)
+    return _cross_source_window(first, second)
+
+
 def _rows_are_duplicate(first, second):
     """Return True only for the same ledger-side transaction represented twice.
 
@@ -67,122 +200,15 @@ def _rows_are_duplicate(first, second):
     """
     if str(first["currency"]).strip().upper() != str(second["currency"]).strip().upper():
         return False
-
-    first_bank = _normalize_account_bank(first["bank"])
-    second_bank = _normalize_account_bank(second["bank"])
-    if first_bank and second_bank and first_bank != second_bank:
-        return False
-
-    first_last4 = str(first["account_last4"] or "").strip()
-    second_last4 = str(second["account_last4"] or "").strip()
-    if first_last4 and second_last4 and first_last4 != second_last4:
+    if _banks_conflict(first, second) or _last4_conflict(first, second):
         return False
 
     first_ref = normalize_reference(first["reference"])
     second_ref = normalize_reference(second["reference"])
-
     if first_ref and second_ref:
-        if str(first["type"]).strip().upper() != str(second["type"]).strip().upper():
-            return False
-        if str(first["account_type"]).strip().upper() != str(second["account_type"]).strip().upper():
-            return False
-        return first_ref == second_ref
+        return _same_side(first, second) and first_ref == second_ref
 
-    if not _same_amount(first, second):
-        return False
-    if str(first["type"]).strip().upper() != str(second["type"]).strip().upper():
-        return False
-    if str(first["account_type"]).strip().upper() != str(second["account_type"]).strip().upper():
-        return False
-
-    first_source = str(first["id"])
-    second_source = str(second["id"])
-    first_mirror = first_source.startswith("gmail:") or first_source.startswith("notification:")
-    second_mirror = second_source.startswith("gmail:") or second_source.startswith("notification:")
-    cross_source = first_mirror != second_mirror
-
-    if first_bank and second_bank:
-        if first_bank != second_bank:
-            return False
-    elif not (cross_source and first_last4 and first_last4 == second_last4):
-        # A fast notification row may not know the bank yet. That is only
-        # tolerated between a notification/e-mail mirror and a real row that
-        # share the same account last-4.
-        return False
-
-    first_payment = str(first["payment_method"] or "").strip().upper()
-    second_payment = str(second["payment_method"] or "").strip().upper()
-    if (
-        first_payment
-        and second_payment
-        and first_payment != "UNKNOWN"
-        and second_payment != "UNKNOWN"
-        and first_payment != second_payment
-    ):
-        return False
-
-    merchant_first = str(first["merchant_or_payee"] or "").strip()
-    merchant_second = str(second["merchant_or_payee"] or "").strip()
-    if not _merchant_values_compatible(merchant_first, merchant_second):
-        return False
-
-    if not cross_source:
-        if not first_last4 and not second_last4:
-            # An Axis-style credit has no SMS and often no last-4: the bank
-            # e-mail carries the reference, the instant notification does not.
-            # That e-mail + notification pair (and only that pair, with the
-            # reference on exactly one side and the same bank) is one event.
-            kinds = {_mirror_kind(first_source), _mirror_kind(second_source)}
-            if (
-                kinds == {"gmail", "notification"}
-                and (first_ref is None) != (second_ref is None)
-                and first_bank
-                and second_bank
-            ):
-                return abs(int(first["timestamp"]) - int(second["timestamp"])) <= 15 * 60 * 1000
-            return False
-        return abs(int(first["timestamp"]) - int(second["timestamp"])) <= 120_000
-
-    if not first_last4 or not second_last4 or first_last4 != second_last4:
-        return False
-
-    merchants_missing = (
-        not merchant_first
-        or merchant_first == "-"
-        or not merchant_second
-        or merchant_second == "-"
-    )
-    if merchants_missing:
-        # One source may omit the merchant while the other source has the
-        # authoritative payee. If the reference is present on exactly one
-        # side, the bank + account + amount + direction + time identity above
-        # is already strong enough to collapse the mirror. Do not apply this
-        # relaxation to two reference-less rows, where merchant identity is
-        # an important extra guard.
-        one_reference_missing = (first_ref is None) != (second_ref is None)
-        if not one_reference_missing:
-            # Neither side has a reference or merchant (typical card spend:
-            # the SMS and the notification both carry only amount + last-4).
-            # Accept a notification/SMS pair only inside a short window.
-            # repair_duplicate_transactions additionally requires exactly one
-            # candidate, so two real same-amount purchases are never merged.
-            # A server-read e-mail can be stamped well away from the SMS, and
-            # reconcile_duplicate_transaction already allows 24h when the
-            # e-mail arrives second. Allow the same when it arrives first, or
-            # the pair is double counted depending only on arrival order.
-            window = (
-                24 * 60 * 60 * 1000
-                if first_source.startswith("gmail:") or second_source.startswith("gmail:")
-                else 15 * 60 * 1000
-            )
-            return abs(int(first["timestamp"]) - int(second["timestamp"])) <= window
-
-    if first_source.startswith("gmail:") or second_source.startswith("gmail:"):
-        max_time_diff = 24 * 60 * 60 * 1000
-    else:
-        max_time_diff = 2 * 60 * 60 * 1000
-
-    return abs(int(first["timestamp"]) - int(second["timestamp"])) <= max_time_diff
+    return _duplicate_without_reference(first, second)
 
 
 def _duplicate_canonical_score(row):
