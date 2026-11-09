@@ -170,8 +170,22 @@ def _cross_source_window(first, second):
     return _apart_ms(first, second) <= window
 
 
+def _is_card_bill_payment_credit(row):
+    return (
+        _upper(row, "account_type") == "CREDIT_CARD"
+        and _upper(row, "type") == "CREDIT"
+        and "bill payment" in str(row["merchant_or_payee"] or "").lower()
+    )
+
+
 def _duplicate_without_reference(first, second):
     if not _same_amount(first, second) or not _same_side(first, second):
+        return False
+
+    # Equal part payments to one card, minutes apart, are separate payments
+    # (five of 5,000 in one sitting). Only an equal reference, handled before
+    # this point, proves two such credits are the same event.
+    if _is_card_bill_payment_credit(first) and _is_card_bill_payment_credit(second):
         return False
 
     cross_source = _is_mirror(first) != _is_mirror(second)

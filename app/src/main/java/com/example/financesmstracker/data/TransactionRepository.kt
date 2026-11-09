@@ -32,6 +32,15 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         return transaction.smsHash.isNotBlank() && transaction.smsHash in clearedHashes
     }
 
+    /**
+     * A card payment the user marked, or the card's own confirmation, is its own
+     * event: equal part payments (five of 5,000 within minutes) are normal and
+     * must never be folded into one another by the look-alike checks below.
+     */
+    private fun isDistinctCardPayment(transaction: Transaction): Boolean =
+        transaction.smsHash.startsWith("manual-card-payment:") ||
+            transaction.smsHash.startsWith("card-bill-payment:")
+
     fun insertTransaction(transaction: Transaction): Long {
         if (wasClearedBefore(transaction)) return 0L
 
@@ -78,7 +87,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         // A Gmail notification can arrive before the bank SMS. When the SMS
         // arrives later, reuse the notification transaction instead of creating
         // a second canonical row.
-        if (!transaction.smsHash.startsWith("notification:")) {
+        if (!transaction.smsHash.startsWith("notification:") && !isDistinctCardPayment(transaction)) {
             val notificationCandidates = db.query(
                 FinanceDatabaseHelper.TABLE_TRANSACTIONS,
                 arrayOf(
@@ -202,7 +211,7 @@ class TransactionRepository(private val dbHelper: FinanceDatabaseHelper, private
         // Some bank SMS variants expose the same real transaction with a
         // different body/hash. Prefer the existing canonical row when strong
         // same-side identity proves that this is the same event.
-        if (!transaction.smsHash.startsWith("notification:")) {
+        if (!transaction.smsHash.startsWith("notification:") && !isDistinctCardPayment(transaction)) {
             val semanticDuplicate = duplicates.findCanonicalDuplicate(db, transaction)
             if (semanticDuplicate != null) {
                 val values = ContentValues().apply {

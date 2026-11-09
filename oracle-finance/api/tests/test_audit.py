@@ -188,3 +188,24 @@ def test_card_payment_naming_only_the_issuer_goes_to_the_one_card_that_owes(tmp_
     assert paid["bill_balance_minor"] == 0
     assert paid["balance_minor"] == -10      # 1770.10 paid against 1770.00: a 10 paise credit
     assert other["balance_minor"] == 0
+
+
+def test_equal_card_payments_minutes_apart_are_separate_payments():
+    from app.ledger.dedup import _rows_are_duplicate
+    ts = 1_800_000_000_000
+
+    def row(i, secs, ref):
+        return {
+            "id": str(i), "currency": "INR", "bank": "AXIS", "account_last4": "9206", "reference": ref,
+            "type": "CREDIT", "account_type": "CREDIT_CARD", "amount_minor": 500_000,
+            "payment_method": "UNKNOWN", "merchant_or_payee": "Credit Card Bill Payment",
+            "timestamp": ts + secs * 1000,
+        }
+
+    sms_credit = row(1, 0, None)          # the card's own SMS: no reference
+    marked_credit = row(2, 31, "RRN-A")   # marked by the user: carries the debit's reference
+    assert not _rows_are_duplicate(sms_credit, marked_credit)
+    assert not _rows_are_duplicate(sms_credit, row(3, 40, None))   # two SMS payments of 5,000
+    assert not _rows_are_duplicate(marked_credit, row(4, 20, "RRN-B"))
+    # The same event with the same reference is still one event.
+    assert _rows_are_duplicate(marked_credit, row(5, 60, "RRN-A"))
