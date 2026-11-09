@@ -86,6 +86,8 @@ object GmailNotificationParser {
         return haystack.substring(lineStart, lineEnd)
     }
 
+    private fun hasAccountIdentity(line: String): Boolean = lastFourRegex.containsMatchIn(line)
+
     fun parse(title: String?, text: String?, bigText: String?, subText: String?): GmailNotificationTransaction? {
         val haystack = listOfNotNull(title, text, bigText, subText)
             .joinToString("\n")
@@ -138,6 +140,11 @@ object GmailNotificationParser {
             Regex("""\bhsbc(?:\s+bank)?\b""").containsMatchIn(issuerText) -> "HSBC"
             else -> null
         }
+
+        // A bank or card alert always names the bank or the card digits. A
+        // merchant's receipt ("your Airtel payment receipt ... received") has
+        // neither, and is not a movement on any account of ours.
+        if (bank == null && !hasAccountIdentity(line)) return null
 
         // Account/card identity must come from the transaction line too. A
         // footer can mention another card and should not become this transaction's

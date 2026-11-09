@@ -175,4 +175,27 @@ class GmailNotificationParserTest {
         assertEquals("5145", result.accountLastFour)
         assertEquals("HUGGINGFACE", result.merchantName)
     }
+
+    @Test
+    fun aMerchantPaymentReceiptThatNamesNoBankOrCardIsNotATransaction() {
+        val result = GmailNotificationParser.parse(
+            "update",
+            "Here's your Airtel payment receipt! Dear Abd, we have received your payment of Rs 747.65.",
+            null,
+            null
+        )
+        assertNull(result)
+    }
+
+    @Test
+    fun aCreditThatNamesOnlyTheCardDigitsIsStillRead() {
+        val result = GmailNotificationParser.parse(
+            "update",
+            "INR 500.00 was credited to your A/c no. XX1234.",
+            null,
+            null
+        )
+        assertNotNull(result)
+        assertEquals("1234", result!!.accountLastFour)
+    }
 }
