@@ -32,40 +32,23 @@ internal class CategoryStore(
             put(FinanceDatabaseHelper.COLUMN_CATEGORY, category)
         }
 
+        // Only debits take a remembered category (credits have their own,
+        // smaller list), and the key's lowercase form is what is compared.
+        val notCredit = "${FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE} = 'DEBIT'"
         return when {
-            normalizedKey.startsWith("VPA|") -> {
-                val payeeId = normalizedKey.removePrefix("vpa|")
+            normalizedKey.startsWith("vpa|") -> db.update(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                values,
+                "LOWER(TRIM(${FinanceDatabaseHelper.COLUMN_PAYEE_ID})) = ? AND $notCredit",
+                arrayOf(normalizedKey.removePrefix("vpa|"))
+            )
 
-                db.update(
-                    FinanceDatabaseHelper.TABLE_TRANSACTIONS,
-                    values,
-                    "LOWER(TRIM(${FinanceDatabaseHelper.COLUMN_PAYEE_ID})) = ?",
-                    arrayOf(payeeId)
-                )
-            }
-
-            normalizedKey.startsWith("BANK|") -> {
-                val parts = normalizedKey.split("|")
-
-                if (parts.size != 4) {
-                    0
-                } else {
-                    val bank = parts[1]
-                    val accountType = parts[2].uppercase()
-                    val lastFour = parts[3]
-
-                    db.update(
-                        FinanceDatabaseHelper.TABLE_TRANSACTIONS,
-                        values,
-                        """
-                        LOWER(TRIM(${FinanceDatabaseHelper.COLUMN_BANK})) = ?
-                        AND ${FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE} = ?
-                        AND TRIM(${FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR}) = ?
-                        """.trimIndent(),
-                        arrayOf(bank, accountType, lastFour)
-                    )
-                }
-            }
+            normalizedKey.startsWith("payee|") -> db.update(
+                FinanceDatabaseHelper.TABLE_TRANSACTIONS,
+                values,
+                "LOWER(TRIM(${FinanceDatabaseHelper.COLUMN_MERCHANT_NAME})) = ? AND $notCredit",
+                arrayOf(normalizedKey.removePrefix("payee|"))
+            )
 
             else -> 0
         }

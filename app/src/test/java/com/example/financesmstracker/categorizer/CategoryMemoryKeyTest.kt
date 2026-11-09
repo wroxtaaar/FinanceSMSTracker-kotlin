@@ -14,7 +14,8 @@ class CategoryMemoryKeyTest {
         bank: String? = null,
         payeeId: String? = null,
         lastFour: String? = null,
-        accountType: AccountType = AccountType.UNKNOWN
+        accountType: AccountType = AccountType.UNKNOWN,
+        merchant: String? = null
     ): ParserResult {
         return ParserResult(
             isTransaction = true,
@@ -23,7 +24,7 @@ class CategoryMemoryKeyTest {
             paymentMethod = PaymentMethod.UNKNOWN,
             accountType = accountType,
             bank = bank,
-            merchantName = null,
+            merchantName = merchant,
             payeeId = payeeId,
             accountLastFour = lastFour,
             refNumber = null,
@@ -44,135 +45,22 @@ class CategoryMemoryKeyTest {
     }
 
     @Test
-    fun `bank account creates bank account key`() {
-        val parserResult = result(
-            bank = " HDFC ",
-            lastFour = "1234",
-            accountType = AccountType.BANK_ACCOUNT
+    fun `payee name without a vpa creates a payee key`() {
+        val key = CategoryMemoryKey.from(
+            result(bank = "HDFC", lastFour = "9591", accountType = AccountType.BANK_ACCOUNT, merchant = "  One Mobikwik Systems Limi ")
         )
-
-        assertEquals(
-            "BANK|hdfc|BANK_ACCOUNT|1234",
-            CategoryMemoryKey.from(parserResult)
-        )
+        assertEquals("PAYEE|one mobikwik systems limi", key)
     }
 
     @Test
-    fun `credit card creates credit card key`() {
-        val parserResult = result(
-            bank = " HDFC ",
-            lastFour = "1234",
-            accountType = AccountType.CREDIT_CARD
-        )
-
-        assertEquals(
-            "BANK|hdfc|CREDIT_CARD|1234",
-            CategoryMemoryKey.from(parserResult)
-        )
+    fun `an account alone never creates a memory key`() {
+        // An account-wide key would re-categorise every payment from that account.
+        assertNull(CategoryMemoryKey.from(result(bank = "HDFC", lastFour = "1234", accountType = AccountType.BANK_ACCOUNT)))
+        assertNull(CategoryMemoryKey.from(result(bank = "HDFC", lastFour = "1234", accountType = AccountType.CREDIT_CARD)))
     }
 
     @Test
-    fun `different banks do not collide`() {
-        val hdfc = result(
-            bank = "HDFC",
-            lastFour = "1234",
-            accountType = AccountType.BANK_ACCOUNT
-        )
-
-        val axis = result(
-            bank = "Axis",
-            lastFour = "1234",
-            accountType = AccountType.BANK_ACCOUNT
-        )
-
-        val hdfcKey = CategoryMemoryKey.from(hdfc)
-        val axisKey = CategoryMemoryKey.from(axis)
-
-        assertEquals(
-            "BANK|hdfc|BANK_ACCOUNT|1234",
-            hdfcKey
-        )
-
-        assertEquals(
-            "BANK|axis|BANK_ACCOUNT|1234",
-            axisKey
-        )
-    }
-
-    @Test
-    fun `bank account and credit card do not collide`() {
-        val bankAccount = result(
-            bank = "HDFC",
-            lastFour = "1234",
-            accountType = AccountType.BANK_ACCOUNT
-        )
-
-        val creditCard = result(
-            bank = "HDFC",
-            lastFour = "1234",
-            accountType = AccountType.CREDIT_CARD
-        )
-
-        assertEquals(
-            "BANK|hdfc|BANK_ACCOUNT|1234",
-            CategoryMemoryKey.from(bankAccount)
-        )
-
-        assertEquals(
-            "BANK|hdfc|CREDIT_CARD|1234",
-            CategoryMemoryKey.from(creditCard)
-        )
-    }
-
-    @Test
-    fun `missing last four does not create bank memory key`() {
-        val parserResult = result(
-            bank = "HDFC",
-            lastFour = null,
-            accountType = AccountType.BANK_ACCOUNT
-        )
-
-        assertNull(CategoryMemoryKey.from(parserResult))
-    }
-
-    @Test
-    fun `missing bank does not create bank memory key`() {
-        val parserResult = result(
-            bank = null,
-            lastFour = "1234",
-            accountType = AccountType.BANK_ACCOUNT
-        )
-
-        assertNull(CategoryMemoryKey.from(parserResult))
-    }
-
-    @Test
-    fun `unknown account type does not create weak memory key`() {
-        val parserResult = result(
-            bank = "HDFC",
-            lastFour = "1234",
-            accountType = AccountType.UNKNOWN
-        )
-
-        assertNull(CategoryMemoryKey.from(parserResult))
-    }
-
-    @Test
-    fun `merchant name alone does not create memory key`() {
-        val parserResult = ParserResult(
-            isTransaction = true,
-            amountPaise = 10000L,
-            transactionType = TransactionType.DEBIT,
-            paymentMethod = PaymentMethod.UPI,
-            accountType = AccountType.UNKNOWN,
-            bank = null,
-            merchantName = "Swiggy",
-            payeeId = null,
-            accountLastFour = null,
-            refNumber = null,
-            confidence = 1.0f
-        )
-
-        assertNull(CategoryMemoryKey.from(parserResult))
+    fun `a vpa wins over the payee name`() {
+        assertEquals("VPA|swiggy@upi", CategoryMemoryKey.from(result(payeeId = "Swiggy@UPI", merchant = "Swiggy")))
     }
 }

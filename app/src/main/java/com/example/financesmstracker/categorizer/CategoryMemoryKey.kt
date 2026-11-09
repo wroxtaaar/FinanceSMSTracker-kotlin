@@ -1,6 +1,5 @@
 ﻿package com.example.financesmstracker.categorizer
 
-import com.example.financesmstracker.parser.AccountType
 import com.example.financesmstracker.parser.ParserResult
 
 object CategoryMemoryKey {
@@ -15,24 +14,13 @@ object CategoryMemoryKey {
             return "VPA|$payeeId"
         }
 
-        val bank = parserResult.bank
+        // Without a VPA the payee's name is the stable identity ("One Mobikwik
+        // Systems Limi"). There is deliberately no account-wide fallback: a key
+        // for "HDFC account 9591" would re-categorise every payment from it.
+        val name = parserResult.merchantName
             ?.trim()
             ?.lowercase()
 
-        val lastFour = parserResult.accountLastFour
-            ?.trim()
-
-        // Account/card memory requires both bank and last 4 digits.
-        if (bank.isNullOrBlank() || lastFour.isNullOrBlank()) {
-            return null
-        }
-
-        val accountType = when (parserResult.accountType) {
-            AccountType.CREDIT_CARD -> "CREDIT_CARD"
-            AccountType.BANK_ACCOUNT -> "BANK_ACCOUNT"
-            AccountType.UNKNOWN -> return null
-        }
-
-        return "BANK|$bank|$accountType|$lastFour"
+        return if (name.isNullOrBlank()) null else "PAYEE|$name"
     }
 }

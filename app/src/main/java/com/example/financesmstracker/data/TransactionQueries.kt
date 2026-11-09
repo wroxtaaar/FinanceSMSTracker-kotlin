@@ -141,24 +141,15 @@ internal class TransactionQueries(
                 )
             }
 
-            normalizedKey.startsWith("bank|") -> {
-                val parts = normalizedKey.split("|")
-                if (parts.size != 4) return emptyList()
-
-                val bank = parts[1]
-                val accountType = parts[2].uppercase()
-                val lastFour = parts[3]
-
+            normalizedKey.startsWith("payee|") -> {
+                val name = normalizedKey.removePrefix("payee|")
                 db.query(
                     FinanceDatabaseHelper.TABLE_TRANSACTIONS,
                     null,
-                    """
-                    LOWER(TRIM(${FinanceDatabaseHelper.COLUMN_BANK})) = ?
-                    AND ${FinanceDatabaseHelper.COLUMN_ACCOUNT_TYPE} = ?
-                    AND TRIM(${FinanceDatabaseHelper.COLUMN_ACCOUNT_LAST_FOUR}) = ?
-                    AND ${FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS} = ?
-                    """.trimIndent(),
-                    arrayOf(bank, accountType, lastFour, "ACTIVE"),
+                    "LOWER(TRIM(" + FinanceDatabaseHelper.COLUMN_MERCHANT_NAME + ")) = ? AND " +
+                        FinanceDatabaseHelper.COLUMN_TRANSACTION_TYPE + " = ? AND " +
+                        FinanceDatabaseHelper.COLUMN_TRANSACTION_STATUS + " = ?",
+                    arrayOf(name, "DEBIT", "ACTIVE"),
                     null,
                     null,
                     FinanceDatabaseHelper.COLUMN_TIMESTAMP + " DESC"
