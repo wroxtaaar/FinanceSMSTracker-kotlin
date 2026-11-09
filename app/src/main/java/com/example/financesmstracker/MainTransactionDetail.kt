@@ -185,9 +185,12 @@ internal fun MainActivity.setupMarkCardPaymentButton(dialogView: View, tx: Trans
                         // Equal part payments are normal (five payments of 5,000), so a
                         // credit of the same amount is a reason to ask, not to refuse.
                         if (existing.isNotEmpty()) {
+                            // Same three-day window as the credits it is compared with.
                             val debits = repository.getTransactionsByAmount(tx.amountPaise).count {
                                 it.transactionType == TransactionType.DEBIT &&
-                                    it.accountType == com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT
+                                    it.accountType == com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT &&
+                                    kotlin.math.abs(it.timestamp - tx.timestamp) <=
+                                        com.example.financesmstracker.transfer.CardPaymentMatch.WINDOW_MS
                             }
                             AlertDialog.Builder(this)
                                 .setTitle("Add another payment?")

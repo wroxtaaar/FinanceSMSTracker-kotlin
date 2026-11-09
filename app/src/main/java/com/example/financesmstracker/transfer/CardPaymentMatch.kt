@@ -12,7 +12,7 @@ import kotlin.math.abs
  */
 object CardPaymentMatch {
     const val MANUAL_PREFIX = "manual-card-payment:"
-    private const val WINDOW_MS = 3L * 24 * 60 * 60 * 1000
+    const val WINDOW_MS = 3L * 24 * 60 * 60 * 1000
 
     /** An existing credit on the same card, same amount, within three days. */
     fun findExisting(
