@@ -155,6 +155,10 @@ internal fun MainActivity.setupMarkCardPaymentButton(dialogView: View, tx: Trans
         tx.accountType == com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT &&
         tx.currency.equals("INR", ignoreCase = true)
     if (!eligible) return
+    // Already marked (its card credit exists): there is nothing left to do, and a
+    // second tap must not be possible. Deleting that card credit brings the button back.
+    val markKey = com.example.financesmstracker.transfer.CardPaymentMatch.MANUAL_PREFIX + tx.id
+    if (repository.getAllTransactions().any { it.smsHash == markKey }) return
     button.visibility = View.VISIBLE
     button.setOnClickListener {
         button.isEnabled = false
@@ -207,6 +211,7 @@ internal fun MainActivity.setupMarkCardPaymentButton(dialogView: View, tx: Trans
                             rowId == -1L -> Toast.makeText(this, "Already marked as a card payment", Toast.LENGTH_LONG).show()
                             rowId == 0L -> Toast.makeText(this, "Not saved: older than your cleared history", Toast.LENGTH_LONG).show()
                             else -> {
+                                button.visibility = View.GONE
                                 repository.getTransactionById(rowId)?.let {
                                     FinanceSyncBridge.enqueueCanonical(this, it, null)
                                 }
