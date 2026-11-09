@@ -176,58 +176,75 @@ internal fun MainActivity.setupMarkCardPaymentButton(dialogView: View, tx: Trans
                     .setTitle("Which card did this pay?")
                     .setItems(labels) { _, which ->
                         val card = cards[which]
-                        val existing = com.example.financesmstracker.transfer.CardPaymentMatch.findExisting(
+                        val existing = com.example.financesmstracker.transfer.CardPaymentMatch.findAll(
                             candidates = repository.getTransactionsByAmount(tx.amountPaise),
                             amountPaise = tx.amountPaise,
                             last4 = card.last4,
                             aroundMs = tx.timestamp
                         )
-                        if (existing != null) {
-                            Toast.makeText(
-                                this,
-                                "That card already shows this payment (row ${existing.id}). Nothing added.",
-                                Toast.LENGTH_LONG
-                            ).show()
+                        // Equal part payments are normal (five payments of 5,000), so a
+                        // credit of the same amount is a reason to ask, not to refuse.
+                        if (existing.isNotEmpty()) {
+                            val debits = repository.getTransactionsByAmount(tx.amountPaise).count {
+                                it.transactionType == TransactionType.DEBIT &&
+                                    it.accountType == com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT
+                            }
+                            AlertDialog.Builder(this)
+                                .setTitle("Add another payment?")
+                                .setMessage(
+                                    "${card.name} ••${card.last4} already shows ${existing.size} payment(s) of this " +
+                                        "amount, and your bank accounts show $debits debit(s) of it. Add this one as " +
+                                        "an additional payment?"
+                                )
+                                .setNegativeButton("Cancel", null)
+                                .setPositiveButton("Add payment") { _, _ -> markCardPayment(tx, card, button, dialog) }
+                                .show()
                             return@setItems
                         }
-                        val credit = Transaction(
-                            amountPaise = tx.amountPaise,
-                            currency = "INR",
-                            transactionType = TransactionType.CREDIT,
-                            paymentMethod = tx.paymentMethod,
-                            accountType = com.example.financesmstracker.parser.AccountType.CREDIT_CARD,
-                            bank = card.bank,
-                            merchantName = "Credit Card Bill Payment",
-                            payeeId = null,
-                            accountLastFour = card.last4,
-                            refNumber = tx.refNumber,
-                            timestamp = tx.timestamp,
-                            smsHash = "manual-card-payment:" + tx.id,
-                            category = "TRANSFER",
-                            parserConfidence = 1.0f
-                        )
-                        val rowId = repository.insertTransaction(credit)
-                        when {
-                            rowId == -1L -> Toast.makeText(this, "Already marked as a card payment", Toast.LENGTH_LONG).show()
-                            rowId == 0L -> Toast.makeText(this, "Not saved: older than your cleared history", Toast.LENGTH_LONG).show()
-                            else -> {
-                                button.visibility = View.GONE
-                                repository.getTransactionById(rowId)?.let {
-                                    FinanceSyncBridge.enqueueCanonical(this, it, null)
-                                }
-                                dialog.dismiss()
-                                loadTransactions()
-                                Toast.makeText(
-                                    this,
-                                    "Recorded as a payment to ${card.name} ••${card.last4}. Delete that card credit to undo.",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
-                        }
+                        markCardPayment(tx, card, button, dialog)
                     }
                     .setNegativeButton("Cancel", null)
                     .show()
             }
+        }
+    }
+}
+
+private fun MainActivity.markCardPayment(
+    tx: Transaction,
+    card: com.example.financesmstracker.integration.OracleAccount,
+    button: Button,
+    dialog: AlertDialog
+) {
+    val credit = Transaction(
+        amountPaise = tx.amountPaise,
+        currency = "INR",
+        transactionType = TransactionType.CREDIT,
+        paymentMethod = tx.paymentMethod,
+        accountType = com.example.financesmstracker.parser.AccountType.CREDIT_CARD,
+        bank = card.bank,
+        merchantName = "Credit Card Bill Payment",
+        payeeId = null,
+        accountLastFour = card.last4,
+        refNumber = tx.refNumber,
+        timestamp = tx.timestamp,
+        smsHash = com.example.financesmstracker.transfer.CardPaymentMatch.MANUAL_PREFIX + tx.id,
+        category = "TRANSFER",
+        parserConfidence = 1.0f
+    )
+    when (val rowId = repository.insertTransaction(credit)) {
+        -1L -> Toast.makeText(this, "Already marked as a card payment", Toast.LENGTH_LONG).show()
+        0L -> Toast.makeText(this, "Not saved: older than your cleared history", Toast.LENGTH_LONG).show()
+        else -> {
+            button.visibility = View.GONE
+            repository.getTransactionById(rowId)?.let { FinanceSyncBridge.enqueueCanonical(this, it, null) }
+            dialog.dismiss()
+            loadTransactions()
+            Toast.makeText(
+                this,
+                "Recorded as a payment to ${card.name} ••${card.last4}. Delete that card credit to undo.",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 }

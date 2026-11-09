@@ -22,12 +22,22 @@ object CardPaymentMatch {
         aroundMs: Long,
         onlyManual: Boolean = false,
         bank: String? = null
-    ): Transaction? {
+    ): Transaction? = findAll(candidates, amountPaise, last4, aroundMs, onlyManual, bank).firstOrNull()
+
+    /** Every such credit; several equal part payments are normal, so callers may need the count. */
+    fun findAll(
+        candidates: List<Transaction>,
+        amountPaise: Long,
+        last4: String?,
+        aroundMs: Long,
+        onlyManual: Boolean = false,
+        bank: String? = null
+    ): List<Transaction> {
         val digits = last4?.trim().orEmpty()
         val issuer = bank?.trim().orEmpty()
         // A message that names no card digits can only be matched by issuer.
-        if (digits.isEmpty() && issuer.isEmpty()) return null
-        return candidates.firstOrNull {
+        if (digits.isEmpty() && issuer.isEmpty()) return emptyList()
+        return candidates.filter {
             it.transactionType == TransactionType.CREDIT &&
                 it.accountType == AccountType.CREDIT_CARD &&
                 it.amountPaise == amountPaise &&
