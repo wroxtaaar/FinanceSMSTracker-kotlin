@@ -198,4 +198,15 @@ class GmailNotificationParserTest {
         assertNotNull(result)
         assertEquals("1234", result!!.accountLastFour)
     }
+
+    @Test
+    fun aPaymentAppsBillPaidConfirmationIsNotACardSpend() {
+        val result = GmailNotificationParser.parse(
+            "Mobikwik",
+            "Your AXIS BANK Credit Card bill of ₹ 5000.0 has now been paid! Your AXIS BANK Credit Card bill is paid.",
+            null,
+            null
+        )
+        assertNull(result)
+    }
 }

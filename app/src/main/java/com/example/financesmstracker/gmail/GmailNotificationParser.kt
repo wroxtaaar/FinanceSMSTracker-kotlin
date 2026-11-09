@@ -67,6 +67,10 @@ object GmailNotificationParser {
         """(?i)\b(?:transaction|purchase|spend|payment)\s+of\s+(?:INR|Rs\.?|₹|USD|EUR|GBP|SGD|AUD|CAD|AED)\s*[0-9][0-9,]*(?:\.\d{1,2})?\s+at\s+(.+?)(?=\s+on\b|[.,;]|$)"""
     )
 
+    private val billPaidConfirmationRegex = Regex(
+        """(?i)\bbill\b.{0,60}\bhas\s+(?:now\s+)?been\s+paid\b"""
+    )
+
     private val explicitDebitRegex = Regex(
         """(?i)\b(?:was|has been|is|is being)?\s*debited\b|\b(?:spent|purchased|purchase|charged|paid|withdrawn)\b|\bused\s+for\s+(?:a\s+)?(?:transaction|purchase)\b"""
     )
@@ -106,6 +110,12 @@ object GmailNotificationParser {
 
         val line = transactionLine(haystack, amountMatch)
         val lowerLine = line.lowercase()
+
+        // "Your AXIS BANK Credit Card bill of Rs 5000 has now been paid" is a
+        // payment app confirming a bill payment, not a spend on the card. The
+        // bank debit and the card's own "payment received" message are the
+        // evidence; reading this as a card debit raised spending by the amount.
+        if (billPaidConfirmationRegex.containsMatchIn(lowerLine)) return null
         val issuerText = listOfNotNull(title, line).joinToString(" ").lowercase()
 
         // Direction is determined from the transaction line, never from the
