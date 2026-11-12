@@ -44,6 +44,8 @@ import com.example.financesmstracker.integration.FinanceSyncClient
 import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.integration.OracleIds
 import com.example.financesmstracker.integration.SyncSettings
+import com.example.financesmstracker.integration.EmiNote
+import com.example.financesmstracker.integration.EmiReservation
 import com.example.financesmstracker.integration.OracleLedgerSummary
 import com.example.financesmstracker.integration.OracleAccount
 import java.util.concurrent.Executors
@@ -65,6 +67,7 @@ class MainActivity : AppCompatActivity() {
     internal lateinit var textViewBankCash: TextView
     internal lateinit var textViewCardOutstanding: TextView
     internal lateinit var textViewSplitwiseReceivable: TextView
+    internal lateinit var textViewEmiNote: TextView
     internal lateinit var buttonOracleSettings: Button
     internal lateinit var buttonGmailSync: Button
     internal lateinit var buttonReviewReconcile: Button
@@ -141,6 +144,7 @@ class MainActivity : AppCompatActivity() {
         textViewBankCash = findViewById(R.id.textViewBankCash)
         textViewCardOutstanding = findViewById(R.id.textViewCardOutstanding)
         textViewSplitwiseReceivable = findViewById(R.id.textViewSplitwiseReceivable)
+        textViewEmiNote = findViewById(R.id.textViewEmiNote)
         buttonOracleSettings = findViewById(R.id.buttonOracleSettings)
         buttonGmailSync = findViewById(R.id.buttonGmailSync)
         buttonReviewReconcile = findViewById(R.id.buttonReviewReconcile)
@@ -262,6 +266,17 @@ class MainActivity : AppCompatActivity() {
         textViewBankCash.text = "Bank cash: " + formatMinor(summary.bankCashMinor)
         textViewCardOutstanding.text = "Card outstanding: " + formatMinor(summary.creditCardOutstandingMinor)
         textViewSplitwiseReceivable.text = "Splitwise receivable: " + formatMinor(summary.splitwiseReceivableMinor)
+        renderEmiNote(summary.emiReservations)
+    }
+
+    /** A quiet line for loan EMIs still to be debited; the low-balance warning is the only emphasis. */
+    private fun renderEmiNote(reservations: List<EmiReservation>) {
+        if (reservations.isEmpty()) {
+            textViewEmiNote.visibility = View.GONE
+            return
+        }
+        textViewEmiNote.text = EmiNote.format(reservations) { formatMinor(it) }
+        textViewEmiNote.visibility = View.VISIBLE
     }
 
     internal fun updateNotificationAccessStatus() {

@@ -268,7 +268,23 @@ class FinanceSyncClient(
                 bankCashMinor = json.getLong("bankCashMinor"),
                 splitwiseReceivableMinor = json.getLong("splitwiseReceivableMinor"),
                 creditCardOutstandingMinor = json.getLong("creditCardOutstandingMinor"),
-                trueAvailableMinor = json.getLong("trueAvailableMinor")
+                trueAvailableMinor = json.getLong("trueAvailableMinor"),
+                emiReservations = parseEmiReservations(json.optJSONArray("emiReservations"))
+            )
+        }
+    }
+
+    private fun parseEmiReservations(array: org.json.JSONArray?): List<EmiReservation> {
+        if (array == null) return emptyList()
+        return (0 until array.length()).map { index ->
+            val item = array.getJSONObject(index)
+            EmiReservation(
+                label = item.optString("label", "Loan"),
+                bank = item.optString("bank", ""),
+                accountLast4 = item.optString("accountLast4", ""),
+                amountMinor = item.getLong("amountMinor"),
+                dueDay = item.optInt("dueDay", 0),
+                shortfall = item.optBoolean("shortfall", false)
             )
         }
     }
@@ -413,7 +429,18 @@ data class OracleLedgerSummary(
     val bankCashMinor: Long,
     val splitwiseReceivableMinor: Long,
     val creditCardOutstandingMinor: Long,
-    val trueAvailableMinor: Long
+    val trueAvailableMinor: Long,
+    val emiReservations: List<EmiReservation> = emptyList()
+)
+
+/** A loan EMI the bank will auto-debit soon; already taken out of "true available". */
+data class EmiReservation(
+    val label: String,
+    val bank: String,
+    val accountLast4: String,
+    val amountMinor: Long,
+    val dueDay: Int,
+    val shortfall: Boolean
 )
 
 class SyncSettings(context: Context) {

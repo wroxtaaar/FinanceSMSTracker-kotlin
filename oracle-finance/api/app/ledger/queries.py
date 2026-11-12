@@ -2,6 +2,7 @@
 
 from ..db import connection
 from .common import now_ms
+from .emi import emi_reservations
 from .splitwise import get_manual_splitwise_total
 
 
@@ -14,7 +15,11 @@ def true_available(currency="INR"):
         else:
             rec=manual
         cards=conn.execute("SELECT COALESCE(SUM(balance_minor),0) value FROM accounts WHERE account_type='CREDIT_CARD' AND currency=?",(currency,)).fetchone()["value"]
-        return {"currency":currency,"bankCashMinor":cash,"splitwiseReceivableMinor":rec,"creditCardOutstandingMinor":cards,"trueAvailableMinor":cash+rec-cards}
+        reservations=emi_reservations(conn,currency)
+        reserved=sum(r["amountMinor"] for r in reservations)
+        return {"currency":currency,"bankCashMinor":cash,"splitwiseReceivableMinor":rec,"creditCardOutstandingMinor":cards,
+                "emiReservedMinor":reserved,"emiReservations":reservations,
+                "trueAvailableMinor":cash+rec-cards-reserved}
 
 
 def list_transactions(limit=100):

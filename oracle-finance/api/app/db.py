@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS splitwise_rules (
   id TEXT PRIMARY KEY, merchant_pattern TEXT NOT NULL, group_id INTEGER NOT NULL,
   split_mode TEXT NOT NULL DEFAULT 'EQUAL', user_shares_json TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS emi_loans (
+  id TEXT PRIMARY KEY, label TEXT NOT NULL, bank TEXT NOT NULL, debit_last4 TEXT NOT NULL,
+  loan_last4 TEXT NOT NULL, emi_minor INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'INR',
+  start_day INTEGER NOT NULL DEFAULT 1, due_day INTEGER NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS splitwise_expenses (
   transaction_id TEXT PRIMARY KEY, splitwise_expense_id TEXT, status TEXT NOT NULL, error TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
@@ -115,6 +121,17 @@ def _card_bank_label(bank):
 def init_db():
     with connection() as conn:
         conn.executescript(SCHEMA)
+
+        # The user's Axis loan: the EMI is auto-debited from the Axis account on
+        # the 10th. It is reserved in "true available" from the 1st, and its
+        # debit and loan-account credit stay out of Splitwise. INSERT OR IGNORE
+        # keeps later edits and makes created_at the date the rule starts.
+        conn.execute(
+            """INSERT OR IGNORE INTO emi_loans(
+                id,label,bank,debit_last4,loan_last4,emi_minor,currency,start_day,due_day,enabled,created_at
+            ) VALUES('axis-loan-8590','Axis loan','AXIS','3370','8590',1110000,'INR',1,10,1,?)""",
+            (int(__import__("time").time() * 1000),),
+        )
 
         transaction_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(transactions)").fetchall()

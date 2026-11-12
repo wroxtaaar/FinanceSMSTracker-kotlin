@@ -209,3 +209,85 @@ def test_equal_card_payments_minutes_apart_are_separate_payments():
     assert not _rows_are_duplicate(marked_credit, row(4, 20, "RRN-B"))
     # The same event with the same reference is still one event.
     assert _rows_are_duplicate(marked_credit, row(5, 60, "RRN-A"))
+
+
+def _ist_ms(year, month, day, hour=12):
+    import datetime
+    ist = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    return int(datetime.datetime(year, month, day, hour, tzinfo=ist).timestamp() * 1000)
+
+
+def _emi_setup(tmp_path, monkeypatch, balance=3_000_000):
+    from app.db import connection
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "emi.db"))
+    db.init_db()
+    L.set_balance("axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "3370", balance)
+    L.set_manual_splitwise_total("INR", 0)
+    with connection() as conn:  # the loan rule applies to rows stored after it was set up
+        conn.execute("UPDATE emi_loans SET created_at=0")
+
+
+def test_emi_is_reserved_from_the_first_to_the_due_day(tmp_path, monkeypatch):
+    from app.db import connection
+    from app.ledger.emi import emi_reservations
+    _emi_setup(tmp_path, monkeypatch)
+    with connection() as conn:
+        assert emi_reservations(conn, "INR", _ist_ms(2026, 12, 1, 1))[0]["amountMinor"] == 1_110_000
+        assert emi_reservations(conn, "INR", _ist_ms(2026, 12, 10, 23))[0]["amountMinor"] == 1_110_000
+        assert emi_reservations(conn, "INR", _ist_ms(2026, 12, 11, 1)) == []
+        assert emi_reservations(conn, "INR", _ist_ms(2026, 11, 30, 23)) == []
+
+
+def test_emi_reserve_stops_once_the_debit_lands(tmp_path, monkeypatch):
+    from app.db import connection
+    from app.ledger.emi import emi_reservations
+    _emi_setup(tmp_path, monkeypatch)
+    at = _ist_ms(2026, 12, 5)
+    L.sync_transaction(sms_debit(bank="AXIS", last4="3370", ts=_ist_ms(2026, 12, 4), id="emi1", amount=1_110_000))
+    with connection() as conn:
+        assert emi_reservations(conn, "INR", at) == []
+        # a different amount is not the EMI
+    L.sync_transaction(sms_debit(bank="AXIS", last4="3370", ts=_ist_ms(2026, 12, 3), id="other1", amount=1_110_001))
+
+
+def test_emi_shortfall_flags_a_low_axis_balance(tmp_path, monkeypatch):
+    from app.db import connection
+    from app.ledger.emi import emi_reservations
+    _emi_setup(tmp_path, monkeypatch, balance=500_000)
+    with connection() as conn:
+        out = emi_reservations(conn, "INR", _ist_ms(2026, 12, 6))
+    assert out[0]["shortfall"] is True
+    assert out[0]["accountBalanceMinor"] == 500_000
+
+
+def test_emi_debit_and_loan_credit_stay_out_of_splitwise(tmp_path, monkeypatch):
+    _emi_setup(tmp_path, monkeypatch)
+    debit = sms_debit(bank="AXIS", last4="3370", ts=_ist_ms(2026, 12, 10), id="emi-debit", amount=1_110_000)
+    L.sync_transaction(debit)
+    from tests.test_self_transfer import Tx
+    credit = Tx(id="loan-credit", amountMinor=1_110_000, type="CREDIT", bank="AXIS", accountLast4="8590",
+                reference=None, timestamp=_ist_ms(2026, 12, 11))
+    L.sync_transaction(credit)
+    L.sync_transaction(sms_debit(bank="AXIS", last4="3370", ts=_ist_ms(2026, 12, 10), id="shop", amount=50_000))
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 50_000
+
+
+def test_rows_stored_before_the_loan_rule_keep_counting(tmp_path, monkeypatch):
+    from app.db import connection
+    _emi_setup(tmp_path, monkeypatch)
+    L.sync_transaction(sms_debit(bank="AXIS", last4="3370", ts=_ist_ms(2026, 12, 10), id="old-emi", amount=1_110_000))
+    with connection() as conn:
+        conn.execute("UPDATE emi_loans SET created_at=?", (2**60,))
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 1_110_000
+
+
+def test_summary_subtracts_the_reserve(tmp_path, monkeypatch):
+    from app.ledger import queries
+    _emi_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(queries, "emi_reservations",
+                        lambda conn, currency: __import__("app.ledger.emi", fromlist=["x"]).emi_reservations(conn, currency, _ist_ms(2026, 12, 5)))
+    out = L.true_available("INR")
+    assert out["emiReservedMinor"] == 1_110_000
+    assert out["trueAvailableMinor"] == out["bankCashMinor"] + out["splitwiseReceivableMinor"] - out["creditCardOutstandingMinor"] - 1_110_000

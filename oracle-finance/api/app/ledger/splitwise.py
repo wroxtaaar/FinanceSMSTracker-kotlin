@@ -2,6 +2,7 @@
 
 from ..db import connection
 from .common import _resolve_transaction_row, is_provisional_row, now_ms
+from .emi import excluded_from_splitwise, list_loans
 
 
 def splitwise_delta(account_type, transaction_type, amount_minor, category=None, exclude_salary=True,
@@ -108,7 +109,7 @@ def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True, lega
     rows = conn.execute(
         """SELECT id,amount_minor,currency,type,account_type,payment_method,
                   bank,merchant_or_payee,account_last4,reference,
-                  timestamp,category,confidence,splitwise_amount_minor
+                  timestamp,category,confidence,splitwise_amount_minor,created_at
            FROM transactions
            WHERE status='ACTIVE'
              AND duplicate_of IS NULL
@@ -140,9 +141,12 @@ def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True, lega
             if resolved is not None:
                 transfer_leg_ids.add(str(resolved["id"]))
 
+    loans = list_loans(conn, cur)
     total = 0
     for row in rows:
         if str(row["id"]) in transfer_leg_ids:
+            continue
+        if loans and excluded_from_splitwise(loans, row):
             continue
         if is_provisional_row(row):
             continue
