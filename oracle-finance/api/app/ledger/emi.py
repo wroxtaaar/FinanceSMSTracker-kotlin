@@ -7,12 +7,15 @@ bank is about to take, and a bank balance too low to cover it is flagged.
 """
 
 import datetime
+import re
 
 from .common import now_ms
 
 _IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 # Banks sometimes debit a day or two after the due date.
 _LATE_DEBIT_DAYS = 3
+# An EMI debit names no payee; anything naming a person or shop is a real payment.
+_LOAN_PAYEE = re.compile(r"(?i)\b(?:emi|loan|ach|nach|ecs|mandate)\b")
 
 
 def _ist(ms):
@@ -44,6 +47,9 @@ def is_emi_debit(loan, row):
         return False
     if str(row["account_last4"] or "").strip() != loan["debit_last4"]:
         return False
+    payee = str(row["merchant_or_payee"] or "").strip()
+    if payee and payee.lower() != "null" and not _LOAN_PAYEE.search(payee):
+        return False
     day = _ist(int(row["timestamp"])).day
     return int(loan["start_day"]) <= day <= int(loan["due_day"]) + _LATE_DEBIT_DAYS
 
@@ -70,7 +76,7 @@ def excluded_from_splitwise(loans, row):
 
 def _paid_this_month(conn, loan, month_start):
     rows = conn.execute(
-        """SELECT type,account_type,bank,account_last4,amount_minor,timestamp,created_at
+        """SELECT type,account_type,bank,account_last4,amount_minor,timestamp,created_at,merchant_or_payee
            FROM transactions
            WHERE status='ACTIVE' AND duplicate_of IS NULL AND timestamp>=?""",
         (month_start,),

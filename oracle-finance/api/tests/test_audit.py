@@ -243,11 +243,25 @@ def test_emi_reserve_stops_once_the_debit_lands(tmp_path, monkeypatch):
     from app.ledger.emi import emi_reservations
     _emi_setup(tmp_path, monkeypatch)
     at = _ist_ms(2026, 12, 5)
+    L.sync_transaction(sms_debit(bank="AXIS", last4="3370", ts=_ist_ms(2026, 12, 3), id="other1", amount=1_110_001))
+    with connection() as conn:
+        assert len(emi_reservations(conn, "INR", at)) == 1  # a different amount is not the EMI
     L.sync_transaction(sms_debit(bank="AXIS", last4="3370", ts=_ist_ms(2026, 12, 4), id="emi1", amount=1_110_000))
     with connection() as conn:
         assert emi_reservations(conn, "INR", at) == []
-        # a different amount is not the EMI
-    L.sync_transaction(sms_debit(bank="AXIS", last4="3370", ts=_ist_ms(2026, 12, 3), id="other1", amount=1_110_001))
+
+
+def test_a_payment_to_a_person_of_the_same_amount_is_not_the_emi(tmp_path, monkeypatch):
+    from app.db import connection
+    from app.ledger.emi import emi_reservations
+    _emi_setup(tmp_path, monkeypatch)
+    friend = sms_debit(bank="AXIS", last4="3370", ts=_ist_ms(2026, 12, 4), id="friend", amount=1_110_000)
+    friend.merchantOrPayee = "RAHUL K"
+    L.sync_transaction(friend)
+    L.rebuild_manual_splitwise_total()
+    with connection() as conn:
+        assert len(emi_reservations(conn, "INR", _ist_ms(2026, 12, 5))) == 1
+    assert L.get_manual_splitwise_total("INR") == 1_110_000
 
 
 def test_emi_shortfall_flags_a_low_axis_balance(tmp_path, monkeypatch):
