@@ -307,20 +307,40 @@ def test_summary_subtracts_the_reserve(tmp_path, monkeypatch):
     assert out["trueAvailableMinor"] == out["bankCashMinor"] + out["splitwiseReceivableMinor"] - out["creditCardOutstandingMinor"] - 1_110_000
 
 
-def test_pull_total_uses_splitwises_net_balance_and_tracks_changes_after(tmp_path, monkeypatch):
-    from app import splitwise
-    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "pull.db"))
+
+def test_changes_since_reset_lists_new_rows_and_reconciles_to_the_total(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "chg.db"))
     db.init_db()
     L.set_balance("axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "1111", 1_000_000)
-    L.sync_transaction(sms_debit(ref=None, amount=100_000))
-    data = {"friends": [
-        {"balance": [{"currency_code": "INR", "amount": "140266.00"}, {"currency_code": "USD", "amount": "5.00"}]},
-        {"balance": [{"currency_code": "INR", "amount": "73368.00"}]},
-        {"balance": [{"currency_code": "INR", "amount": "-100.50"}]},
-    ]}
-    assert splitwise.net_balance_minor("INR", data) == 21_353_350
-    assert splitwise.pull_manual_total("INR", data) == 21_353_350
-    assert L.get_manual_splitwise_total("INR") == 21_353_350
-    L.sync_transaction(sms_debit(ref=None, amount=25_000, id="sms:later", ts=sms_debit().timestamp + 3_600_000))
+    L.sync_transaction(sms_debit(ref=None, amount=70_000, id="sms:before"))
+    L.set_manual_splitwise_total("INR", 5_000_000)
+    assert L.splitwise_changes_since_reset("INR")["items"] == []
+    import time
+    time.sleep(0.01)
+    L.sync_transaction(sms_debit(ref=None, amount=38_000, id="sms:after1"))
+    L.sync_transaction(sms_debit(ref=None, amount=9_000, id="sms:after2", ts=sms_debit().timestamp + 600_000))
     L.rebuild_manual_splitwise_total()
-    assert L.get_manual_splitwise_total("INR") == 21_353_350 + 25_000
+    out = L.splitwise_changes_since_reset("INR")
+    assert [i["id"] for i in out["items"]] == ["sms:after2", "sms:after1"]
+    assert out["changeMinor"] == 47_000 and out["otherChangeMinor"] == 0
+    assert L.get_manual_splitwise_total("INR") == 5_000_000 + 47_000
+
+
+def test_an_edit_to_an_older_row_shows_up_as_other_change(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "chg2.db"))
+    db.init_db()
+    L.set_balance("axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "1111", 1_000_000)
+    old = sms_debit(ref=None, amount=70_000, id="sms:old")
+    L.sync_transaction(old)
+    L.set_manual_splitwise_total("INR", 5_000_000)
+    old.category = "OTHER"
+    L.sync_transaction(old)
+    L.rebuild_manual_splitwise_total()
+    out = L.splitwise_changes_since_reset("INR")
+    assert out["items"] == [] and out["changeMinor"] == -70_000 and out["otherChangeMinor"] == -70_000
+
+
+def test_changes_report_is_empty_when_the_total_was_never_set(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "chg3.db"))
+    db.init_db()
+    assert L.splitwise_changes_since_reset("INR")["setAt"] is None

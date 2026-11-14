@@ -6,6 +6,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.example.financesmstracker.integration.FinanceSyncClient
+import com.example.financesmstracker.integration.SplitwiseChangesText
 import java.util.Locale
 
 internal fun MainActivity.showManualSplitwiseDialog() {
@@ -39,34 +40,13 @@ internal fun MainActivity.showManualSplitwiseDialog() {
                     )
                     .setView(container)
                     .setNegativeButton("Cancel", null)
-                    .setNeutralButton("Read from Splitwise", null)
+                    .setNeutralButton("Changes since set", null)
                     .setPositiveButton("Save", null)
                     .create()
 
                 dialog.setOnShowListener {
                     dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                        buttonEditSplitwise.isEnabled = false
-                        oracleExecutor.execute {
-                            val pulled = FinanceSyncClient(this@showManualSplitwiseDialog).pullSplitwiseTotal()
-                            runOnUiThread {
-                                buttonEditSplitwise.isEnabled = true
-                                pulled.onSuccess { minor ->
-                                    dialog.dismiss()
-                                    loadOracleSummary()
-                                    Toast.makeText(
-                                        this@showManualSplitwiseDialog,
-                                        "Splitwise owed set to " + String.format(Locale.getDefault(), "%.2f", minor / 100.0) + " from Splitwise",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }.onFailure { error ->
-                                    Toast.makeText(
-                                        this@showManualSplitwiseDialog,
-                                        "Could not read Splitwise: " + (error.message ?: "Unavailable"),
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            }
-                        }
+                        showSplitwiseChangesDialog()
                     }
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                         val amount = input.text.toString().trim().replace(",", "").toDoubleOrNull()
@@ -113,6 +93,35 @@ internal fun MainActivity.showManualSplitwiseDialog() {
                     this@showManualSplitwiseDialog,
                     "Could not load Splitwise amount: " +
                         (error.message ?: "Unavailable"),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+}
+
+/** Lists what the app counted since the Splitwise total was last set, to compare with the Splitwise app. */
+internal fun MainActivity.showSplitwiseChangesDialog() {
+    oracleExecutor.execute {
+        val result = FinanceSyncClient(this@showSplitwiseChangesDialog).fetchSplitwiseChanges()
+        runOnUiThread {
+            result.onSuccess { changes ->
+                val text = SplitwiseChangesText.format(changes, { formatMinor(it) })
+                val body = android.widget.TextView(this@showSplitwiseChangesDialog).apply {
+                    this.text = text
+                    setTextIsSelectable(true)
+                    setPadding(48, 24, 48, 0)
+                }
+                val scroll = android.widget.ScrollView(this@showSplitwiseChangesDialog).apply { addView(body) }
+                AlertDialog.Builder(this@showSplitwiseChangesDialog)
+                    .setTitle("Changes since you set it")
+                    .setView(scroll)
+                    .setPositiveButton("Close", null)
+                    .show()
+            }.onFailure { error ->
+                Toast.makeText(
+                    this@showSplitwiseChangesDialog,
+                    "Could not load changes: " + (error.message ?: "Unavailable"),
                     Toast.LENGTH_LONG
                 ).show()
             }

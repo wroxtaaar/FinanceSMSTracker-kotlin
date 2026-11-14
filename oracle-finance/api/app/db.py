@@ -161,6 +161,8 @@ def init_db():
             conn.execute("ALTER TABLE manual_splitwise_total ADD COLUMN baseline_amount_minor INTEGER")
         if "baseline_ledger_minor" not in splitwise_total_columns:
             conn.execute("ALTER TABLE manual_splitwise_total ADD COLUMN baseline_ledger_minor INTEGER")
+        if "baseline_set_at" not in splitwise_total_columns:
+            conn.execute("ALTER TABLE manual_splitwise_total ADD COLUMN baseline_set_at INTEGER")
 
         account_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()

@@ -55,14 +55,15 @@ def set_manual_splitwise_total(currency, amount_minor):
         ledger = _ledger_splitwise_total(conn, currency)
         conn.execute(
             """INSERT INTO manual_splitwise_total
-                   (currency, amount_minor, updated_at, baseline_amount_minor, baseline_ledger_minor)
-               VALUES(?,?,?,?,?)
+                   (currency, amount_minor, updated_at, baseline_amount_minor, baseline_ledger_minor, baseline_set_at)
+               VALUES(?,?,?,?,?,?)
                ON CONFLICT(currency) DO UPDATE SET
                  amount_minor=excluded.amount_minor,
                  updated_at=excluded.updated_at,
                  baseline_amount_minor=excluded.baseline_amount_minor,
-                 baseline_ledger_minor=excluded.baseline_ledger_minor""",
-            (currency, int(amount_minor), now_ms(), int(amount_minor), ledger)
+                 baseline_ledger_minor=excluded.baseline_ledger_minor,
+                 baseline_set_at=excluded.baseline_set_at""",
+            (currency, int(amount_minor), now_ms(), int(amount_minor), ledger, now_ms())
         )
 
 
@@ -93,8 +94,8 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
     return bool(inserted.rowcount)
 
 
-def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True, legacy_statement_rule=False):
-    """Ledger-wide Splitwise sum of the canonical bank/card movements.
+def _ledger_splitwise_entries(conn, cur, honor_other=True, honor_salary=True, legacy_statement_rule=False):
+    """Yield (row, delta) for every canonical bank/card movement that counts toward Splitwise.
 
     Only active, canonical transactions that actually affect a bank/card
     balance are included. A bank/card transfer naturally cancels because its
@@ -142,7 +143,6 @@ def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True, lega
                 transfer_leg_ids.add(str(resolved["id"]))
 
     loans = list_loans(conn, cur)
-    total = 0
     for row in rows:
         if str(row["id"]) in transfer_leg_ids:
             continue
@@ -153,7 +153,7 @@ def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True, lega
         category = row["category"]
         if not honor_other and str(category or "").strip().upper() == "OTHER":
             category = None
-        total += splitwise_delta(
+        yield row, splitwise_delta(
             row["account_type"],
             row["type"],
             row["amount_minor"],
@@ -161,7 +161,50 @@ def _ledger_splitwise_total(conn, cur, honor_other=True, honor_salary=True, lega
             exclude_salary=honor_salary,
             salary_share_minor=row["splitwise_amount_minor"] if honor_salary else None,
         )
-    return total
+
+
+def _ledger_splitwise_total(conn, cur, **options):
+    """Ledger-wide Splitwise sum of the canonical bank/card movements."""
+    return sum(delta for _row, delta in _ledger_splitwise_entries(conn, cur, **options))
+
+
+def splitwise_changes_since_reset(currency="INR", limit=100):
+    """Every row counted toward Splitwise since the total was last set, newest first.
+
+    Lets the user compare the app with the Splitwise app row by row. Edits to
+    rows that already existed (a category change, a merged duplicate) move the
+    total without appearing as new rows, so that part is reported separately.
+    """
+    with connection() as conn:
+        row = conn.execute(
+            """SELECT baseline_amount_minor,baseline_ledger_minor,baseline_set_at
+               FROM manual_splitwise_total WHERE currency=?""",
+            (currency,),
+        ).fetchone()
+        if row is None or row["baseline_set_at"] is None or row["baseline_ledger_minor"] is None:
+            return {"setAt": None, "baselineMinor": None, "changeMinor": 0, "otherChangeMinor": 0, "items": []}
+        set_at = int(row["baseline_set_at"])
+        entries = list(_ledger_splitwise_entries(conn, currency))
+        change = sum(delta for _r, delta in entries) - int(row["baseline_ledger_minor"])
+        items = [
+            {
+                "id": r["id"], "timestamp": int(r["timestamp"]), "createdAt": int(r["created_at"] or 0),
+                "description": r["merchant_or_payee"], "type": r["type"], "accountType": r["account_type"],
+                "bank": r["bank"], "last4": r["account_last4"], "category": r["category"],
+                "amountMinor": int(r["amount_minor"]), "deltaMinor": delta,
+            }
+            for r, delta in entries
+            if delta and int(r["created_at"] or 0) >= set_at
+        ]
+        items.sort(key=lambda item: item["createdAt"], reverse=True)
+        listed = sum(item["deltaMinor"] for item in items)
+        return {
+            "setAt": set_at,
+            "baselineMinor": int(row["baseline_amount_minor"]),
+            "changeMinor": change,
+            "otherChangeMinor": change - listed,
+            "items": items[:limit],
+        }
 
 
 def rebuild_manual_splitwise_total(currency=None):

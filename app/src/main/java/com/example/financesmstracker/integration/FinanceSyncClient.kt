@@ -92,11 +92,32 @@ class FinanceSyncClient(
         return put("/api/v1/splitwise/manual-total", json.toString())
     }
 
-    /** Asks the server to read the overall balance from Splitwise and use it as the new total. */
-    fun pullSplitwiseTotal(): Result<Long> {
+    /** Rows counted toward Splitwise since the total was last set, for comparing with the Splitwise app. */
+    fun fetchSplitwiseChanges(): Result<SplitwiseChanges> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
-        return post("/api/v1/splitwise/pull-total", "{}").map { JSONObject(it).getLong("amountMinor") }
+        return get("/api/v1/splitwise/changes?currency=INR").map { body ->
+            val json = JSONObject(body)
+            val array = json.optJSONArray("items")
+            SplitwiseChanges(
+                setAt = if (json.isNull("setAt")) null else json.getLong("setAt"),
+                baselineMinor = if (json.isNull("baselineMinor")) null else json.getLong("baselineMinor"),
+                changeMinor = json.optLong("changeMinor", 0),
+                otherChangeMinor = json.optLong("otherChangeMinor", 0),
+                items = (0 until (array?.length() ?: 0)).map { i ->
+                    val item = array!!.getJSONObject(i)
+                    SplitwiseChangeItem(
+                        timestamp = item.getLong("timestamp"),
+                        description = cleanRemoteString(item.optString("description")),
+                        type = item.optString("type"),
+                        bank = item.optString("bank"),
+                        category = item.optString("category"),
+                        amountMinor = item.getLong("amountMinor"),
+                        deltaMinor = item.getLong("deltaMinor")
+                    )
+                }
+            )
+        }
     }
 
     fun triggerGmailSync(): Result<GmailSyncResult> {
@@ -438,6 +459,24 @@ data class OracleLedgerSummary(
     val creditCardOutstandingMinor: Long,
     val trueAvailableMinor: Long,
     val emiReservations: List<EmiReservation> = emptyList()
+)
+
+data class SplitwiseChangeItem(
+    val timestamp: Long,
+    val description: String?,
+    val type: String,
+    val bank: String,
+    val category: String,
+    val amountMinor: Long,
+    val deltaMinor: Long
+)
+
+data class SplitwiseChanges(
+    val setAt: Long?,
+    val baselineMinor: Long?,
+    val changeMinor: Long,
+    val otherChangeMinor: Long,
+    val items: List<SplitwiseChangeItem>
 )
 
 /** A loan EMI the bank will auto-debit soon; already taken out of "true available". */
