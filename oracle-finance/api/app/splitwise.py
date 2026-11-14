@@ -106,3 +106,24 @@ def sync_receivables():
                 )
                 items.append({"id":rid,"name":name,"amountMinor":minor,"currency":currency})
     return items
+
+
+def net_balance_minor(currency="INR", data=None):
+    """What Splitwise says you are owed overall: friend balances netted, in one currency."""
+    data = friends() if data is None else data
+    total = Decimal(0)
+    for friend in data.get("friends", []):
+        for balance in friend.get("balance", []) or []:
+            if (balance.get("currency_code") or "INR") == currency:
+                total += Decimal(str(balance.get("amount", "0")))
+    return int((total * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def pull_manual_total(currency="INR", data=None):
+    """Set the app's Splitwise total to Splitwise's own figure; later changes add to it."""
+    from .ledger import rebuild_manual_splitwise_total, set_manual_splitwise_total
+
+    amount = max(0, net_balance_minor(currency, data))
+    set_manual_splitwise_total(currency, amount)
+    rebuild_manual_splitwise_total(currency)
+    return amount

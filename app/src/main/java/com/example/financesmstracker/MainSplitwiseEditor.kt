@@ -39,10 +39,35 @@ internal fun MainActivity.showManualSplitwiseDialog() {
                     )
                     .setView(container)
                     .setNegativeButton("Cancel", null)
+                    .setNeutralButton("Read from Splitwise", null)
                     .setPositiveButton("Save", null)
                     .create()
 
                 dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                        buttonEditSplitwise.isEnabled = false
+                        oracleExecutor.execute {
+                            val pulled = FinanceSyncClient(this@showManualSplitwiseDialog).pullSplitwiseTotal()
+                            runOnUiThread {
+                                buttonEditSplitwise.isEnabled = true
+                                pulled.onSuccess { minor ->
+                                    dialog.dismiss()
+                                    loadOracleSummary()
+                                    Toast.makeText(
+                                        this@showManualSplitwiseDialog,
+                                        "Splitwise owed set to " + String.format(Locale.getDefault(), "%.2f", minor / 100.0) + " from Splitwise",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }.onFailure { error ->
+                                    Toast.makeText(
+                                        this@showManualSplitwiseDialog,
+                                        "Could not read Splitwise: " + (error.message ?: "Unavailable"),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                        }
+                    }
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                         val amount = input.text.toString().trim().replace(",", "").toDoubleOrNull()
 

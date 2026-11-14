@@ -11,6 +11,7 @@ from .splitwise import (
     enabled as splitwise_enabled,
     current_user as splitwise_user,
     groups as splitwise_groups,
+    pull_manual_total as splitwise_pull_total,
     sync_receivables,
 )
 from .sheets_snapshot import get_snapshot
@@ -219,6 +220,15 @@ def update_manual_splitwise_total(payload:ManualSplitwiseTotalRequest,x_sync_tok
     require_token(x_sync_token)
     set_manual_splitwise_total(payload.currency, payload.amountMinor)
     return {"status":"ok","currency":payload.currency,"amountMinor":payload.amountMinor}
+
+@app.post("/api/v1/splitwise/pull-total")
+def pull_splitwise_total(currency:str="INR",x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    if not splitwise_enabled():
+        raise HTTPException(400,"Splitwise is not enabled on the server (set SPLITWISE_ENABLED=true and SPLITWISE_ACCESS_TOKEN)")
+    try: amount=splitwise_pull_total(currency)
+    except Exception as exc: raise HTTPException(400,str(exc))
+    return {"status":"ok","currency":currency,"amountMinor":amount}
 
 @app.get("/api/v1/splitwise/receivables")
 def get_receivables(currency:str="INR",x_sync_token:str=Header(default="")):

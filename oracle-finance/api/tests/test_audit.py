@@ -305,3 +305,22 @@ def test_summary_subtracts_the_reserve(tmp_path, monkeypatch):
     out = L.true_available("INR")
     assert out["emiReservedMinor"] == 1_110_000
     assert out["trueAvailableMinor"] == out["bankCashMinor"] + out["splitwiseReceivableMinor"] - out["creditCardOutstandingMinor"] - 1_110_000
+
+
+def test_pull_total_uses_splitwises_net_balance_and_tracks_changes_after(tmp_path, monkeypatch):
+    from app import splitwise
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "pull.db"))
+    db.init_db()
+    L.set_balance("axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "1111", 1_000_000)
+    L.sync_transaction(sms_debit(ref=None, amount=100_000))
+    data = {"friends": [
+        {"balance": [{"currency_code": "INR", "amount": "140266.00"}, {"currency_code": "USD", "amount": "5.00"}]},
+        {"balance": [{"currency_code": "INR", "amount": "73368.00"}]},
+        {"balance": [{"currency_code": "INR", "amount": "-100.50"}]},
+    ]}
+    assert splitwise.net_balance_minor("INR", data) == 21_353_350
+    assert splitwise.pull_manual_total("INR", data) == 21_353_350
+    assert L.get_manual_splitwise_total("INR") == 21_353_350
+    L.sync_transaction(sms_debit(ref=None, amount=25_000, id="sms:later", ts=sms_debit().timestamp + 3_600_000))
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 21_353_350 + 25_000

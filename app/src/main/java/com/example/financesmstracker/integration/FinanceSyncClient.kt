@@ -92,6 +92,13 @@ class FinanceSyncClient(
         return put("/api/v1/splitwise/manual-total", json.toString())
     }
 
+    /** Asks the server to read the overall balance from Splitwise and use it as the new total. */
+    fun pullSplitwiseTotal(): Result<Long> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return post("/api/v1/splitwise/pull-total", "{}").map { JSONObject(it).getLong("amountMinor") }
+    }
+
     fun triggerGmailSync(): Result<GmailSyncResult> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
