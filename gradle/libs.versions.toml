@@ -10,6 +10,8 @@ activityKtx = "1.8.0"
 constraintlayout = "2.1.4"
 robolectric = "4.11.1"
 androidxTestCore = "1.5.0"
+googleServices = "4.6.0"
+firebaseAppDistribution = "16.0.0-beta19"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -22,7 +24,9 @@ androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", ve
 androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTestCore" }
+firebase-appdistribution-api = { group = "com.google.firebase", name = "firebase-appdistribution-api", version.ref = "firebaseAppDistribution" }
+firebase-appdistribution = { group = "com.google.firebase", name = "firebase-appdistribution", version.ref = "firebaseAppDistribution" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
