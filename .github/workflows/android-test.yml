@@ -13,6 +13,12 @@ on:
       - ".github/workflows/oracle-deploy.yml"
   workflow_dispatch:
 
+# A newer push cancels the older run still in progress on the same branch,
+# so only the latest commit gets built and uploaded.
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
