@@ -229,6 +229,7 @@ class MainActivity : AppCompatActivity() {
         loadTransactions()
         updateNotificationAccessStatus()
         loadOracleSummary()
+        AppUpdateChecker.check()
     }
 
     internal fun updateReviewCount() {
