@@ -4,6 +4,12 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+// Firebase is configured only when app/google-services.json exists, so the
+// project still builds without it (the in-app update check then does nothing).
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.example.financesmstracker"
     compileSdk {
@@ -14,6 +20,8 @@ android {
         applicationId = "com.example.financesmstracker"
         minSdk = 26
         targetSdk = 37
+        // GitHub Actions sets these on every release build so each APK has a
+        // higher versionCode than the last (Android refuses same/lower updates).
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
         versionName = System.getenv("VERSION_NAME") ?: "1.0"
 
@@ -85,6 +93,10 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.core.ktx)
     implementation(libs.material)
+    // API-only library in every variant; the full SDK (the part that actually
+    // checks for and installs updates) ships in release builds only.
+    implementation(libs.firebase.appdistribution.api)
+    releaseImplementation(libs.firebase.appdistribution)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
