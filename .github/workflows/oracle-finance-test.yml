@@ -9,6 +9,11 @@ on:
     paths:
       - "oracle-finance/**"
 
+# A newer push cancels the older test run on the same branch or pull request.
+concurrency:
+  group: oracle-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
