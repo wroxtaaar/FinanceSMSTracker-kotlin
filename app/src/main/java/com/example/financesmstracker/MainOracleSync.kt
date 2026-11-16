@@ -161,7 +161,7 @@ internal fun formatLedgerAudit(body: String): String {
             val items = since.optJSONArray("items")
             if (items != null) for (i in 0 until items.length()) {
                 val it = items.getJSONObject(i)
-                out.append("    #${it.optLong("id")} ${it.optString("type")} ${it.optString("bank")} ${it.optString("last4")} ${it.optString("category")} ${it.optString("description")} => ${money(it.optLong("deltaMinor"))}\n")
+                out.append("    #${it.optString("id")} ${it.optString("type")} ${it.optString("bank")} ${it.optString("last4")} ${it.optString("category")} ${it.optString("description")} => ${money(it.optLong("deltaMinor"))}\n")
             }
         }
     }

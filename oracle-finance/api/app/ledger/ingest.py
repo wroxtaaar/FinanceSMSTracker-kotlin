@@ -6,7 +6,7 @@ from .common import is_provisional_unresolved_transaction, normalize_reference, 
 from .foreign import _convert_foreign_transaction
 
 
-def sync_transaction(t, apply_balance=True):
+def sync_transaction(t, apply_balance=True, category_edit=False):
     t, orig_amount, orig_currency, fx_rate = _convert_foreign_transaction(t)
     with connection() as conn:
         before=conn.execute(
@@ -116,7 +116,10 @@ def sync_transaction(t, apply_balance=True):
         if (
             before is not None
             and before["status"] == "ACTIVE"
-            and not str(t.id).startswith("gmail:")
+            # Gmail re-scans resend the parser's guess for the same id and must not
+            # undo the user's choice, so only an edit coming from the phone may
+            # change the category of a Gmail-sourced row.
+            and (category_edit or not str(t.id).startswith("gmail:"))
             and str(before["category"] or "").strip().upper()
                 != str(t.category or "").strip().upper()
         ):

@@ -108,7 +108,7 @@ def health(): return {"status":"ok","service":"oracle-finance","version":"1.0.0"
 def sync(payload:SyncRequest,x_sync_token:str=Header(default="")):
     require_token(x_sync_token)
     if payload.version!=1: raise HTTPException(400,"unsupported sync contract version")
-    new_t=sum(sync_transaction(t) for t in payload.transactions)
+    new_t=sum(sync_transaction(t, category_edit=True) for t in payload.transactions)
     new_e=sum(sync_evidence(e) for e in payload.evidence)
     bill_results=[]
     for bill in payload.cardBills:

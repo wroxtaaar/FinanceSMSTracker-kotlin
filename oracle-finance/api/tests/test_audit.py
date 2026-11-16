@@ -380,3 +380,23 @@ def test_a_closed_card_that_still_owes_money_is_kept(tmp_path, monkeypatch):
     assert migrations.migrate_remove_closed_card("ACME", "5145") is False
     with connection() as conn:
         assert conn.execute("SELECT COUNT(*) c FROM accounts WHERE last4='5145'").fetchone()["c"] == 1
+
+
+def test_phone_category_edit_reaches_a_gmail_only_row_but_a_gmail_rescan_does_not_undo_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "gm.db"))
+    db.init_db()
+    L.set_balance("axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "1111", 1_000_000)
+    L.set_manual_splitwise_total("INR", 5_000_000)
+    row = sms_debit(ref="777", amount=10_000, id="gmail:abc")
+    row.category = "GROCERIES"
+    L.sync_transaction(row)
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 5_010_000
+    row.category = "OTHER"
+    L.sync_transaction(row, category_edit=True)
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 5_000_000
+    row.category = "GROCERIES"
+    L.sync_transaction(row)  # Gmail re-scan: parser guess again
+    L.rebuild_manual_splitwise_total()
+    assert L.get_manual_splitwise_total("INR") == 5_000_000
