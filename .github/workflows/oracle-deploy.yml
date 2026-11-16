@@ -10,6 +10,11 @@ on:
       - "oracle-finance/**"
       - ".github/workflows/oracle-deploy.yml"
   workflow_dispatch:
+    inputs:
+      full_rebuild:
+        description: "Rebuild the server image from scratch (ignore Docker cache)"
+        type: boolean
+        default: false
 
 # Only the newest Oracle deployment should remain active.
 # A new push/workflow run cancels an older run in this deployment group.
@@ -79,7 +84,49 @@ jobs:
             echo "Tailscale public Sheets endpoint:"
             sudo tailscale funnel status
 
-      - name: 4. Stop current finance services
+      - name: 4. Verify VPS commit
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          DEPLOY_COMMIT: ${{ github.sha }}
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          envs: DEPLOY_COMMIT
+          script: |
+            set -e
+            cd ~/FinanceSMSTracker-kotlin
+            ACTUAL="$(git rev-parse HEAD)"
+            echo "Expected commit: $DEPLOY_COMMIT"
+            echo "Actual commit:   $ACTUAL"
+            test "$ACTUAL" = "$DEPLOY_COMMIT"
+
+      - name: 5. Build finance services (old version keeps running)
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          FULL_REBUILD: ${{ github.event.inputs.full_rebuild }}
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          envs: FULL_REBUILD
+          script: |
+            set -e
+            cd ~/FinanceSMSTracker-kotlin/oracle-finance
+            # Docker reuses unchanged layers, so a code-only change skips the
+            # pip install; dependencies reinstall only when requirements.txt
+            # changes. The manual "full_rebuild" option ignores the cache.
+            CACHE_FLAG=""
+            if [ "$FULL_REBUILD" = "true" ]; then CACHE_FLAG="--no-cache"; fi
+            if grep -Eq '^GMAIL_ENABLED=true([[:space:]]*)$' .env; then
+              docker compose -f docker-compose.yml -f docker-compose.sheets.yml build $CACHE_FLAG finance-api finance-worker finance-sheets
+            else
+              docker compose -f docker-compose.yml -f docker-compose.sheets.yml build $CACHE_FLAG finance-api finance-sheets
+            fi
+
+      - name: 6. Stop old finance services (just before the new ones start)
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.ORACLE_HOST }}
@@ -98,40 +145,6 @@ jobs:
             # Remove a legacy Sheets container left behind by an older Compose
             # project name so the current project can recreate it cleanly.
             docker ps -aq --filter "name=_oracle-finance-finance-sheets-1" | xargs -r docker rm -f
-
-      - name: 5. Verify VPS commit
-        uses: appleboy/ssh-action@v1.2.2
-        env:
-          DEPLOY_COMMIT: ${{ github.sha }}
-        with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: ${{ secrets.ORACLE_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
-          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
-          envs: DEPLOY_COMMIT
-          script: |
-            set -e
-            cd ~/FinanceSMSTracker-kotlin
-            ACTUAL="$(git rev-parse HEAD)"
-            echo "Expected commit: $DEPLOY_COMMIT"
-            echo "Actual commit:   $ACTUAL"
-            test "$ACTUAL" = "$DEPLOY_COMMIT"
-
-      - name: 6. Build finance services
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: ${{ secrets.ORACLE_USER }}
-          key: ${{ secrets.ORACLE_SSH_KEY }}
-          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
-          script: |
-            set -e
-            cd ~/FinanceSMSTracker-kotlin/oracle-finance
-            if grep -Eq '^GMAIL_ENABLED=true([[:space:]]*)$' .env; then
-              docker compose -f docker-compose.yml -f docker-compose.sheets.yml build --no-cache finance-api finance-worker finance-sheets
-            else
-              docker compose -f docker-compose.yml -f docker-compose.sheets.yml build --no-cache finance-api finance-sheets
-            fi
 
       - name: 7. Start finance services
         uses: appleboy/ssh-action@v1.2.2
