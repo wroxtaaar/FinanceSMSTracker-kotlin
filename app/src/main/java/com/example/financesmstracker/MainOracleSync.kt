@@ -10,6 +10,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.example.financesmstracker.integration.FinanceSyncClient
+import com.example.financesmstracker.integration.FinanceSyncService
 import com.example.financesmstracker.integration.OracleIds
 import com.example.financesmstracker.integration.SyncSettings
 import com.example.financesmstracker.receiver.SmsHandlingLog
@@ -217,7 +218,13 @@ internal fun formatLedgerAudit(body: String): String {
 internal fun MainActivity.showLedgerAudit() {
     Toast.makeText(this, "Loading audit...", Toast.LENGTH_SHORT).show()
     oracleExecutor.execute {
-        val result = FinanceSyncClient(this@showLedgerAudit).fetchAudit().mapCatching { formatLedgerAudit(it) }
+        val phoneStatus = run {
+            val queued = runCatching { FinanceSyncService(this@showLedgerAudit).pendingCount() }.getOrDefault(-1)
+            val last = getSharedPreferences("finance_sync_status", android.content.Context.MODE_PRIVATE)
+                .getString("last_category_edit", "none yet")
+            "PHONE SYNC\n  waiting to send: $queued\n  last category edit: $last\n\n"
+        }
+        val result = FinanceSyncClient(this@showLedgerAudit).fetchAudit().mapCatching { phoneStatus + formatLedgerAudit(it) }
         runOnUiThread {
             result.onSuccess { text ->
                 val view = android.widget.TextView(this).apply {

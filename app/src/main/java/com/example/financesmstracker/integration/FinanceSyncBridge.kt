@@ -68,6 +68,16 @@ object FinanceSyncBridge {
                 )
                 service.flush().exceptionOrNull()?.message ?: ""
             }.getOrElse { it.message ?: "unknown error" }.ifEmpty { null }
+            // Kept so the audit can show exactly what was sent for the last edit.
+            runCatching {
+                val sent = FinanceSyncMapper.toSyncTransaction(transaction, OracleIds.scheme(appContext))
+                appContext.getSharedPreferences("finance_sync_status", Context.MODE_PRIVATE).edit()
+                    .putString(
+                        "last_category_edit",
+                        "id ${sent.serverId} -> ${sent.category} at ${System.currentTimeMillis()}: " +
+                            (error ?: "delivered")
+                    ).apply()
+            }
             // Runs after Oracle has recalculated, so a refresh sees the new totals.
             // `error` is null when everything was delivered.
             onDone?.invoke(error)
