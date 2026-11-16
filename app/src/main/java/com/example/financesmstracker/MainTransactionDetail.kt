@@ -478,12 +478,12 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
             FinanceSyncBridge.enqueueCategoryUpdate(
                 this,
                 updatedTransaction,
-                if (isLast) { delivered ->
+                if (isLast) { error ->
                     runOnUiThread {
-                        if (!delivered) {
+                        if (error != null) {
                             Toast.makeText(
                                 this,
-                                "Category saved here but Oracle could not be reached; it will retry",
+                                "Saved here, but Oracle did not accept it: " + error.take(180),
                                 Toast.LENGTH_LONG
                             ).show()
                         }

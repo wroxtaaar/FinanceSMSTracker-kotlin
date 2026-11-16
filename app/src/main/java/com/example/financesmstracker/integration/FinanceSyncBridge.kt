@@ -50,11 +50,11 @@ object FinanceSyncBridge {
     fun enqueueCategoryUpdate(
         context: Context,
         transaction: Transaction,
-        onDone: ((Boolean) -> Unit)? = null
+        onDone: ((String?) -> Unit)? = null
     ) {
         val appContext = context.applicationContext
         executor.execute {
-            val delivered = runCatching {
+            val error: String? = runCatching {
                 val service = FinanceSyncService(appContext)
                 service.enqueue(
                     transactions = listOf(
@@ -66,10 +66,11 @@ object FinanceSyncBridge {
                         transaction
                     )
                 )
-                service.flush().isSuccess
-            }.getOrDefault(false)
+                service.flush().exceptionOrNull()?.message ?: ""
+            }.getOrElse { it.message ?: "unknown error" }.ifEmpty { null }
             // Runs after Oracle has recalculated, so a refresh sees the new totals.
-            onDone?.invoke(delivered)
+            // `error` is null when everything was delivered.
+            onDone?.invoke(error)
         }
     }
 
