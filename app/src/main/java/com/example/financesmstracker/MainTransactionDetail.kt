@@ -471,8 +471,26 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
         // OTHER as the explicit opt-out. Push the updated existing rows to
         // Oracle so it can add/remove each row's Splitwise share without
         // applying any bank/card balance a second time.
-        transactionsToSync.forEach { updatedTransaction ->
-            FinanceSyncBridge.enqueueCategoryUpdate(this, updatedTransaction)
+        // The summary is refreshed only after the last row has reached Oracle;
+        // refreshing immediately would show the totals from before the change.
+        transactionsToSync.forEachIndexed { index, updatedTransaction ->
+            val isLast = index == transactionsToSync.lastIndex
+            FinanceSyncBridge.enqueueCategoryUpdate(
+                this,
+                updatedTransaction,
+                if (isLast) { delivered ->
+                    runOnUiThread {
+                        if (!delivered) {
+                            Toast.makeText(
+                                this,
+                                "Category saved here but Oracle could not be reached; it will retry",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        loadOracleSummary()
+                    }
+                } else null
+            )
         }
 
         if (
@@ -495,7 +513,6 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
 
         dialog.dismiss()
         loadTransactions()
-        loadOracleSummary()
     }
 
     dialog.show()

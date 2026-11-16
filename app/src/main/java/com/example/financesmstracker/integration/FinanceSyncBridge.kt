@@ -49,11 +49,12 @@ object FinanceSyncBridge {
      */
     fun enqueueCategoryUpdate(
         context: Context,
-        transaction: Transaction
+        transaction: Transaction,
+        onDone: ((Boolean) -> Unit)? = null
     ) {
         val appContext = context.applicationContext
         executor.execute {
-            runCatching {
+            val delivered = runCatching {
                 val service = FinanceSyncService(appContext)
                 service.enqueue(
                     transactions = listOf(
@@ -65,8 +66,10 @@ object FinanceSyncBridge {
                         transaction
                     )
                 )
-                service.flush()
-            }
+                service.flush().isSuccess
+            }.getOrDefault(false)
+            // Runs after Oracle has recalculated, so a refresh sees the new totals.
+            onDone?.invoke(delivered)
         }
     }
 
