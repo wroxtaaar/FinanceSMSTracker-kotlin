@@ -36,6 +36,21 @@ class OracleIdsTest {
     }
 
     @Test
+    fun aFreshDatabaseWithRestoredSettingsIsDetected() {
+        // Saved boundary 640 but this database has only ever reached row 477:
+        // new rows would be sent as bare "477" and land on old history.
+        assertTrue(OracleIds.isStale(640L, 477L))
+        assertTrue(OracleIds.isStale(640L, 0L))
+    }
+
+    @Test
+    fun theSameDatabaseIsNeverTreatedAsStale() {
+        assertEquals(false, OracleIds.isStale(640L, 640L))
+        assertEquals(false, OracleIds.isStale(640L, 900L))
+        assertEquals(false, OracleIds.isStale(0L, 0L))
+    }
+
+    @Test
     fun twoInstallsNeverShareAPrefix() {
         assertNotEquals(OracleIds.newPrefix(), OracleIds.newPrefix())
         assertEquals(6, OracleIds.newPrefix().length)

@@ -45,12 +45,36 @@ object OracleIds {
      */
     fun initialize(context: Context, db: SQLiteDatabase) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.contains(KEY_PREFIX)) return
 
         fun maxId(table: String): Long =
             db.rawQuery("SELECT COALESCE(MAX(id), 0) FROM $table", null).use {
                 if (it.moveToFirst()) it.getLong(0) else 0L
             }
+
+        // The highest id this database has ever handed out. AUTOINCREMENT never
+        // goes back, so for the database the saved boundary was made for it is
+        // always at least that boundary.
+        fun everUsed(table: String): Long = runCatching {
+            db.rawQuery("SELECT COALESCE(MAX(seq), 0) FROM sqlite_sequence WHERE name = ?", arrayOf(table)).use {
+                if (it.moveToFirst()) it.getLong(0) else 0L
+            }
+        }.getOrDefault(0L)
+
+        if (prefs.contains(KEY_PREFIX)) {
+            val staleTx = isStale(prefs.getLong(KEY_LEGACY_MAX_TX, 0L), everUsed("transactions"))
+            val staleEvidence = isStale(prefs.getLong(KEY_LEGACY_MAX_EVIDENCE, 0L), everUsed("source_evidence"))
+            if (!staleTx && !staleEvidence) return
+            // A fresh database (after a reinstall) with settings restored from a
+            // backup of the old one: its row numbers start again from 1, so the
+            // old boundary would send new rows under the ids of old history.
+            // Start over with every row prefixed, under a new prefix.
+            prefs.edit()
+                .putLong(KEY_LEGACY_MAX_TX, 0L)
+                .putLong(KEY_LEGACY_MAX_EVIDENCE, 0L)
+                .putString(KEY_PREFIX, newPrefix())
+                .apply()
+            return
+        }
 
         val maxTx = runCatching { maxId("transactions") }.getOrDefault(0L)
         val maxEvidence = runCatching { maxId("source_evidence") }.getOrDefault(0L)
@@ -60,6 +84,10 @@ object OracleIds {
             .putString(KEY_PREFIX, newPrefix())
             .apply()
     }
+
+    /** Pure: the saved boundary is higher than any row number this database has ever used. */
+    fun isStale(savedLegacyMax: Long, highestIdEverUsed: Long): Boolean =
+        savedLegacyMax > 0L && highestIdEverUsed < savedLegacyMax
 
     /** The saved scheme, or [BARE] if the database has not been opened yet. */
     fun scheme(context: Context): Scheme {
