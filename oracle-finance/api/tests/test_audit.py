@@ -400,3 +400,30 @@ def test_phone_category_edit_reaches_a_gmail_only_row_but_a_gmail_rescan_does_no
     L.sync_transaction(row)  # Gmail re-scan: parser guess again
     L.rebuild_manual_splitwise_total()
     assert L.get_manual_splitwise_total("INR") == 5_000_000
+
+
+def test_an_id_owned_by_an_old_row_gets_its_own_row_and_edits_follow_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "col.db"))
+    db.init_db()
+    L.set_balance("axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "1111", 1_000_000)
+    old = sms_debit(ref="111111", amount=10_000, id="477")
+    old.category = "OTHER"
+    L.sync_transaction(old)
+    L.set_manual_splitwise_total("INR", 5_000_000)
+    new = sms_debit(ref="229275321545", amount=10_000, id="477", ts=old.timestamp + 40 * 24 * 3600 * 1000)
+    new.category = "GROCERIES"
+    L.sync_transaction(new)
+    L.rebuild_manual_splitwise_total()
+    from app.db import connection
+    with connection() as conn:
+        rows = {r["id"]: (r["reference"], r["category"]) for r in conn.execute("SELECT id,reference,category FROM transactions")}
+    assert rows["477"] == ("111111", "OTHER")  # old row untouched
+    assert len(rows) == 2 and any(i.startswith("477~") for i in rows)
+    assert L.get_manual_splitwise_total("INR") == 5_010_000
+    new.category = "OTHER"
+    L.sync_transaction(new, category_edit=True)
+    L.sync_transaction(new, category_edit=True)  # repeat lands on the same row
+    L.rebuild_manual_splitwise_total()
+    with connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 2
+    assert L.get_manual_splitwise_total("INR") == 5_000_000

@@ -1,9 +1,29 @@
 """Phone/server ingest: sync_transaction and sync_evidence."""
 
+import copy
+
 from ..db import connection
 from .accounts import apply_transaction_to_account
 from .common import is_provisional_unresolved_transaction, normalize_reference, now_ms
 from .foreign import _convert_foreign_transaction
+
+
+_ID_COLLISION_GAP_MS = 3 * 24 * 60 * 60 * 1000
+
+
+def _is_id_collision(stored, t):
+    """True when `t` carries the id of an unrelated, older ledger row.
+
+    The phone numbers rows itself, and a reinstall or a local merge can hand a new
+    event an id that an old row already owns. A later edit of the same event never
+    moves it by days or gives it a different bank reference, so either one proves
+    the id belongs to someone else.
+    """
+    if abs(int(stored["timestamp"]) - int(t.timestamp)) > _ID_COLLISION_GAP_MS:
+        return True
+    stored_ref = normalize_reference(stored["reference"])
+    new_ref = normalize_reference(getattr(t, "reference", None))
+    return bool(stored_ref and new_ref and stored_ref != new_ref)
 
 
 def sync_transaction(t, apply_balance=True, category_edit=False):
@@ -13,6 +33,16 @@ def sync_transaction(t, apply_balance=True, category_edit=False):
             """SELECT * FROM transactions WHERE id=?""",
             (t.id,)
         ).fetchone()
+        if before is not None and _is_id_collision(before, t):
+            # Keep the old row untouched and store this event under its own id.
+            # The new id is derived from the event, so a repeated send or a later
+            # category edit finds the same row again.
+            t = copy.copy(t)
+            t.id = f"{t.id}~{int(t.timestamp)}"
+            before=conn.execute(
+                """SELECT * FROM transactions WHERE id=?""",
+                (t.id,)
+            ).fetchone()
         if before is not None and before["fx_exact"]:
             # The user fixed the exact rupee charge for this foreign spend;
             # a later re-sync of the same row must not revert it to an estimate.
