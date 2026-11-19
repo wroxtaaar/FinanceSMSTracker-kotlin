@@ -22,4 +22,13 @@ class FinanceSyncRejectionTest {
         assertFalse(FinanceSyncService.isPermanentRejection(err("Unable to resolve host")))
         assertFalse(FinanceSyncService.isPermanentRejection(err("Oracle request HTTP 4220: x")))
     }
+
+    @Test
+    fun aServerFaultIsSkippedPastButANetworkFailureStopsTheFlush() {
+        assertTrue(FinanceSyncService.isServerFault(err("Oracle request HTTP 500: boom")))
+        assertTrue(FinanceSyncService.isServerFault(err("Oracle request HTTP 503: down")))
+        assertFalse(FinanceSyncService.isServerFault(err("Unable to resolve host")))
+        assertFalse(FinanceSyncService.isServerFault(err("Oracle request HTTP 401: no")))
+        assertFalse(FinanceSyncService.isServerFault(err("Oracle request HTTP 422: bad")))
+    }
 }

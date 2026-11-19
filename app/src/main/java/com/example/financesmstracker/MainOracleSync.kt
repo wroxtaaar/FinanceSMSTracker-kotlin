@@ -222,7 +222,9 @@ internal fun MainActivity.showLedgerAudit() {
             val queued = runCatching { FinanceSyncService(this@showLedgerAudit).pendingCount() }.getOrDefault(-1)
             val last = getSharedPreferences("finance_sync_status", android.content.Context.MODE_PRIVATE)
                 .getString("last_category_edit", "none yet")
-            "PHONE SYNC\n  waiting to send: $queued\n  last category edit: $last\n\n"
+            val lastError = getSharedPreferences("finance_sync_status", android.content.Context.MODE_PRIVATE)
+                .getString("last_flush_error", "none")
+            "PHONE SYNC\n  waiting to send: $queued\n  last send error: $lastError\n  last category edit: $last\n\n"
         }
         val result = FinanceSyncClient(this@showLedgerAudit).fetchAudit().mapCatching { phoneStatus + formatLedgerAudit(it) }
         runOnUiThread {

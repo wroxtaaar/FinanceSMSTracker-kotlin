@@ -30,6 +30,16 @@ class FinanceSyncQueue(context: Context) {
         }
     }
 
+    /** Moves the first item to the back so one stuck item cannot hold up the rest. */
+    @Synchronized
+    fun rotate() {
+        val items = read().toMutableList()
+        if (items.size > 1) {
+            items.add(items.removeAt(0))
+            write(items)
+        }
+    }
+
     @Synchronized
     fun size(): Int = read().size
 
