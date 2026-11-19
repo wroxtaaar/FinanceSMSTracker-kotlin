@@ -505,3 +505,19 @@ def test_indusind_table_header_without_spaces_is_still_found():
         common._pdf_text = original
     assert metadata["account_last4"] == "3526"
     assert [(r["type"], r["amount_minor"]) for r in rows] == [("DEBIT", 40738)]
+
+
+def test_a_statement_error_string_does_not_break_the_gmail_sync_note(monkeypatch):
+    from app import gmail_sync
+
+    monkeypatch.setattr(
+        gmail_sync, "process_statement_attachments",
+        lambda service, message: {"attachmentsScanned": 1, "attachmentsParsed": 0, "transactionsAdded": 0,
+                                  "transactionsMatched": 0, "errors": ["card.pdf: could not read"]},
+    )
+    stats = {"statementAttachmentsScanned": 0, "statementAttachmentsParsed": 0, "statementTransactionsAdded": 0,
+             "statementTransactionsMatched": 0, "statementErrors": []}
+    notes = []
+    monkeypatch.setattr(gmail_sync, "_note", lambda *a, **k: notes.append(a))
+    gmail_sync._record_statement_attachments(None, {"payload": {"headers": []}}, stats)
+    assert "card.pdf: could not read" in notes[0][-1]

@@ -353,7 +353,11 @@ def _record_statement_attachments(service, message, stats):
     stats["statementErrors"].extend(statement_stats["errors"])
     if statement_stats["attachmentsScanned"] or statement_stats["errors"]:
         h=_headers(message.get("payload",{}))
-        errors="; ".join(str(e.get("error", e))[:120] for e in statement_stats["errors"][:2])
+        # Errors are plain strings ("file.pdf: reason"); older code paths used dicts.
+        errors="; ".join(
+            str(e.get("error", e) if isinstance(e, dict) else e)[:120]
+            for e in statement_stats["errors"][:2]
+        )
         _note(stats, parseaddr(h.get("from",""))[1], h.get("subject",""),
               "Statement PDF: {} read, {} parsed{}".format(
                   statement_stats["attachmentsScanned"], statement_stats["attachmentsParsed"],
