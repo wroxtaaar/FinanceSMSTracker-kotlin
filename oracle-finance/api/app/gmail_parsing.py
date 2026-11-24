@@ -44,6 +44,17 @@ _REJECT_NOT_COMPLETED = re.compile(
 )
 
 
+# AutoPay / e-mandate / standing-instruction notices ("AutoPay for AIRTEL :
+# ACTIVATED") carry the mandate's maximum limit, not a spend. Matched on the
+# subject only, so a real payment alert that merely mentions AutoPay in its
+# body is unaffected.
+AUTOPAY_NOTICE_SUBJECT = re.compile(
+    r"(?i)\b(?:auto[\s-]?pay|e-?mandate|standing\s+instruction|si\s+mandate)\b"
+    r".{0,80}\b(?:activat\w*|regist\w*|set\s?up|creat\w*|cancel\w*|deactivat\w*|"
+    r"modif\w*|updat\w*|paus\w*|resum\w*|suspend\w*|enrol\w*|approv\w*)\b"
+)
+
+
 _REJECT_INFO_ONLY = re.compile(
     r"mini statement|statement is ready|statement has been generated|e-statement|"
     r"available balance|available limit|credit limit",
@@ -82,6 +93,8 @@ def _sender_domain_is_known_bank(bank, sender):
 
 def _hard_reject_email(subject, text):
     combined = f"{subject}\n{text}"
+    if AUTOPAY_NOTICE_SUBJECT.search(subject or ""):
+        return True
     # Real bank transaction emails often contain promotional banners and
     # security disclaimers (for example "Apply Now", "Click here", "OTP", or
     # "CVV"). Those phrases must not veto an otherwise strong transaction alert.

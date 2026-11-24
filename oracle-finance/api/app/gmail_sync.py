@@ -43,6 +43,7 @@ from .gmail_parsing import (
     parse_bank_email,
 )  # noqa: F401  (moved names stay importable from gmail_sync)
 from .gmail_legacy_repairs import (
+    _repair_autopay_notice_transactions,
     _repair_legacy_unidentified_hdfc_gmail_transactions,
     _repair_legacy_axis_credit_direction_conflicts,
     _repair_legacy_gmail_account_classifications,
@@ -555,6 +556,7 @@ def _ingest_messages(service,query="newer_than:30d"):
     stats["repairedTransactions"] = _run_legacy_repairs_once(service)
     stats["repairedTransactions"] += _repair_legacy_axis_credit_direction_conflicts()
     stats["repairedTransactions"] += _repair_legacy_unidentified_hdfc_gmail_transactions()
+    stats["repairedTransactions"] += _repair_autopay_notice_transactions()
 
     # Retry previously discovered statement emails before the normal date-bounded
     # mailbox scan. This is intentionally limited to PENDING statement rows,

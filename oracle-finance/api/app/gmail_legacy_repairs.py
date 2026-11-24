@@ -3,7 +3,7 @@ import re
 import time
 from .db import connection
 from .ledger import apply_transaction_to_account, void_transaction
-from .gmail_parsing import parse_bank_email
+from .gmail_parsing import parse_bank_email, AUTOPAY_NOTICE_SUBJECT
 
 
 def _repair_legacy_unidentified_hdfc_gmail_transactions():
@@ -56,6 +56,33 @@ def _repair_legacy_unidentified_hdfc_gmail_transactions():
             )
         repaired += 1
 
+    return repaired
+
+
+def _repair_autopay_notice_transactions():
+    """Void Gmail rows that an AutoPay/e-mandate notice was wrongly read as a spend.
+
+    "AutoPay for AIRTEL : ACTIVATED" states the mandate limit; older parsers
+    booked that limit as a card spend. The parser now rejects these subjects,
+    so the voided row is not recreated.
+    """
+    repaired = 0
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT t.id AS transaction_id, gm.subject AS subject
+            FROM transactions t
+            JOIN evidence e ON e.transaction_id = t.id AND e.source_type = 'GMAIL'
+            JOIN gmail_messages gm
+              ON (gm.id = e.source_id OR e.source_id LIKE 'imap:%:' || gm.id)
+            WHERE t.id LIKE 'gmail:%' AND t.status = 'ACTIVE'
+            """
+        ).fetchall()
+    for row in rows:
+        if not AUTOPAY_NOTICE_SUBJECT.search(row["subject"] or ""):
+            continue
+        if void_transaction(row["transaction_id"]).get("status") == "VOIDED":
+            repaired += 1
     return repaired
 
 

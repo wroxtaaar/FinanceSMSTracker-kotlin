@@ -690,3 +690,49 @@ def test_repair_legacy_gmail_merchant_values_replaces_axis_disclaimer():
         ).fetchone()
 
     assert tx["merchant_or_payee"] == "ABDUL WASIQ"
+
+
+def _insert_gmail_row(mid, subject, amount_minor):
+    with connection() as conn:
+        conn.execute(
+            "INSERT INTO gmail_messages (id,thread_id,internal_date,sender,subject,fingerprint,status,created_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (mid, "t-" + mid, 1950000000000, "alerts@axis.bank.in", subject, "fp-" + mid, "PARSED", 1950000000000),
+        )
+        conn.execute(
+            "INSERT INTO transactions (id,amount_minor,currency,type,payment_method,account_type,bank,"
+            "merchant_or_payee,account_last4,reference,timestamp,category,confidence,duplicate_of,status,created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("gmail:" + mid, amount_minor, "INR", "DEBIT", "CARD", "CREDIT_CARD", "AXIS", None, "9206",
+             None, 1950000000000, "GROCERIES", 0.95, None, "ACTIVE", 1950000000000),
+        )
+        conn.execute(
+            "INSERT INTO evidence (id,source_type,source_id,status,observed_at,transaction_id,amount_minor,"
+            "currency,direction,bank_provider,account_last4,content_hash,confidence,created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("gmail-evidence:" + mid, "GMAIL", mid, "UNMATCHED", 1950000000000, "gmail:" + mid, amount_minor,
+             "INR", "DEBIT", "AXIS", "9206", "h-" + mid, 0.95, 1950000000000),
+        )
+
+
+def test_autopay_activation_email_is_not_a_spend_and_the_old_row_is_voided():
+    from app.gmail_sync import _repair_autopay_notice_transactions
+
+    message = _message(
+        "autopay-1",
+        "Your AutoPay for AIRTEL is activated. Maximum amount INR 5000 on credit card no. XX9206 spent limit.",
+        subject="AutoPay for AIRTEL : ACTIVATED",
+    )
+    message["payload"]["headers"] = [
+        {"name": "Subject", "value": "AutoPay for AIRTEL : ACTIVATED"},
+        {"name": "From", "value": "alerts@axis.bank.in"},
+    ]
+    assert parse_bank_email(message) is None
+
+    _insert_gmail_row("autopay-old", "AutoPay for AIRTEL : ACTIVATED", 500000)
+    _insert_gmail_row("real-spend", "INR 50 spent on credit card no. XX9206", 5000)
+    assert _repair_autopay_notice_transactions() == 1
+    with connection() as conn:
+        status = {r["id"]: r["status"] for r in conn.execute(
+            "SELECT id,status FROM transactions WHERE id IN ('gmail:autopay-old','gmail:real-spend')")}
+    assert status == {"gmail:autopay-old": "VOIDED", "gmail:real-spend": "ACTIVE"}
