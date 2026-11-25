@@ -123,7 +123,7 @@ private fun MainActivity.buildSplitsDialog(
         Toast.makeText(this, "Splits has no people yet. Open the Splits app once.", Toast.LENGTH_LONG).show()
         return
     }
-    val prefs = getSharedPreferences(SPLITS_PREFS, MODE_PRIVATE)
+    val prefs = getSharedPreferences(SPLITS_PREFS, android.content.Context.MODE_PRIVATE)
     val pad = (16 * resources.displayMetrics.density).toInt()
     val box = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
