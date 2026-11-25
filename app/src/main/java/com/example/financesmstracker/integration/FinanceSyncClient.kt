@@ -92,6 +92,13 @@ class FinanceSyncClient(
         return put("/api/v1/splitwise/manual-total", json.toString())
     }
 
+    /** Ledger expenses with no matching expense in the Splits app, and Splits expenses with no ledger row. */
+    fun fetchSplitsCheck(): Result<SplitsCheck> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return get("/api/v1/splits/check?currency=INR").map { body -> SplitsCheck.parse(JSONObject(body)) }
+    }
+
     /** Rows counted toward Splitwise since the total was last set, for comparing with the Splitwise app. */
     fun fetchSplitwiseChanges(): Result<SplitwiseChanges> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
@@ -483,6 +490,42 @@ data class SplitwiseChangeItem(
     val amountMinor: Long,
     val deltaMinor: Long
 )
+
+/** One expense on either side of the ledger / Splits comparison. */
+data class SplitsCheckItem(val timestamp: Long, val label: String, val amountMinor: Long)
+
+data class SplitsCheck(
+    val configured: Boolean,
+    val error: String?,
+    val since: String,
+    val matched: Int,
+    val missing: List<SplitsCheckItem>,
+    val extra: List<SplitsCheckItem>
+) {
+    companion object {
+        fun parse(json: JSONObject): SplitsCheck {
+            fun clean(v: String?) = v?.trim()?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+            fun items(name: String, stamp: (JSONObject) -> Long, label: (JSONObject) -> String): List<SplitsCheckItem> {
+                val array = json.optJSONArray(name) ?: return emptyList()
+                return (0 until array.length()).map { i ->
+                    val o = array.getJSONObject(i)
+                    SplitsCheckItem(stamp(o), label(o), o.optLong("amountMinor", 0))
+                }
+            }
+            return SplitsCheck(
+                configured = json.optBoolean("configured", false),
+                error = if (json.isNull("error")) null else json.optString("error"),
+                since = json.optString("since"),
+                matched = json.optInt("matched", 0),
+                missing = items("missing", { it.optLong("timestamp") }, {
+                    (clean(it.optString("description")) ?: it.optString("bank")) +
+                        (it.optString("last4").takeIf { l -> l.isNotBlank() && l != "null" }?.let { l -> " ·$l" } ?: "")
+                }),
+                extra = items("extra", { 0L }, { (clean(it.optString("description")) ?: "") + "  " + it.optString("date") })
+            )
+        }
+    }
+}
 
 /** An older row whose effect on Splitwise changed after the total was set. */
 data class SplitwiseChangeEdit(

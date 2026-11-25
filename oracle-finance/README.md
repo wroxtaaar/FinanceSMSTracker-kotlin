@@ -33,6 +33,8 @@ Bank accounts are summed as cash; credit-card accounts are summed as liabilities
 A transfer is only linked when both events are bank-account transactions, directions are opposite, amount/currency are identical, timestamps are within 10 minutes, and the accounts are distinct. It is deliberately conservative.
 
 ## Splitwise
+Splits check: with the SPLITS_* values set (see .env.example) the server reads the personal Splits app and `GET /api/v1/splits/check` lists ledger expenses that have no matching Splits expense (same amount, dates within 2 days, one-to-one) and Splits expenses with no ledger row. The Audit and the phone's Splitwise check dialog show it. It is read-only.
+
 Splitwise is optional. Set SPLITWISE_ACCESS_TOKEN and enable it. Add a merchant rule before automatic expense creation. Transactions without a rule are not automatically pushed. The receivables endpoint exposes only positive balances owed to you; those open receivables are included in true available.
 
 ## Gmail

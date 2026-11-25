@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from .db import init_db
 from .ledger import *
 from .reconcile import reconcile_all
+from .splits_check import check as splits_check
 from .splitwise import (
     create_for_transaction,
     enabled as splitwise_enabled,
@@ -243,9 +244,16 @@ def get_receivables(currency:str="INR",x_sync_token:str=Header(default="")):
 def summary(currency:str="INR",x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return true_available(currency)
 
+@app.get("/api/v1/splits/check")
+def splits_check_api(currency:str="INR",x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return splits_check(currency)
+
 @app.get("/api/v1/audit")
 def audit(recent:int=25,x_sync_token:str=Header(default="")):
-    require_token(x_sync_token); return ledger_audit(recent)
+    require_token(x_sync_token)
+    result=ledger_audit(recent)
+    result["splitsCheck"]=splits_check("INR")
+    return result
 
 @app.get("/api/v1/transactions")
 def transactions(limit:int=100,x_sync_token:str=Header(default="")):

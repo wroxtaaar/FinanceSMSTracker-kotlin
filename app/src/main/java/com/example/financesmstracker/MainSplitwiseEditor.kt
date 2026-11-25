@@ -6,6 +6,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.example.financesmstracker.integration.FinanceSyncClient
+import com.example.financesmstracker.integration.SplitsCheckText
 import com.example.financesmstracker.integration.SplitwiseChangesText
 import java.util.Locale
 
@@ -103,10 +104,14 @@ internal fun MainActivity.showManualSplitwiseDialog() {
 /** Lists what the app counted since the Splitwise total was last set, to compare with the Splitwise app. */
 internal fun MainActivity.showSplitwiseChangesDialog() {
     oracleExecutor.execute {
-        val result = FinanceSyncClient(this@showSplitwiseChangesDialog).fetchSplitwiseChanges()
+        val client = FinanceSyncClient(this@showSplitwiseChangesDialog)
+        val result = client.fetchSplitwiseChanges()
+        val splits = client.fetchSplitsCheck()
         runOnUiThread {
             result.onSuccess { changes ->
-                val text = SplitwiseChangesText.format(changes, { formatMinor(it) })
+                val splitsText = splits.getOrNull()?.let { SplitsCheckText.format(it, { m -> formatMinor(m) }) }
+                    ?: ("Splits check unavailable: " + (splits.exceptionOrNull()?.message ?: "unknown"))
+                val text = splitsText + "\n\n— — —\n\n" + SplitwiseChangesText.format(changes, { formatMinor(it) })
                 val body = android.widget.TextView(this@showSplitwiseChangesDialog).apply {
                     this.text = text
                     setTextIsSelectable(true)
@@ -114,7 +119,7 @@ internal fun MainActivity.showSplitwiseChangesDialog() {
                 }
                 val scroll = android.widget.ScrollView(this@showSplitwiseChangesDialog).apply { addView(body) }
                 AlertDialog.Builder(this@showSplitwiseChangesDialog)
-                    .setTitle("Changes since you set it")
+                    .setTitle("Splitwise check")
                     .setView(scroll)
                     .setPositiveButton("Close", null)
                     .show()
