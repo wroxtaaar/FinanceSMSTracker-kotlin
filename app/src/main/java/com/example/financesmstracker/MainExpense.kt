@@ -40,7 +40,15 @@ internal fun friendlyExpenseError(error: Throwable?): String {
 internal fun MainActivity.setupExpenseSelection() {
     val bar = findViewById<View>(R.id.selectionBar)
     val count = findViewById<TextView>(R.id.selectionCount)
+    // Back cancels a selection instead of leaving the app.
+    val backCallback = object : androidx.activity.OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            adapter.clearSelection()
+        }
+    }
+    onBackPressedDispatcher.addCallback(this, backCallback)
     adapter.onSelectionChanged = { n ->
+        backCallback.isEnabled = n > 0
         bar.visibility = if (n > 0) View.VISIBLE else View.GONE
         val total = adapter.selectedTransactions().sumOf { it.amountPaise.toLong() }
         count.text = "$n selected · ${rupees(total)}"
