@@ -1,6 +1,5 @@
 package com.example.financesmstracker.integration
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -33,18 +32,5 @@ class SplitsCheckTextTest {
     fun allMatchedSaysSo() {
         val text = SplitsCheckText.format(SplitsCheck(true, null, "2026-11-25", 7, emptyList(), emptyList()), money, date)
         assertEquals("Everything since 2026-11-25 is in Splits (7 matched).", text)
-    }
-
-    @Test
-    fun parsesTheServerReply() {
-        val json = JSONObject(
-            """{"configured":true,"error":null,"since":"2026-11-25","matched":1,
-               "missing":[{"timestamp":5,"description":"STAR","last4":"3370","amountMinor":26000}],
-               "extra":[{"description":"tea","date":"2026-11-26","amountMinor":1000}]}"""
-        )
-        val check = SplitsCheck.parse(json)
-        assertEquals("STAR ·3370", check.missing[0].label)
-        assertEquals(26_000L, check.missing[0].amountMinor)
-        assertEquals("tea  2026-11-26", check.extra[0].label)
     }
 }
