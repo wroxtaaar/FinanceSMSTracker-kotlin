@@ -166,10 +166,10 @@ internal fun formatLedgerAudit(body: String): String {
             }
         }
     }
-    json.optJSONObject("splitsCheck")?.let { sc ->
-        out.append("\nSPLITS CHECK\n")
-        out.append(com.example.financesmstracker.integration.SplitsCheckText.format(
-            com.example.financesmstracker.integration.SplitsCheck.parse(sc), { v -> money(v) }
+    json.optJSONObject("expenseCheck")?.let { sc ->
+        out.append("\nEXPENSE CHECK\n")
+        out.append(com.example.financesmstracker.integration.ExpenseCheckText.format(
+            com.example.financesmstracker.integration.ExpenseCheck.parse(sc), { v -> money(v) }
         ).lines().joinToString("\n") { "  $it" } + "\n")
     }
     fun rowsSection(title: String, key: String) {

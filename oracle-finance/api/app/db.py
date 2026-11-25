@@ -31,11 +31,11 @@ CREATE TABLE IF NOT EXISTS splitwise_baseline_rows (
   currency TEXT NOT NULL, transaction_id TEXT NOT NULL, delta_minor INTEGER NOT NULL,
   PRIMARY KEY(currency, transaction_id)
 );
-CREATE TABLE IF NOT EXISTS splits_links (
-  transaction_id TEXT PRIMARY KEY, splits_id TEXT NOT NULL, description TEXT,
+CREATE TABLE IF NOT EXISTS expense_links (
+  transaction_id TEXT PRIMARY KEY, expense_id TEXT NOT NULL, description TEXT,
   group_id TEXT, payer_id TEXT, amount_minor INTEGER NOT NULL, created_at INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS splits_handled (
+CREATE TABLE IF NOT EXISTS expense_handled (
   transaction_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS manual_splitwise_total (
@@ -132,6 +132,16 @@ def _card_bank_label(bank):
 def init_db():
     with connection() as conn:
         conn.executescript(SCHEMA)
+        # The Expense-app tables were first called splits_*: move any rows over once.
+        tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "splits_links" in tables:
+            conn.execute(
+                "INSERT OR IGNORE INTO expense_links(transaction_id,expense_id,description,group_id,payer_id,amount_minor,created_at)"
+                " SELECT transaction_id,splits_id,description,group_id,payer_id,amount_minor,created_at FROM splits_links")
+            conn.execute("DROP TABLE splits_links")
+        if "splits_handled" in tables:
+            conn.execute("INSERT OR IGNORE INTO expense_handled(transaction_id,created_at) SELECT transaction_id,created_at FROM splits_handled")
+            conn.execute("DROP TABLE splits_handled")
 
         # The user's Axis loan: the EMI is auto-debited from the Axis account on
         # the 10th. It is reserved in "true available" from the 1st, and its

@@ -1,14 +1,14 @@
-"""Bridge to the personal Splits app (Supabase): add a ledger expense to it, and list what is missing.
+"""Bridge to the personal Expense app (Supabase): add a ledger expense to it, and list what is missing.
 
-The server signs in with its own Supabase user (SPLITS_EMAIL / SPLITS_PASSWORD in the VPS .env,
-never in the repo; that email must be in the Splits `allowed_users` table).
+The server signs in with its own Supabase user (EXPENSE_EMAIL / EXPENSE_PASSWORD in the VPS .env,
+never in the repo; that email must be in the Expense `allowed_users` table).
 
-* add_expense: writes ONE Splits expense for ONE ledger row. The row id is stored in the expense as
-  `ledgerId` and in the local `splits_links` table, so the link is exact and re-adding updates the same
+* add_expense: writes ONE Expense expense for ONE ledger row. The row id is stored in the expense as
+  `ledgerId` and in the local `expense_links` table, so the link is exact and re-adding updates the same
   expense instead of creating a second one.
-* check: ledger rows that raise Splitwise (delta > 0), dated on/after SPLITS_TRACK_FROM, that are
-  neither linked to a Splits expense nor marked handled. Nothing is guessed from amounts, because the
-  expenses typed by hand in Splits are grouped differently from the bank rows.
+* check: ledger rows that raise Splitwise (delta > 0), dated on/after EXPENSE_TRACK_FROM, that are
+  neither linked to a Expense expense nor marked handled. Nothing is guessed from amounts, because the
+  expenses typed by hand in Expense are grouped differently from the bank rows.
 """
 import hashlib
 import json
@@ -28,17 +28,22 @@ PAGE = 1000
 DESCRIPTION_LIMIT = 200
 
 
-class SplitsError(RuntimeError):
-    """A problem the user can act on (bad choice, Splits unreachable, ...)."""
+class ExpenseError(RuntimeError):
+    """A problem the user can act on (bad choice, Expense unreachable, ...)."""
+
+
+def _env(name, default=""):
+    """EXPENSE_<name>, falling back to the old SPLITS_<name> so an existing .env keeps working."""
+    return os.getenv(f"EXPENSE_{name}") or os.getenv(f"SPLITS_{name}") or default
 
 
 def settings():
     return {
-        "url": os.getenv("SPLITS_SUPABASE_URL", "").strip().rstrip("/"),
-        "key": os.getenv("SPLITS_SUPABASE_KEY", "").strip(),
-        "email": os.getenv("SPLITS_EMAIL", "").strip(),
-        "password": os.getenv("SPLITS_PASSWORD", ""),
-        "from": os.getenv("SPLITS_TRACK_FROM", "").strip() or DEFAULT_TRACK_FROM,
+        "url": _env("SUPABASE_URL").strip().rstrip("/"),
+        "key": _env("SUPABASE_KEY").strip(),
+        "email": _env("EMAIL").strip(),
+        "password": _env("PASSWORD"),
+        "from": _env("TRACK_FROM").strip() or DEFAULT_TRACK_FROM,
     }
 
 
@@ -58,14 +63,14 @@ def _http(method, url, headers, body=None):
             raw = r.read().decode()
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
-        raise SplitsError(f"Splits HTTP {e.code}: {e.read().decode(errors='replace')[:160]}") from e
+        raise ExpenseError(f"Expense HTTP {e.code}: {e.read().decode(errors='replace')[:160]}") from e
     except urllib.error.URLError as e:
-        raise SplitsError(f"Splits unreachable: {e.reason}") from e
+        raise ExpenseError(f"Expense unreachable: {e.reason}") from e
 
 
 def _login(s):
     if not configured(s):
-        raise SplitsError("Splits is not configured on the server")
+        raise ExpenseError("Expense is not configured on the server")
     login = _http(
         "POST", f"{s['url']}/auth/v1/token?grant_type=password",
         {"apikey": s["key"], "Content-Type": "application/json"},
@@ -98,7 +103,7 @@ def fetch_expenses(s=None):
 
 
 def options(s=None):
-    """Groups and people of the Splits app, for the pickers on the phone."""
+    """Groups and people of the Expense app, for the pickers on the phone."""
     s = s or settings()
     headers = _login(s)
     groups = [{"id": g["id"], "name": g.get("name") or "", "members": list(g.get("members") or [])}
@@ -118,7 +123,7 @@ def _allocate(amount, n):
 
 
 def build_expense(txs, description, group, payer_id, people, now_ms):
-    """The Splits expense record (same shape the Splits app stores). Pure, for testing.
+    """The Expense expense record (same shape the Expense app stores). Pure, for testing.
 
     `txs` are one or more ledger rows paid for together; the expense is their total.
     """
@@ -127,11 +132,11 @@ def build_expense(txs, description, group, payer_id, people, now_ms):
     if group:
         others = [m for m in group["members"] if m != payer_id]
         if payer_id not in group["members"]:
-            raise SplitsError("The payer is not a member of that group")
+            raise ExpenseError("The payer is not a member of that group")
     else:
         others = [p["id"] for p in people if p["isUser"] and p["id"] != payer_id]
     if not others:
-        raise SplitsError("There is nobody else to owe this amount")
+        raise ExpenseError("There is nobody else to owe this amount")
     lines = [ln.strip() for ln in str(description or "").splitlines() if ln.strip()]
     if not lines:
         names = [str(t["merchant_or_payee"] or "").strip() for t in txs]
@@ -140,13 +145,13 @@ def build_expense(txs, description, group, payer_id, people, now_ms):
     if len(title) > DESCRIPTION_LIMIT:
         title = title[:DESCRIPTION_LIMIT - 1].rstrip() + "…"
     ids = [str(t["id"]) for t in txs]
-    splits = dict(zip(others, _allocate(amount, len(others))))
+    shares = dict(zip(others, _allocate(amount, len(others))))
     return {
         "id": "led-" + hashlib.sha1("|".join(sorted(ids)).encode()).hexdigest()[:20],
         "createdBy": payer_id, "description": title, "amount": amount, "payer": payer_id,
         "groupId": group["id"] if group else None, "date": _day(int(txs[-1]["timestamp"])).isoformat(),
         "notes": "\n".join(lines) if len(lines) > 1 or title != lines[0] else "",
-        "splitType": "equal", "splitValues": {}, "splits": splits,
+        "splitType": "equal", "splitValues": {}, "splits": shares,
         "ledgerId": ids[0], "ledgerIds": ids,
         "deleted": False, "createdAt": now_ms, "updatedAt": now_ms,
     }
@@ -190,20 +195,20 @@ def link_info(transaction_id, currency="INR"):
     out["transactionId"] = tid
     out["eligible"] = tid in eligible_rows(currency)
     with connection() as conn:
-        link = conn.execute("SELECT * FROM splits_links WHERE transaction_id=?", (tid,)).fetchone()
+        link = conn.execute("SELECT * FROM expense_links WHERE transaction_id=?", (tid,)).fetchone()
         out["handled"] = conn.execute(
-            "SELECT 1 FROM splits_handled WHERE transaction_id=?", (tid,)).fetchone() is not None
+            "SELECT 1 FROM expense_handled WHERE transaction_id=?", (tid,)).fetchone() is not None
     if link:
         with connection() as conn:
             together = conn.execute(
-                "SELECT COUNT(*) c, SUM(amount_minor) a FROM splits_links WHERE splits_id=?", (link["splits_id"],)).fetchone()
+                "SELECT COUNT(*) c, SUM(amount_minor) a FROM expense_links WHERE expense_id=?", (link["expense_id"],)).fetchone()
         out.update(linked=True, description=link["description"], groupId=link["group_id"], payerId=link["payer_id"],
                    together=int(together["c"]), togetherMinor=int(together["a"] or 0))
     return out
 
 
 def add_expense(transaction_ids, description, group_id, payer_id, now_ms=None):
-    """One Splits expense for one or more ledger rows (their sum). Re-adding the same rows updates it."""
+    """One Expense expense for one or more ledger rows (their sum). Re-adding the same rows updates it."""
     if isinstance(transaction_ids, str):
         transaction_ids = [transaction_ids]
     s = settings()
@@ -211,73 +216,73 @@ def add_expense(transaction_ids, description, group_id, payer_id, now_ms=None):
     for tid in transaction_ids:
         row = _canonical_row(tid)
         if not row or row["status"] != "ACTIVE":
-            raise SplitsError("Transaction not found")
+            raise ExpenseError("Transaction not found")
         if row["id"] not in seen:
             seen.add(row["id"])
             rows.append(row)
     if not rows:
-        raise SplitsError("Select at least one transaction")
+        raise ExpenseError("Select at least one transaction")
     eligible = eligible_rows()
     not_counted = [r["id"] for r in rows if r["id"] not in eligible]
     if not_counted:
-        raise SplitsError("Only expenses that count toward Splitwise can be added (not credits, transfers or OTHER)")
+        raise ExpenseError("Only expenses that count toward Splitwise can be added (not credits, transfers or OTHER)")
     headers = _login(s)
     now_ms = now_ms or int(datetime.now(timezone.utc).timestamp() * 1000)
     groups, people_raw = _records(s, headers, "groups"), _records(s, headers, "people")
     group = next((g for g in groups if g["id"] == group_id), None) if group_id else None
     if group_id and group is None:
-        raise SplitsError("That group no longer exists in Splits")
+        raise ExpenseError("That group no longer exists in Expense")
     group = {"id": group["id"], "members": list(group.get("members") or [])} if group else None
     people = [{"id": p["id"], "isUser": bool(p.get("isUser"))} for p in people_raw]
     record = build_expense(rows, description, group, payer_id, people, now_ms)
     with connection() as conn:  # rows leaving an older, different combination: drop that expense
-        old_ids = {l["splits_id"] for l in conn.execute(
-            "SELECT DISTINCT splits_id FROM splits_links WHERE transaction_id IN (%s)" % ",".join("?" * len(rows)),
+        old_ids = {l["expense_id"] for l in conn.execute(
+            "SELECT DISTINCT expense_id FROM expense_links WHERE transaction_id IN (%s)" % ",".join("?" * len(rows)),
             [r["id"] for r in rows])} - {record["id"]}
     _upsert(s, headers, record)
     for old in old_ids:
         _upsert(s, headers, {"id": old, "deleted": True, "updatedAt": now_ms}, deleted=True)
     with connection() as conn:
         for old in old_ids:
-            conn.execute("DELETE FROM splits_links WHERE splits_id=?", (old,))
+            conn.execute("DELETE FROM expense_links WHERE expense_id=?", (old,))
         for r in rows:
             conn.execute(
-                "INSERT OR REPLACE INTO splits_links(transaction_id,splits_id,description,group_id,payer_id,amount_minor,created_at)"
+                "INSERT OR REPLACE INTO expense_links(transaction_id,expense_id,description,group_id,payer_id,amount_minor,created_at)"
                 " VALUES(?,?,?,?,?,?,?)",
                 (r["id"], record["id"], str(description or ""), group_id, payer_id, int(r["amount_minor"]), now_ms))
-            conn.execute("DELETE FROM splits_handled WHERE transaction_id=?", (r["id"],))
-    return {"status": "ok", "splitsId": record["id"], "description": record["description"],
+            conn.execute("DELETE FROM expense_handled WHERE transaction_id=?", (r["id"],))
+    return {"status": "ok", "expenseId": record["id"], "description": record["description"],
             "count": len(rows), "amountMinor": record["amount"]}
 
 
 def remove_expense(transaction_id, now_ms=None):
-    """Undo: mark the Splits expense deleted (the Splits app syncs the deletion) and unlink all its rows."""
+    """Undo: mark the Expense expense deleted (the Expense app syncs the deletion) and unlink all its rows."""
     s = settings()
     row = _canonical_row(transaction_id)
     if not row:
-        raise SplitsError("Transaction not found")
+        raise ExpenseError("Transaction not found")
     with connection() as conn:
-        link = conn.execute("SELECT splits_id FROM splits_links WHERE transaction_id=?", (row["id"],)).fetchone()
+        link = conn.execute("SELECT expense_id FROM expense_links WHERE transaction_id=?", (row["id"],)).fetchone()
     if not link:
         return {"status": "not_linked"}
     now_ms = now_ms or int(datetime.now(timezone.utc).timestamp() * 1000)
-    _upsert(s, _login(s), {"id": link["splits_id"], "deleted": True, "updatedAt": now_ms}, deleted=True)
+    _upsert(s, _login(s), {"id": link["expense_id"], "deleted": True, "updatedAt": now_ms}, deleted=True)
     with connection() as conn:
-        conn.execute("DELETE FROM splits_links WHERE splits_id=?", (link["splits_id"],))
+        conn.execute("DELETE FROM expense_links WHERE expense_id=?", (link["expense_id"],))
     return {"status": "removed"}
 
 
 def mark_handled(transaction_id, handled=True, now_ms=None):
-    """Keep a row out of the "not in Splits yet" list (entered by hand, or not meant for Splitwise)."""
+    """Keep a row out of the "not in Expense yet" list (entered by hand, or not meant for Splitwise)."""
     row = _canonical_row(transaction_id)
     if not row:
-        raise SplitsError("Transaction not found")
+        raise ExpenseError("Transaction not found")
     with connection() as conn:
         if handled:
-            conn.execute("INSERT OR REPLACE INTO splits_handled(transaction_id,created_at) VALUES(?,?)",
+            conn.execute("INSERT OR REPLACE INTO expense_handled(transaction_id,created_at) VALUES(?,?)",
                          (row["id"], now_ms or int(datetime.now(timezone.utc).timestamp() * 1000)))
         else:
-            conn.execute("DELETE FROM splits_handled WHERE transaction_id=?", (row["id"],))
+            conn.execute("DELETE FROM expense_handled WHERE transaction_id=?", (row["id"],))
     return {"status": "ok", "handled": bool(handled)}
 
 
@@ -302,15 +307,15 @@ def check(currency="INR", expenses=None):
     if not result["configured"]:
         return result
     try:
-        splits = fetch_expenses(s) if expenses is None else expenses
+        expense = fetch_expenses(s) if expenses is None else expenses
         linked_ids = set()
-        for e in splits:
+        for e in expense:
             linked_ids.update(e.get("ledgerIds") or ([e["ledgerId"]] if e.get("ledgerId") else []))
         with connection() as conn:
-            handled_ids = {r["transaction_id"] for r in conn.execute("SELECT transaction_id FROM splits_handled")}
+            handled_ids = {r["transaction_id"] for r in conn.execute("SELECT transaction_id FROM expense_handled")}
         linked, handled, missing = reconcile(
             eligible_rows(currency).values(), linked_ids, handled_ids, track_from_ms(s["from"]))
-    except Exception as e:  # a down or misconfigured Splits must never break the audit
+    except Exception as e:  # a down or misconfigured Expense must never break the audit
         result["error"] = str(e)[:200]
         return result
     result["matched"], result["handled"] = linked, handled

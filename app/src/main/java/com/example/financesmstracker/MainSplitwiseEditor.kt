@@ -6,7 +6,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.example.financesmstracker.integration.FinanceSyncClient
-import com.example.financesmstracker.integration.SplitsCheckText
+import com.example.financesmstracker.integration.ExpenseCheckText
 import com.example.financesmstracker.integration.SplitwiseChangesText
 import java.util.Locale
 
@@ -106,12 +106,12 @@ internal fun MainActivity.showSplitwiseChangesDialog() {
     oracleExecutor.execute {
         val client = FinanceSyncClient(this@showSplitwiseChangesDialog)
         val result = client.fetchSplitwiseChanges()
-        val splits = client.fetchSplitsCheck()
+        val expense = client.fetchExpenseCheck()
         runOnUiThread {
             result.onSuccess { changes ->
-                val splitsText = splits.getOrNull()?.let { SplitsCheckText.format(it, { m -> formatMinor(m) }) }
-                    ?: ("Splits check unavailable: " + (splits.exceptionOrNull()?.message ?: "unknown"))
-                val text = splitsText + "\n\n— — —\n\n" + SplitwiseChangesText.format(changes, { formatMinor(it) })
+                val expenseText = expense.getOrNull()?.let { ExpenseCheckText.format(it, { m -> formatMinor(m) }) }
+                    ?: ("Expense check unavailable: " + (expense.exceptionOrNull()?.message ?: "unknown"))
+                val text = expenseText + "\n\n— — —\n\n" + SplitwiseChangesText.format(changes, { formatMinor(it) })
                 val body = android.widget.TextView(this@showSplitwiseChangesDialog).apply {
                     this.text = text
                     setTextIsSelectable(true)

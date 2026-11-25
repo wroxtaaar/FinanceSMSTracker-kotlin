@@ -22,7 +22,7 @@ class TransactionAdapter(
     private val onClick: (Transaction) -> Unit
 ) : RecyclerView.Adapter<TransactionAdapter.TransactionViewHolder>() {
 
-    /** Long-press selects rows (to send several to Splits as one expense); taps then toggle. */
+    /** Long-press selects rows (to send several to Expense as one expense); taps then toggle. */
     private val selected = linkedSetOf<Long>()
     var onSelectionChanged: (Int) -> Unit = {}
 

@@ -1,7 +1,7 @@
-"""Ledger <-> Splits app bridge (synthetic data only; no network)."""
+"""Ledger <-> Expense app bridge (synthetic data only; no network)."""
 from app import db
 from app import ledger as L
-from app import splits_check as S
+from app import expense_check as S
 from tests.test_self_transfer import sms_debit
 
 SINCE = S.track_from_ms("2026-11-25")
@@ -44,10 +44,10 @@ def test_split_errors_are_clear():
     for group, payer in (({"id": "g", "members": [ME]}, ME), ({"id": "g", "members": [DAD]}, ME)):
         try:
             S.build_expense([tx("a", NOON, 100)], "x", group, payer, [], 1)
-        except S.SplitsError as e:
+        except S.ExpenseError as e:
             assert str(e)
         else:
-            raise AssertionError("expected SplitsError")
+            raise AssertionError("expected ExpenseError")
 
 
 def test_three_people_share_equally_without_losing_a_paisa():
@@ -65,13 +65,13 @@ def test_reconcile_lists_only_unlinked_unhandled_rows_since_the_start_date():
 
 
 def _configure(monkeypatch):
-    for k, v in {"SPLITS_SUPABASE_URL": "https://x.example", "SPLITS_SUPABASE_KEY": "k",
-                 "SPLITS_EMAIL": "bot@example.com", "SPLITS_PASSWORD": "pw"}.items():
+    for k, v in {"EXPENSE_SUPABASE_URL": "https://x.example", "EXPENSE_SUPABASE_KEY": "k",
+                 "EXPENSE_EMAIL": "bot@example.com", "EXPENSE_PASSWORD": "pw"}.items():
         monkeypatch.setenv(k, v)
 
 
-def test_add_then_check_end_to_end_with_a_fake_splits(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "splits.db"))
+def test_add_then_check_end_to_end_with_a_fake_expense(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "expense.db"))
     db.init_db()
     _configure(monkeypatch)
     L.set_balance("axis", "Axis", "INR", "BANK_ACCOUNT", "AXIS", "1111", 1_000_000)
@@ -100,33 +100,60 @@ def test_add_then_check_end_to_end_with_a_fake_splits(tmp_path, monkeypatch):
     S.mark_handled("sms:2")
     assert S.check()["missing"] == [] and S.check()["handled"] == 1
 
-    # deleting the expense inside Splits makes its rows show up as missing again
+    # deleting the expense inside Expense makes its rows show up as missing again
     store[expense["id"]]["deleted"] = True
     assert [m["id"] for m in S.check()["missing"]] == ["sms:1", "sms:0"]
 
-    # undo from the app deletes the Splits expense and unlinks every row
+    # undo from the app deletes the Expense expense and unlinks every row
     S.add_expense(["sms:0", "sms:1"], "chai", "g1", ME)
     assert S.remove_expense("sms:0")["status"] == "removed"
     assert S.link_info("sms:1")["linked"] is False
 
 
 def test_credits_and_unknown_rows_cannot_be_added(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "splits2.db"))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "expense2.db"))
     db.init_db()
     _configure(monkeypatch)
     try:
         S.add_expense(["nope"], "x", None, ME)
-    except S.SplitsError as e:
+    except S.ExpenseError as e:
         assert "not found" in str(e)
     else:
-        raise AssertionError("expected SplitsError")
+        raise AssertionError("expected ExpenseError")
 
 
-def test_check_is_quiet_when_not_configured_and_survives_a_splits_outage(monkeypatch):
-    for k in ("SPLITS_SUPABASE_URL", "SPLITS_SUPABASE_KEY", "SPLITS_EMAIL", "SPLITS_PASSWORD"):
+def test_check_is_quiet_when_not_configured_and_survives_a_expense_outage(monkeypatch):
+    for k in ("EXPENSE_SUPABASE_URL", "EXPENSE_SUPABASE_KEY", "EXPENSE_EMAIL", "EXPENSE_PASSWORD"):
         monkeypatch.delenv(k, raising=False)
     assert S.check()["configured"] is False
     _configure(monkeypatch)
-    monkeypatch.setattr(S, "fetch_expenses", lambda s=None: (_ for _ in ()).throw(S.SplitsError("Splits HTTP 503")))
+    monkeypatch.setattr(S, "fetch_expenses", lambda s=None: (_ for _ in ()).throw(S.ExpenseError("Expense HTTP 503")))
     out = S.check()
     assert out["configured"] and "503" in out["error"] and out["missing"] == []
+
+
+def test_the_old_splits_env_names_still_work(monkeypatch):
+    for k in ("SUPABASE_URL", "SUPABASE_KEY", "EMAIL", "PASSWORD"):
+        monkeypatch.delenv(f"EXPENSE_{k}", raising=False)
+        monkeypatch.setenv(f"SPLITS_{k}", "old")
+    assert S.configured() is True
+    monkeypatch.setenv("EXPENSE_EMAIL", "new")
+    assert S.settings()["email"] == "new" and S.settings()["key"] == "old"
+
+
+def test_old_splits_tables_are_carried_over(tmp_path, monkeypatch):
+    from app.db import connection
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "legacy.db"))
+    db.init_db()
+    with connection() as conn:
+        conn.execute("CREATE TABLE splits_links (transaction_id TEXT PRIMARY KEY, splits_id TEXT NOT NULL, description TEXT,"
+                     " group_id TEXT, payer_id TEXT, amount_minor INTEGER NOT NULL, created_at INTEGER NOT NULL)")
+        conn.execute("INSERT INTO splits_links VALUES('t1','led-1','chai','g','p',500,1)")
+        conn.execute("CREATE TABLE splits_handled (transaction_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL)")
+        conn.execute("INSERT INTO splits_handled VALUES('t2',2)")
+    db.init_db()
+    with connection() as conn:
+        assert conn.execute("SELECT expense_id FROM expense_links WHERE transaction_id='t1'").fetchone()[0] == "led-1"
+        assert conn.execute("SELECT 1 FROM expense_handled WHERE transaction_id='t2'").fetchone() is not None
+        names = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "splits_links" not in names and "splits_handled" not in names

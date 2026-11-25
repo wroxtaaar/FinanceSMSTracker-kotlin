@@ -16,12 +16,12 @@ import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.integration.FinanceSyncClient
 import com.example.financesmstracker.integration.OracleIds
-import com.example.financesmstracker.integration.SplitsLink
-import com.example.financesmstracker.integration.SplitsOptions
+import com.example.financesmstracker.integration.ExpenseLink
+import com.example.financesmstracker.integration.ExpenseOptions
 import com.example.financesmstracker.parser.TransactionType
 import java.util.Locale
 
-private const val SPLITS_PREFS = "splits_prefs"
+private const val EXPENSE_PREFS = "expense_prefs"
 private const val KEY_LAST_GROUP = "last_group"
 private const val KEY_LAST_PAYER = "last_payer"
 
@@ -31,13 +31,13 @@ private fun MainActivity.oracleIdOf(tx: Transaction): String =
 private fun rupees(minor: Long): String = "₹" + String.format(Locale.US, "%.2f", minor / 100.0)
 
 /** The server answers with {"detail": "..."}; show just the sentence. */
-internal fun friendlySplitsError(error: Throwable?): String {
+internal fun friendlyExpenseError(error: Throwable?): String {
     val message = error?.message ?: return "Unavailable"
     return Regex("\"detail\"\\s*:\\s*\"([^\"]*)\"").find(message)?.groupValues?.get(1) ?: message
 }
 
-/** Long-press rows in the history to select them; the bar sends them to Splits as one expense. */
-internal fun MainActivity.setupSplitsSelection() {
+/** Long-press rows in the history to select them; the bar sends them to Expense as one expense. */
+internal fun MainActivity.setupExpenseSelection() {
     val bar = findViewById<View>(R.id.selectionBar)
     val count = findViewById<TextView>(R.id.selectionCount)
     adapter.onSelectionChanged = { n ->
@@ -45,36 +45,36 @@ internal fun MainActivity.setupSplitsSelection() {
         val total = adapter.selectedTransactions().sumOf { it.amountPaise.toLong() }
         count.text = "$n selected · ${rupees(total)}"
     }
-    findViewById<Button>(R.id.selectionAddToSplits).setOnClickListener {
+    findViewById<Button>(R.id.selectionAddToExpense).setOnClickListener {
         val chosen = adapter.selectedTransactions()
-        if (chosen.isNotEmpty()) showAddToSplitsDialog(chosen)
+        if (chosen.isNotEmpty()) showAddToExpenseDialog(chosen)
     }
     findViewById<Button>(R.id.selectionCancel).setOnClickListener { adapter.clearSelection() }
 }
 
-/** "Add to Splits" / "Skip" buttons on a single transaction. Hidden unless the server says it can be added. */
-internal fun MainActivity.setupSplitsButtons(dialogView: View, tx: Transaction) {
+/** "Add to Expense" / "Skip" buttons on a single transaction. Hidden unless the server says it can be added. */
+internal fun MainActivity.setupExpenseButtons(dialogView: View, tx: Transaction) {
     if (tx.transactionType == TransactionType.CREDIT) return
-    val add = dialogView.findViewById<Button>(R.id.buttonAddToSplits)
-    val skip = dialogView.findViewById<Button>(R.id.buttonSplitsHandled)
+    val add = dialogView.findViewById<Button>(R.id.buttonAddToExpense)
+    val skip = dialogView.findViewById<Button>(R.id.buttonExpenseHandled)
     val id = oracleIdOf(tx)
 
-    fun render(link: SplitsLink) {
+    fun render(link: ExpenseLink) {
         if (!link.configured || !link.eligible) return
         add.visibility = View.VISIBLE
         add.text = when {
-            !link.linked -> "Add to Splits"
-            link.together > 1 -> "In Splits with ${link.together - 1} other transaction(s) · edit"
-            else -> "In Splits · edit"
+            !link.linked -> "Add to Expense"
+            link.together > 1 -> "In Expense with ${link.together - 1} other transaction(s) · edit"
+            else -> "In Expense · edit"
         }
         skip.visibility = if (link.linked) View.GONE else View.VISIBLE
-        skip.text = if (link.handled) "Skipped · tap to undo" else "Skip: already in Splits / not for Splits"
+        skip.text = if (link.handled) "Skipped · tap to undo" else "Skip: already in Expense / not for Expense"
         skip.setOnClickListener {
             skip.isEnabled = false
             oracleExecutor.execute {
-                val client = FinanceSyncClient(this@setupSplitsButtons)
-                client.markSplitsHandled(id, !link.handled)
-                val fresh = client.fetchSplitsLink(id).getOrNull()
+                val client = FinanceSyncClient(this@setupExpenseButtons)
+                client.markExpenseHandled(id, !link.handled)
+                val fresh = client.fetchExpenseLink(id).getOrNull()
                 runOnUiThread {
                     skip.isEnabled = true
                     fresh?.let { render(it) }
@@ -83,47 +83,47 @@ internal fun MainActivity.setupSplitsButtons(dialogView: View, tx: Transaction) 
         }
     }
 
-    add.setOnClickListener { showAddToSplitsDialog(listOf(tx)) }
+    add.setOnClickListener { showAddToExpenseDialog(listOf(tx)) }
     oracleExecutor.execute {
-        val link = FinanceSyncClient(this@setupSplitsButtons).fetchSplitsLink(id).getOrNull()
+        val link = FinanceSyncClient(this@setupExpenseButtons).fetchExpenseLink(id).getOrNull()
         runOnUiThread { link?.let { render(it) } }
     }
 }
 
-/** Asks the user what was bought, then adds one Splits expense for all [txs] (their total). */
-internal fun MainActivity.showAddToSplitsDialog(txs: List<Transaction>) {
+/** Asks the user what was bought, then adds one Expense expense for all [txs] (their total). */
+internal fun MainActivity.showAddToExpenseDialog(txs: List<Transaction>) {
     if (txs.any { it.transactionType == TransactionType.CREDIT }) {
-        Toast.makeText(this, "Only expenses can be added to Splits", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Only expenses can be added to Expense", Toast.LENGTH_SHORT).show()
         return
     }
     val ids = txs.map { oracleIdOf(it) }
     oracleExecutor.execute {
-        val client = FinanceSyncClient(this@showAddToSplitsDialog)
-        val options = client.fetchSplitsOptions()
-        val link = if (ids.size == 1) client.fetchSplitsLink(ids[0]).getOrNull() else null
+        val client = FinanceSyncClient(this@showAddToExpenseDialog)
+        val options = client.fetchExpenseOptions()
+        val link = if (ids.size == 1) client.fetchExpenseLink(ids[0]).getOrNull() else null
         runOnUiThread {
-            options.onSuccess { opts -> buildSplitsDialog(txs, ids, opts, link) }
+            options.onSuccess { opts -> buildExpenseDialog(txs, ids, opts, link) }
                 .onFailure {
                     Toast.makeText(
-                        this@showAddToSplitsDialog, "Splits unavailable: " + friendlySplitsError(it), Toast.LENGTH_LONG
+                        this@showAddToExpenseDialog, "Expense unavailable: " + friendlyExpenseError(it), Toast.LENGTH_LONG
                     ).show()
                 }
         }
     }
 }
 
-private fun MainActivity.buildSplitsDialog(
+private fun MainActivity.buildExpenseDialog(
     txs: List<Transaction>,
     ids: List<String>,
-    opts: SplitsOptions,
-    link: SplitsLink?
+    opts: ExpenseOptions,
+    link: ExpenseLink?
 ) {
     val users = opts.people.filter { it.isUser }.ifEmpty { opts.people }
     if (users.isEmpty()) {
-        Toast.makeText(this, "Splits has no people yet. Open the Splits app once.", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "The Expense app has no people yet. Open it once.", Toast.LENGTH_LONG).show()
         return
     }
-    val prefs = getSharedPreferences(SPLITS_PREFS, android.content.Context.MODE_PRIVATE)
+    val prefs = getSharedPreferences(EXPENSE_PREFS, android.content.Context.MODE_PRIVATE)
     val pad = (16 * resources.displayMetrics.density).toInt()
     val box = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -151,13 +151,13 @@ private fun MainActivity.buildSplitsDialog(
 
     val groupSpinner = Spinner(this).apply {
         adapter = ArrayAdapter(
-            this@buildSplitsDialog, android.R.layout.simple_spinner_dropdown_item,
+            this@buildExpenseDialog, android.R.layout.simple_spinner_dropdown_item,
             listOf("No group") + opts.groups.map { it.name }
         )
     }
     val payerSpinner = Spinner(this).apply {
         adapter = ArrayAdapter(
-            this@buildSplitsDialog, android.R.layout.simple_spinner_dropdown_item, users.map { it.name.ifBlank { "Someone" } }
+            this@buildExpenseDialog, android.R.layout.simple_spinner_dropdown_item, users.map { it.name.ifBlank { "Someone" } }
         )
     }
     val wantedGroup = link?.groupId ?: prefs.getString(KEY_LAST_GROUP, null)
@@ -172,11 +172,11 @@ private fun MainActivity.buildSplitsDialog(
 
     val linked = link?.linked == true
     val builder = AlertDialog.Builder(this)
-        .setTitle(if (linked) "Update in Splits" else "Add to Splits")
+        .setTitle(if (linked) "Update in Expense" else "Add to Expense")
         .setView(ScrollView(this).apply { addView(box) })
         .setNegativeButton("Cancel", null)
         .setPositiveButton(if (linked) "Update" else "Add", null)
-    if (linked) builder.setNeutralButton("Remove from Splits", null)
+    if (linked) builder.setNeutralButton("Remove from Expense", null)
     val dialog = builder.create()
 
     dialog.setOnShowListener {
@@ -186,17 +186,17 @@ private fun MainActivity.buildSplitsDialog(
             val text = items.text.toString()
             button.isEnabled = false
             oracleExecutor.execute {
-                val result = FinanceSyncClient(this@buildSplitsDialog).addToSplits(ids, text, group?.id, payer.id)
+                val result = FinanceSyncClient(this@buildExpenseDialog).addToExpense(ids, text, group?.id, payer.id)
                 runOnUiThread {
                     button.isEnabled = true
                     result.onSuccess {
                         prefs.edit().putString(KEY_LAST_GROUP, group?.id).putString(KEY_LAST_PAYER, payer.id).apply()
-                        Toast.makeText(this@buildSplitsDialog, "Added to Splits", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@buildExpenseDialog, "Added to Expense", Toast.LENGTH_SHORT).show()
                         dialog.dismiss()
                         adapter.clearSelection()
                     }.onFailure {
                         Toast.makeText(
-                            this@buildSplitsDialog, "Could not add: " + friendlySplitsError(it), Toast.LENGTH_LONG
+                            this@buildExpenseDialog, "Could not add: " + friendlyExpenseError(it), Toast.LENGTH_LONG
                         ).show()
                     }
                 }
@@ -205,14 +205,14 @@ private fun MainActivity.buildSplitsDialog(
         if (linked) {
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
                 oracleExecutor.execute {
-                    val result = FinanceSyncClient(this@buildSplitsDialog).removeFromSplits(ids[0])
+                    val result = FinanceSyncClient(this@buildExpenseDialog).removeFromExpense(ids[0])
                     runOnUiThread {
                         result.onSuccess {
-                            Toast.makeText(this@buildSplitsDialog, "Removed from Splits", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@buildExpenseDialog, "Removed from Expense", Toast.LENGTH_SHORT).show()
                             dialog.dismiss()
                         }.onFailure {
                             Toast.makeText(
-                                this@buildSplitsDialog, "Could not remove: " + friendlySplitsError(it), Toast.LENGTH_LONG
+                                this@buildExpenseDialog, "Could not remove: " + friendlyExpenseError(it), Toast.LENGTH_LONG
                             ).show()
                         }
                     }

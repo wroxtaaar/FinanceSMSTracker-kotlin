@@ -6,14 +6,14 @@ from pydantic import BaseModel, Field
 from .db import init_db
 from .ledger import *
 from .reconcile import reconcile_all
-from .splits_check import (
-    SplitsError,
-    add_expense as splits_add_expense,
-    check as splits_check,
-    link_info as splits_link_info,
-    mark_handled as splits_mark_handled,
-    options as splits_options,
-    remove_expense as splits_remove_expense,
+from .expense_check import (
+    ExpenseError,
+    add_expense as expense_add_expense,
+    check as expense_check,
+    link_info as expense_link_info,
+    mark_handled as expense_mark_handled,
+    options as expense_options,
+    remove_expense as expense_remove_expense,
 )
 from .splitwise import (
     create_for_transaction,
@@ -252,48 +252,54 @@ def get_receivables(currency:str="INR",x_sync_token:str=Header(default="")):
 def summary(currency:str="INR",x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return true_available(currency)
 
-class SplitsAddRequest(BaseModel):
+class ExpenseAddRequest(BaseModel):
     transactionIds:list[str]; description:str=""; groupId:Optional[str]=None; payerId:str
 
-class SplitsRefRequest(BaseModel):
+class ExpenseRefRequest(BaseModel):
     transactionId:str; handled:bool=True
 
-def _splits_call(fn,*args):
+def _expense_call(fn,*args):
     try:
         return fn(*args)
-    except SplitsError as e:
+    except ExpenseError as e:
         raise HTTPException(status_code=422,detail=str(e))
 
-@app.get("/api/v1/splits/options")
-def splits_options_api(x_sync_token:str=Header(default="")):
-    require_token(x_sync_token); return _splits_call(splits_options)
+@app.get("/api/v1/splits/options")  # old name, kept for the previous app build
+@app.get("/api/v1/expense/options")
+def expense_options_api(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return _expense_call(expense_options)
 
-@app.get("/api/v1/splits/link")
-def splits_link_api(transactionId:str,x_sync_token:str=Header(default="")):
-    require_token(x_sync_token); return splits_link_info(transactionId)
+@app.get("/api/v1/splits/link")  # old name, kept for the previous app build
+@app.get("/api/v1/expense/link")
+def expense_link_api(transactionId:str,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return expense_link_info(transactionId)
 
-@app.post("/api/v1/splits/add")
-def splits_add_api(payload:SplitsAddRequest,x_sync_token:str=Header(default="")):
+@app.post("/api/v1/splits/add")  # old name, kept for the previous app build
+@app.post("/api/v1/expense/add")
+def expense_add_api(payload:ExpenseAddRequest,x_sync_token:str=Header(default="")):
     require_token(x_sync_token)
-    return _splits_call(splits_add_expense,payload.transactionIds,payload.description,payload.groupId,payload.payerId)
+    return _expense_call(expense_add_expense,payload.transactionIds,payload.description,payload.groupId,payload.payerId)
 
-@app.post("/api/v1/splits/remove")
-def splits_remove_api(payload:SplitsRefRequest,x_sync_token:str=Header(default="")):
-    require_token(x_sync_token); return _splits_call(splits_remove_expense,payload.transactionId)
+@app.post("/api/v1/splits/remove")  # old name, kept for the previous app build
+@app.post("/api/v1/expense/remove")
+def expense_remove_api(payload:ExpenseRefRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return _expense_call(expense_remove_expense,payload.transactionId)
 
-@app.post("/api/v1/splits/handled")
-def splits_handled_api(payload:SplitsRefRequest,x_sync_token:str=Header(default="")):
-    require_token(x_sync_token); return _splits_call(splits_mark_handled,payload.transactionId,payload.handled)
+@app.post("/api/v1/splits/handled")  # old name, kept for the previous app build
+@app.post("/api/v1/expense/handled")
+def expense_handled_api(payload:ExpenseRefRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return _expense_call(expense_mark_handled,payload.transactionId,payload.handled)
 
-@app.get("/api/v1/splits/check")
-def splits_check_api(currency:str="INR",x_sync_token:str=Header(default="")):
-    require_token(x_sync_token); return splits_check(currency)
+@app.get("/api/v1/splits/check")  # old name, kept for the previous app build
+@app.get("/api/v1/expense/check")
+def expense_check_api(currency:str="INR",x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return expense_check(currency)
 
 @app.get("/api/v1/audit")
 def audit(recent:int=25,x_sync_token:str=Header(default="")):
     require_token(x_sync_token)
     result=ledger_audit(recent)
-    result["splitsCheck"]=splits_check("INR")
+    result["expenseCheck"]=expense_check("INR")
     return result
 
 @app.get("/api/v1/transactions")

@@ -183,18 +183,18 @@
             android:text="This was a credit card bill payment" />
 
         <Button
-            android:id="@+id/buttonAddToSplits"
+            android:id="@+id/buttonAddToExpense"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Add to Splits"
+            android:text="Add to Expense"
             android:visibility="gone" />
 
         <Button
-            android:id="@+id/buttonSplitsHandled"
+            android:id="@+id/buttonExpenseHandled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Skip: already in Splits / not for Splits"
+            android:text="Skip: already in Expense / not for Expense"
             android:visibility="gone" />
 
         <Button

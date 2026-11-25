@@ -313,7 +313,7 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
 
     setupForeignAmountSection(dialogView, tx)
     setupSalaryShareSection(dialogView, tx)
-    setupSplitsButtons(dialogView, tx)
+    setupExpenseButtons(dialogView, tx)
 
     detailTextType.text =
         "Type: ${tx.transactionType.name}"

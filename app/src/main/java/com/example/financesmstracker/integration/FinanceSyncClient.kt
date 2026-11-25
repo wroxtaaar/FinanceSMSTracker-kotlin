@@ -92,23 +92,23 @@ class FinanceSyncClient(
         return put("/api/v1/splitwise/manual-total", json.toString())
     }
 
-    /** Groups and people of the Splits app, for the "Add to Splits" pickers. */
-    fun fetchSplitsOptions(): Result<SplitsOptions> {
+    /** Groups and people of the Expense app, for the "Add to Expense" pickers. */
+    fun fetchExpenseOptions(): Result<ExpenseOptions> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
-        return get("/api/v1/splits/options").map { SplitsOptions.parse(JSONObject(it)) }
+        return get("/api/v1/expense/options").map { ExpenseOptions.parse(JSONObject(it)) }
     }
 
-    /** Whether this transaction can be added to Splits, and whether it already was or was skipped. */
-    fun fetchSplitsLink(transactionId: String): Result<SplitsLink> {
+    /** Whether this transaction can be added to Expense, and whether it already was or was skipped. */
+    fun fetchExpenseLink(transactionId: String): Result<ExpenseLink> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
         val id = java.net.URLEncoder.encode(transactionId, "UTF-8")
-        return get("/api/v1/splits/link?transactionId=$id").map { SplitsLink.parse(JSONObject(it)) }
+        return get("/api/v1/expense/link?transactionId=$id").map { ExpenseLink.parse(JSONObject(it)) }
     }
 
-    /** One Splits expense for one or more transactions (their total). */
-    fun addToSplits(transactionIds: List<String>, description: String, groupId: String?, payerId: String): Result<String> {
+    /** One Expense expense for one or more transactions (their total). */
+    fun addToExpense(transactionIds: List<String>, description: String, groupId: String?, payerId: String): Result<String> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
         val json = JSONObject().apply {
@@ -117,23 +117,23 @@ class FinanceSyncClient(
             if (groupId != null) put("groupId", groupId)
             put("payerId", payerId)
         }
-        return post("/api/v1/splits/add", json.toString())
+        return post("/api/v1/expense/add", json.toString())
     }
 
-    fun removeFromSplits(transactionId: String): Result<String> =
-        post("/api/v1/splits/remove", JSONObject().put("transactionId", transactionId).toString())
+    fun removeFromExpense(transactionId: String): Result<String> =
+        post("/api/v1/expense/remove", JSONObject().put("transactionId", transactionId).toString())
 
-    fun markSplitsHandled(transactionId: String, handled: Boolean): Result<String> =
+    fun markExpenseHandled(transactionId: String, handled: Boolean): Result<String> =
         post(
-            "/api/v1/splits/handled",
+            "/api/v1/expense/handled",
             JSONObject().put("transactionId", transactionId).put("handled", handled).toString()
         )
 
-    /** Ledger expenses with no matching expense in the Splits app, and Splits expenses with no ledger row. */
-    fun fetchSplitsCheck(): Result<SplitsCheck> {
+    /** Ledger expenses with no matching expense in the Expense app, and Expense expenses with no ledger row. */
+    fun fetchExpenseCheck(): Result<ExpenseCheck> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
-        return get("/api/v1/splits/check?currency=INR").map { body -> SplitsCheck.parse(JSONObject(body)) }
+        return get("/api/v1/expense/check?currency=INR").map { body -> ExpenseCheck.parse(JSONObject(body)) }
     }
 
     /** Rows counted toward Splitwise since the total was last set, for comparing with the Splitwise app. */
@@ -528,30 +528,30 @@ data class SplitwiseChangeItem(
     val deltaMinor: Long
 )
 
-data class SplitsGroup(val id: String, val name: String, val members: List<String>)
-data class SplitsPerson(val id: String, val name: String, val isUser: Boolean)
+data class ExpenseGroup(val id: String, val name: String, val members: List<String>)
+data class ExpensePerson(val id: String, val name: String, val isUser: Boolean)
 
-data class SplitsOptions(val groups: List<SplitsGroup>, val people: List<SplitsPerson>) {
+data class ExpenseOptions(val groups: List<ExpenseGroup>, val people: List<ExpensePerson>) {
     companion object {
-        fun parse(json: JSONObject): SplitsOptions {
+        fun parse(json: JSONObject): ExpenseOptions {
             val groups = json.optJSONArray("groups")
             val people = json.optJSONArray("people")
-            return SplitsOptions(
+            return ExpenseOptions(
                 groups = (0 until (groups?.length() ?: 0)).map { i ->
                     val g = groups!!.getJSONObject(i)
                     val members = g.optJSONArray("members")
-                    SplitsGroup(g.getString("id"), g.optString("name"), (0 until (members?.length() ?: 0)).map { members!!.getString(it) })
+                    ExpenseGroup(g.getString("id"), g.optString("name"), (0 until (members?.length() ?: 0)).map { members!!.getString(it) })
                 },
                 people = (0 until (people?.length() ?: 0)).map { i ->
                     val p = people!!.getJSONObject(i)
-                    SplitsPerson(p.getString("id"), p.optString("name"), p.optBoolean("isUser", false))
+                    ExpensePerson(p.getString("id"), p.optString("name"), p.optBoolean("isUser", false))
                 }
             )
         }
     }
 }
 
-data class SplitsLink(
+data class ExpenseLink(
     val configured: Boolean,
     val eligible: Boolean,
     val linked: Boolean,
@@ -562,9 +562,9 @@ data class SplitsLink(
     val together: Int
 ) {
     companion object {
-        fun parse(json: JSONObject): SplitsLink {
+        fun parse(json: JSONObject): ExpenseLink {
             fun text(key: String) = if (json.isNull(key)) null else json.optString(key).takeIf { it.isNotBlank() }
-            return SplitsLink(
+            return ExpenseLink(
                 configured = json.optBoolean("configured", false),
                 eligible = json.optBoolean("eligible", false),
                 linked = json.optBoolean("linked", false),
@@ -578,28 +578,28 @@ data class SplitsLink(
     }
 }
 
-/** One expense on either side of the ledger / Splits comparison. */
-data class SplitsCheckItem(val timestamp: Long, val label: String, val amountMinor: Long)
+/** One expense on either side of the ledger / Expense comparison. */
+data class ExpenseCheckItem(val timestamp: Long, val label: String, val amountMinor: Long)
 
-data class SplitsCheck(
+data class ExpenseCheck(
     val configured: Boolean,
     val error: String?,
     val since: String,
     val matched: Int,
     val handled: Int,
-    val missing: List<SplitsCheckItem>
+    val missing: List<ExpenseCheckItem>
 ) {
     companion object {
-        fun parse(json: JSONObject): SplitsCheck {
+        fun parse(json: JSONObject): ExpenseCheck {
             fun clean(v: String?) = v?.trim()?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
-            fun items(name: String, stamp: (JSONObject) -> Long, label: (JSONObject) -> String): List<SplitsCheckItem> {
+            fun items(name: String, stamp: (JSONObject) -> Long, label: (JSONObject) -> String): List<ExpenseCheckItem> {
                 val array = json.optJSONArray(name) ?: return emptyList()
                 return (0 until array.length()).map { i ->
                     val o = array.getJSONObject(i)
-                    SplitsCheckItem(stamp(o), label(o), o.optLong("amountMinor", 0))
+                    ExpenseCheckItem(stamp(o), label(o), o.optLong("amountMinor", 0))
                 }
             }
-            return SplitsCheck(
+            return ExpenseCheck(
                 configured = json.optBoolean("configured", false),
                 error = if (json.isNull("error")) null else json.optString("error"),
                 since = json.optString("since"),
