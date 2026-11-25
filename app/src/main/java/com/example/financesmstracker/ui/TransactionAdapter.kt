@@ -22,6 +22,25 @@ class TransactionAdapter(
     private val onClick: (Transaction) -> Unit
 ) : RecyclerView.Adapter<TransactionAdapter.TransactionViewHolder>() {
 
+    /** Long-press selects rows (to send several to Splits as one expense); taps then toggle. */
+    private val selected = linkedSetOf<Long>()
+    var onSelectionChanged: (Int) -> Unit = {}
+
+    fun selectedTransactions(): List<Transaction> = transactions.filter { it.id in selected }
+
+    fun clearSelection() {
+        if (selected.isEmpty()) return
+        selected.clear()
+        notifyDataSetChanged()
+        onSelectionChanged(0)
+    }
+
+    private fun toggle(tx: Transaction) {
+        if (!selected.remove(tx.id)) selected.add(tx.id)
+        notifyDataSetChanged()
+        onSelectionChanged(selected.size)
+    }
+
     /** Rupee amounts Oracle holds for foreign spends, keyed by local row id. */
     private var foreignAmounts: Map<Long, FinanceSyncClient.ForeignAmountInfo> = emptyMap()
 
@@ -31,6 +50,7 @@ class TransactionAdapter(
     }
 
     class TransactionViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val defaultCardColor = (view as? androidx.cardview.widget.CardView)?.cardBackgroundColor
         val textViewMerchant: TextView = view.findViewById(R.id.textViewMerchant)
         val textViewAmount: TextView = view.findViewById(R.id.textViewAmount)
         val textViewCategory: TextView = view.findViewById(R.id.textViewCategory)
@@ -98,13 +118,20 @@ class TransactionAdapter(
         val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
         holder.textViewDateTime.text = sdf.format(Date(tx.timestamp))
 
-        holder.itemView.setOnClickListener { onClick(tx) }
+        (holder.itemView as? androidx.cardview.widget.CardView)?.let { card ->
+            if (tx.id in selected) card.setCardBackgroundColor(Color.parseColor("#667E57C2"))
+            else holder.defaultCardColor?.let { card.setCardBackgroundColor(it) }
+        }
+        holder.itemView.setOnClickListener { if (selected.isEmpty()) onClick(tx) else toggle(tx) }
+        holder.itemView.setOnLongClickListener { toggle(tx); true }
     }
 
     override fun getItemCount(): Int = transactions.size
 
     fun updateData(newTransactions: List<Transaction>) {
         transactions = newTransactions
+        val ids = newTransactions.map { it.id }.toSet()
+        if (selected.retainAll(ids)) onSelectionChanged(selected.size)
         notifyDataSetChanged()
     }
 }

@@ -6,7 +6,15 @@ from pydantic import BaseModel, Field
 from .db import init_db
 from .ledger import *
 from .reconcile import reconcile_all
-from .splits_check import check as splits_check
+from .splits_check import (
+    SplitsError,
+    add_expense as splits_add_expense,
+    check as splits_check,
+    link_info as splits_link_info,
+    mark_handled as splits_mark_handled,
+    options as splits_options,
+    remove_expense as splits_remove_expense,
+)
 from .splitwise import (
     create_for_transaction,
     enabled as splitwise_enabled,
@@ -243,6 +251,39 @@ def get_receivables(currency:str="INR",x_sync_token:str=Header(default="")):
 @app.get("/api/v1/summary")
 def summary(currency:str="INR",x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return true_available(currency)
+
+class SplitsAddRequest(BaseModel):
+    transactionIds:list[str]; description:str=""; groupId:Optional[str]=None; payerId:str
+
+class SplitsRefRequest(BaseModel):
+    transactionId:str; handled:bool=True
+
+def _splits_call(fn,*args):
+    try:
+        return fn(*args)
+    except SplitsError as e:
+        raise HTTPException(status_code=422,detail=str(e))
+
+@app.get("/api/v1/splits/options")
+def splits_options_api(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return _splits_call(splits_options)
+
+@app.get("/api/v1/splits/link")
+def splits_link_api(transactionId:str,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return splits_link_info(transactionId)
+
+@app.post("/api/v1/splits/add")
+def splits_add_api(payload:SplitsAddRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    return _splits_call(splits_add_expense,payload.transactionIds,payload.description,payload.groupId,payload.payerId)
+
+@app.post("/api/v1/splits/remove")
+def splits_remove_api(payload:SplitsRefRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return _splits_call(splits_remove_expense,payload.transactionId)
+
+@app.post("/api/v1/splits/handled")
+def splits_handled_api(payload:SplitsRefRequest,x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return _splits_call(splits_mark_handled,payload.transactionId,payload.handled)
 
 @app.get("/api/v1/splits/check")
 def splits_check_api(currency:str="INR",x_sync_token:str=Header(default="")):

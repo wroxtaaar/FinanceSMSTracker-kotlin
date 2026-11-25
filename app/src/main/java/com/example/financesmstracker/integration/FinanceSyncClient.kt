@@ -92,6 +92,43 @@ class FinanceSyncClient(
         return put("/api/v1/splitwise/manual-total", json.toString())
     }
 
+    /** Groups and people of the Splits app, for the "Add to Splits" pickers. */
+    fun fetchSplitsOptions(): Result<SplitsOptions> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return get("/api/v1/splits/options").map { SplitsOptions.parse(JSONObject(it)) }
+    }
+
+    /** Whether this transaction can be added to Splits, and whether it already was or was skipped. */
+    fun fetchSplitsLink(transactionId: String): Result<SplitsLink> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        val id = java.net.URLEncoder.encode(transactionId, "UTF-8")
+        return get("/api/v1/splits/link?transactionId=$id").map { SplitsLink.parse(JSONObject(it)) }
+    }
+
+    /** One Splits expense for one or more transactions (their total). */
+    fun addToSplits(transactionIds: List<String>, description: String, groupId: String?, payerId: String): Result<String> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        val json = JSONObject().apply {
+            put("transactionIds", org.json.JSONArray(transactionIds))
+            put("description", description)
+            if (groupId != null) put("groupId", groupId)
+            put("payerId", payerId)
+        }
+        return post("/api/v1/splits/add", json.toString())
+    }
+
+    fun removeFromSplits(transactionId: String): Result<String> =
+        post("/api/v1/splits/remove", JSONObject().put("transactionId", transactionId).toString())
+
+    fun markSplitsHandled(transactionId: String, handled: Boolean): Result<String> =
+        post(
+            "/api/v1/splits/handled",
+            JSONObject().put("transactionId", transactionId).put("handled", handled).toString()
+        )
+
     /** Ledger expenses with no matching expense in the Splits app, and Splits expenses with no ledger row. */
     fun fetchSplitsCheck(): Result<SplitsCheck> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
@@ -491,6 +528,56 @@ data class SplitwiseChangeItem(
     val deltaMinor: Long
 )
 
+data class SplitsGroup(val id: String, val name: String, val members: List<String>)
+data class SplitsPerson(val id: String, val name: String, val isUser: Boolean)
+
+data class SplitsOptions(val groups: List<SplitsGroup>, val people: List<SplitsPerson>) {
+    companion object {
+        fun parse(json: JSONObject): SplitsOptions {
+            val groups = json.optJSONArray("groups")
+            val people = json.optJSONArray("people")
+            return SplitsOptions(
+                groups = (0 until (groups?.length() ?: 0)).map { i ->
+                    val g = groups!!.getJSONObject(i)
+                    val members = g.optJSONArray("members")
+                    SplitsGroup(g.getString("id"), g.optString("name"), (0 until (members?.length() ?: 0)).map { members!!.getString(it) })
+                },
+                people = (0 until (people?.length() ?: 0)).map { i ->
+                    val p = people!!.getJSONObject(i)
+                    SplitsPerson(p.getString("id"), p.optString("name"), p.optBoolean("isUser", false))
+                }
+            )
+        }
+    }
+}
+
+data class SplitsLink(
+    val configured: Boolean,
+    val eligible: Boolean,
+    val linked: Boolean,
+    val handled: Boolean,
+    val description: String?,
+    val groupId: String?,
+    val payerId: String?,
+    val together: Int
+) {
+    companion object {
+        fun parse(json: JSONObject): SplitsLink {
+            fun text(key: String) = if (json.isNull(key)) null else json.optString(key).takeIf { it.isNotBlank() }
+            return SplitsLink(
+                configured = json.optBoolean("configured", false),
+                eligible = json.optBoolean("eligible", false),
+                linked = json.optBoolean("linked", false),
+                handled = json.optBoolean("handled", false),
+                description = text("description"),
+                groupId = text("groupId"),
+                payerId = text("payerId"),
+                together = json.optInt("together", 0)
+            )
+        }
+    }
+}
+
 /** One expense on either side of the ledger / Splits comparison. */
 data class SplitsCheckItem(val timestamp: Long, val label: String, val amountMinor: Long)
 
@@ -499,8 +586,8 @@ data class SplitsCheck(
     val error: String?,
     val since: String,
     val matched: Int,
-    val missing: List<SplitsCheckItem>,
-    val extra: List<SplitsCheckItem>
+    val handled: Int,
+    val missing: List<SplitsCheckItem>
 ) {
     companion object {
         fun parse(json: JSONObject): SplitsCheck {
@@ -517,11 +604,11 @@ data class SplitsCheck(
                 error = if (json.isNull("error")) null else json.optString("error"),
                 since = json.optString("since"),
                 matched = json.optInt("matched", 0),
+                handled = json.optInt("handled", 0),
                 missing = items("missing", { it.optLong("timestamp") }, {
                     (clean(it.optString("description")) ?: it.optString("bank")) +
                         (it.optString("last4").takeIf { l -> l.isNotBlank() && l != "null" }?.let { l -> " ·$l" } ?: "")
-                }),
-                extra = items("extra", { 0L }, { (clean(it.optString("description")) ?: "") + "  " + it.optString("date") })
+                })
             )
         }
     }

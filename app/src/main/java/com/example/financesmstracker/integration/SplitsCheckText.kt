@@ -10,17 +10,13 @@ object SplitsCheckText {
         if (!check.configured) return "Splits app is not connected to the server yet."
         if (check.error != null) return "Could not read the Splits app: ${check.error}"
         val lines = mutableListOf<String>()
+        val done = "${check.matched} in Splits" + if (check.handled > 0) ", ${check.handled} skipped" else ""
         if (check.missing.isEmpty()) {
-            lines += "Everything since ${check.since} is in Splits (${check.matched} matched)."
+            lines += "Everything since ${check.since} is in Splits ($done)."
         } else {
             lines += "NOT IN SPLITS YET (${check.missing.size}), total ${money(check.missing.sumOf { it.amountMinor })}"
             check.missing.forEach { lines += "${date(it.timestamp)}  ${money(it.amountMinor)}  ${it.label}" }
-            lines += "${check.matched} others are matched."
-        }
-        if (check.extra.isNotEmpty()) {
-            lines += ""
-            lines += "IN SPLITS, NOT IN THE APP (${check.extra.size}) — cash, or the app missed it"
-            check.extra.forEach { lines += "${money(it.amountMinor)}  ${it.label}" }
+            lines += done + "."
         }
         return lines.joinToString("\n")
     }

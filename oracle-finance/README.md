@@ -33,7 +33,7 @@ Bank accounts are summed as cash; credit-card accounts are summed as liabilities
 A transfer is only linked when both events are bank-account transactions, directions are opposite, amount/currency are identical, timestamps are within 10 minutes, and the accounts are distinct. It is deliberately conservative.
 
 ## Splitwise
-Splits check: with the SPLITS_* values set (see .env.example) the server reads the personal Splits app and `GET /api/v1/splits/check` lists ledger expenses that have no matching Splits expense (same amount, dates within 2 days, one-to-one) and Splits expenses with no ledger row. The Audit and the phone's Splitwise check dialog show it. It is read-only.
+Splits (the personal two-person expense app on Supabase): with the SPLITS_* values set (see .env.example) the phone can send transactions to it. Open a transaction and tap "Add to Splits", or long-press several rows in the history to add them as ONE expense (their total). The text typed under "What was bought" becomes the expense description; the expense remembers its ledger rows (`ledgerIds`), so nothing is guessed from amounts. `GET /api/v1/splits/check` (also in the Audit and the phone's Splitwise check dialog) lists the Splitwise-eligible rows since SPLITS_TRACK_FROM that are not in Splits and not marked "Skip".
 
 Splitwise is optional. Set SPLITWISE_ACCESS_TOKEN and enable it. Add a merchant rule before automatic expense creation. Transactions without a rule are not automatically pushed. The receivables endpoint exposes only positive balances owed to you; those open receivables are included in true available.
 

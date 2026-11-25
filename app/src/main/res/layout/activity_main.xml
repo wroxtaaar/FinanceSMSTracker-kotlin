@@ -284,6 +284,8 @@
         android:id="@+id/recyclerViewTransactions"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:clipToPadding="false"
+        android:paddingBottom="72dp"
         android:layout_marginTop="12dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
@@ -302,5 +304,39 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="@id/recyclerViewTransactions" />
+
+    <LinearLayout
+        android:id="@+id/selectionBar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="#FF4527A0"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <TextView
+            android:id="@+id/selectionCount"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#FFFFFFFF"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/selectionAddToSplits"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Add to Splits" />
+
+        <Button
+            android:id="@+id/selectionCancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Cancel" />
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

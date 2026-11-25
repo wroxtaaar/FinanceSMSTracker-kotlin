@@ -31,6 +31,13 @@ CREATE TABLE IF NOT EXISTS splitwise_baseline_rows (
   currency TEXT NOT NULL, transaction_id TEXT NOT NULL, delta_minor INTEGER NOT NULL,
   PRIMARY KEY(currency, transaction_id)
 );
+CREATE TABLE IF NOT EXISTS splits_links (
+  transaction_id TEXT PRIMARY KEY, splits_id TEXT NOT NULL, description TEXT,
+  group_id TEXT, payer_id TEXT, amount_minor INTEGER NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS splits_handled (
+  transaction_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS manual_splitwise_total (
   currency TEXT PRIMARY KEY, amount_minor INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
 );

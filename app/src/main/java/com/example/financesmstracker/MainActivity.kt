@@ -193,6 +193,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         recyclerView.adapter = adapter
+        setupSplitsSelection()
 
         buttonOpenNotificationSettings.setOnClickListener {
             val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
