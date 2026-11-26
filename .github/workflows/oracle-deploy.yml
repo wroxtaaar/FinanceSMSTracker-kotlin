@@ -50,6 +50,7 @@ jobs:
           script: |
             set -e
             cd ~/FinanceSMSTracker-kotlin
+            mkdir -p oracle-finance/app-release
             git fetch origin main
             git reset --hard origin/main
             echo "Deployed commit on VPS:"

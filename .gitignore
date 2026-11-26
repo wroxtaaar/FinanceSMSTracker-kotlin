@@ -18,3 +18,4 @@ local.properties
 /finance-release.jks
 __pycache__/
 *.pyc
+oracle-finance/app-release/

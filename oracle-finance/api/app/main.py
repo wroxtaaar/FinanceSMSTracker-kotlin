@@ -2,6 +2,7 @@ import hmac, os
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from .db import init_db
 from .ledger import *
@@ -22,6 +23,7 @@ from .splitwise import (
     groups as splitwise_groups,
     sync_receivables,
 )
+from . import app_release
 from .sheets_snapshot import get_snapshot
 from .gmail_auth import (
     auth_url as gmail_auth_url,
@@ -109,6 +111,20 @@ def require_token(token:str):
     expected=os.getenv("SYNC_API_TOKEN","").strip()
     if not expected or not token or not hmac.compare_digest(token,expected):
         raise HTTPException(status_code=401,detail="unauthorized")
+
+@app.get("/api/v1/app/version")
+def app_version(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    info=app_release.latest()
+    if not info: raise HTTPException(status_code=404,detail="no build published")
+    return info
+
+@app.get("/api/v1/app/apk")
+def app_apk(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token)
+    path=app_release.apk_path()
+    if not path: raise HTTPException(status_code=404,detail="no build published")
+    return FileResponse(path,media_type="application/vnd.android.package-archive",filename="FinanceApp.apk")
 
 @app.get("/health")
 def health(): return {"status":"ok","service":"oracle-finance","version":"1.0.0"}

@@ -290,6 +290,7 @@ internal fun MainActivity.showOracleSettingsDialog() {
         .setMessage("Use your private Tailscale/Serve URL. The token is stored only in this app's private preferences.")
         .setView(container)
         .setNegativeButton("Cancel", null)
+        .setNeutralButton("Check app update") { _, _ -> AppUpdateChecker.checkNow(this) }
         .setPositiveButton("Save & Test", null)
         .create()
 

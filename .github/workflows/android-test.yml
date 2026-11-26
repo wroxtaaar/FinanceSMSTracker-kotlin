@@ -83,3 +83,47 @@ jobs:
           serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           groups: testers
           file: FinanceApp.apk
+
+      # The in-app updater downloads from the private Oracle server (not a public link, because the APK
+      # embeds the sync token). The APK goes first and version.json last, so the app never sees a new
+      # version number before its file is complete.
+      - name: Prepare Oracle release folder
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          script: mkdir -p ~/FinanceSMSTracker-kotlin/oracle-finance/app-release
+
+      - name: Upload APK to Oracle
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          source: FinanceApp.apk
+          target: FinanceSMSTracker-kotlin/oracle-finance/app-release
+
+      - name: Publish version to Oracle
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          printf '{"versionCode": %s, "versionName": "1.0.%s", "sha256": "%s"}\n' \
+            "$VERSION_CODE" "$VERSION_CODE" "$(sha256sum FinanceApp.apk | cut -d' ' -f1)" > version.json
+          cat version.json
+
+      - name: Upload version.json to Oracle
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          port: ${{ secrets.ORACLE_SSH_PORT || '22' }}
+          source: version.json
+          target: FinanceSMSTracker-kotlin/oracle-finance/app-release
