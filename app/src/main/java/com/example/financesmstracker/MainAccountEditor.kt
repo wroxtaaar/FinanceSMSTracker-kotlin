@@ -6,11 +6,15 @@ import android.widget.ProgressBar
 import com.example.financesmstracker.ui.HomeFormat
 import android.graphics.Color
 import android.text.InputType
+import android.view.Gravity
+import android.view.View
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.example.financesmstracker.integration.EmiNote
 import com.example.financesmstracker.integration.FinanceSyncClient
 import com.example.financesmstracker.integration.OracleAccount
 import com.example.financesmstracker.util.MoneyInput
@@ -134,13 +138,172 @@ private class CardRow(
     val account: OracleAccount,
     val bill: EditText,
     val active: EditText,
-    val limit: EditText,
-    val dueDay: EditText
+    /** Usage bar + due date; rebuilt whenever the card's limit, due day or sharing changes. */
+    val summary: LinearLayout
 )
 
-private const val CARD_META_PREFS = "card_meta"
+private fun MainActivity.cardMeta() = CardMeta(getSharedPreferences("card_meta", android.content.Context.MODE_PRIVATE))
 
-private fun MainActivity.cardMeta() = getSharedPreferences(CARD_META_PREFS, android.content.Context.MODE_PRIVATE)
+private fun MainActivity.cardTitle(account: OracleAccount) = buildString {
+    append(displayAccountName(account.name))
+    account.last4?.let { append("  ••••").append(it) }
+}
+
+/**
+ * Usage bar with the due date on the right. Cards that share one combined limit show the COMBINED
+ * usage: the lighter bar is everything on the shared limit, the solid part is this card's own share.
+ */
+private fun MainActivity.renderCardSummary(
+    container: LinearLayout,
+    account: OracleAccount,
+    accounts: List<OracleAccount>,
+    meta: CardMeta
+) {
+    container.removeAllViews()
+    val group = meta.sharedWith(account.id, accounts.map { it.id }).let { ids -> accounts.filter { it.id in ids } }
+    val shared = group.size > 1
+    val limitMinor = meta.limitMinor(account.id)
+    val dueDay = meta.dueDay(account.id)
+    val own = account.balanceMinor.coerceAtLeast(0L)
+    val combined = group.sumOf { it.balanceMinor.coerceAtLeast(0L) }
+
+    var usage: String? = null
+    if (limitMinor > 0) {
+        val ownPercent = HomeFormat.utilisationPercent(own, limitMinor)
+        val groupPercent = HomeFormat.utilisationPercent(combined, limitMinor)
+        container.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = ownPercent
+            secondaryProgress = groupPercent
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(8))
+        })
+        usage = if (shared) {
+            "${formatMinor(combined)} of ${formatMinor(limitMinor)} shared ($groupPercent%)"
+        } else {
+            "${formatMinor(own)} of ${formatMinor(limitMinor)} used ($ownPercent%)"
+        }
+    }
+
+    var dueText: String? = null
+    var dueUrgent = false
+    if (dueDay in 1..31) {
+        if (account.billBalanceMinor > 0) {
+            val days = HomeFormat.daysUntilDue(dueDay, System.currentTimeMillis())
+            dueText = when (days) {
+                0 -> "Due today"
+                1 -> "Due tomorrow"
+                else -> "Due in $days days"
+            }
+            dueUrgent = days <= 3
+        } else {
+            dueText = "Due ${EmiNote.ordinal(dueDay)}"
+        }
+    }
+
+    val usageLine = usage
+    val dueLine = dueText
+    if (usageLine != null || dueLine != null) {
+        container.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(2), 0, 0)
+            addView(
+                if (usageLine != null) caption(usageLine) else View(context),
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            if (dueLine != null) {
+                addView(TextView(context).apply {
+                    text = dueLine
+                    textSize = 12f
+                    gravity = Gravity.END
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    if (dueUrgent) setTextColor(Color.parseColor("#D64545"))
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { marginStart = dp(8) })
+            }
+        })
+    }
+    if (shared) {
+        val names = group.filter { it.id != account.id }.joinToString(", ") {
+            displayAccountName(it.name) + (it.last4?.let { l4 -> " ••$l4" } ?: "")
+        }
+        container.addView(caption("One limit shared with $names"))
+    }
+}
+
+/** Opens when the card name is tapped, so limit, due day and sharing take no space until needed. */
+private fun MainActivity.showCardSettingsDialog(
+    account: OracleAccount,
+    accounts: List<OracleAccount>,
+    meta: CardMeta,
+    onSaved: () -> Unit
+) {
+    val currentLimit = meta.limitMinor(account.id)
+    val limit = amountInput("Credit limit (optional)", currentLimit).apply {
+        if (currentLimit == 0L) setText("")
+    }
+    val due = EditText(this).apply {
+        inputType = InputType.TYPE_CLASS_NUMBER
+        setSingleLine(true)
+        hint = "1-31"
+        meta.dueDay(account.id).takeIf { it > 0 }?.let { setText(it.toString()) }
+    }
+    val others = accounts.filter { it.id != account.id }
+    val sharedNow = meta.sharedWith(account.id, accounts.map { it.id })
+    val checks = others.map { other ->
+        other to CheckBox(this).apply {
+            text = displayAccountName(other.name) + (other.last4?.let { "  ••••$it" } ?: "")
+            isChecked = other.id in sharedNow
+        }
+    }
+
+    val content = dialogContent {
+        addView(caption("Credit limit"))
+        addView(limit)
+        addView(caption("Bill due day").apply { setPadding(0, dp(12), 0, 0) })
+        addView(due)
+        if (checks.isNotEmpty()) {
+            addView(caption("Shares one combined limit with").apply { setPadding(0, dp(16), 0, 0) })
+            checks.forEach { (_, box) -> addView(box) }
+            addView(caption("Tick cards that have a single limit between them. Enter the combined limit above."))
+        }
+    }
+
+    val dialog = MaterialAlertDialogBuilder(this)
+        .setTitle(cardTitle(account))
+        .setView(content)
+        .setNegativeButton("Cancel", null)
+        .setPositiveButton("Save", null)
+        .create()
+
+    dialog.setOnShowListener {
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val limitText = limit.text.toString().trim()
+            val limitMinor = if (limitText.isEmpty()) 0L else MoneyInput.parseMinor(limitText)
+            if (limitMinor == null) {
+                limit.error = "Enter a valid limit"
+                limit.requestFocus()
+                return@setOnClickListener
+            }
+            val dueText = due.text.toString().trim()
+            val dueDay = if (dueText.isEmpty()) 0 else dueText.toIntOrNull()
+            if (dueDay == null || (dueDay != 0 && dueDay !in 1..31)) {
+                due.error = "Use a day from 1 to 31"
+                due.requestFocus()
+                return@setOnClickListener
+            }
+            // Limit, due day and sharing are kept on this phone only; the server never needs them.
+            meta.save(
+                account.id, limitMinor, dueDay,
+                checks.filter { it.second.isChecked }.map { it.first.id }.toSet(),
+                accounts.map { it.id }
+            )
+            dialog.dismiss()
+            onSaved()
+        }
+    }
+    dialog.show()
+}
 
 private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, title: String) {
     val meta = cardMeta()
@@ -152,49 +315,21 @@ private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, ti
             account,
             amountInput("Bill", billMinor),
             amountInput("Active spend", account.balanceMinor - billMinor, signed = true),
-            amountInput("Credit limit (optional)", meta.getLong("limit_" + account.id, 0L)).apply {
-                if (meta.getLong("limit_" + account.id, 0L) == 0L) setText("")
-            },
-            EditText(this).apply {
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setSingleLine(true)
-                hint = "1-31"
-                val d = meta.getInt("due_" + account.id, 0)
-                if (d in 1..31) setText(d.toString())
-            }
+            LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         )
     }
+
+    fun renderSummaries() = rows.forEach { renderCardSummary(it.summary, it.account, accounts, meta) }
 
     val scrollView = dialogContent {
         rows.forEach { row ->
             addView(tile {
-                addView(accountLabel(row.account, 0, 4))
-
-                val outstanding = row.account.balanceMinor
-                val limitMinor = meta.getLong("limit_" + row.account.id, 0L)
-                if (limitMinor > 0) {
-                    val percent = HomeFormat.utilisationPercent(outstanding, limitMinor)
-                    addView(ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-                        max = 100
-                        progress = percent
-                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(8))
-                    })
-                    addView(caption("${formatMinor(maxOf(outstanding, 0))} of ${formatMinor(limitMinor)} used ($percent%)"))
-                }
-                val dueDay = meta.getInt("due_" + row.account.id, 0)
-                if (dueDay in 1..31 && row.account.billBalanceMinor > 0) {
-                    val days = HomeFormat.daysUntilDue(dueDay, System.currentTimeMillis())
-                    addView(TextView(context).apply {
-                        text = when (days) {
-                            0 -> "Bill due today"
-                            1 -> "Bill due tomorrow"
-                            else -> "Bill due in $days days"
-                        }
-                        textSize = 13f
-                        setTypeface(typeface, android.graphics.Typeface.BOLD)
-                        if (days <= 3) setTextColor(Color.parseColor("#D64545"))
-                    })
-                }
+                // Tap the name to set the limit, due day and shared limit.
+                addView(accountLabel(row.account, dp(2), dp(6)).apply {
+                    text = "$text  ▾"
+                    setOnClickListener { showCardSettingsDialog(row.account, accounts, meta) { renderSummaries() } }
+                })
+                addView(row.summary)
 
                 fun pair(leftLabel: String, left: EditText, rightLabel: String, right: EditText) {
                     addView(LinearLayout(context).apply {
@@ -211,10 +346,10 @@ private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, ti
                     })
                 }
                 pair("Bill", row.bill, "Active spend", row.active)
-                pair("Credit limit", row.limit, "Bill due day", row.dueDay)
             })
         }
     }
+    renderSummaries()
 
     val dialog = MaterialAlertDialogBuilder(this)
         .setTitle(title)
@@ -226,7 +361,6 @@ private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, ti
     dialog.setOnShowListener {
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val values = mutableListOf<Triple<OracleAccount, Long, Long>>()
-            val editor = meta.edit()
             for (row in rows) {
                 val bill = MoneyInput.parseMinor(row.bill.text.toString())
                 val active = MoneyInput.parseMinor(row.active.text.toString(), allowNegative = true)
@@ -240,25 +374,8 @@ private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, ti
                     row.active.requestFocus()
                     return@setOnClickListener
                 }
-                val limitText = row.limit.text.toString().trim()
-                val limit = if (limitText.isEmpty()) 0L else MoneyInput.parseMinor(limitText)
-                if (limit == null) {
-                    row.limit.error = "Enter a valid limit"
-                    row.limit.requestFocus()
-                    return@setOnClickListener
-                }
-                val dueText = row.dueDay.text.toString().trim()
-                val due = if (dueText.isEmpty()) 0 else dueText.toIntOrNull()
-                if (due == null || (due != 0 && due !in 1..31)) {
-                    row.dueDay.error = "Use a day from 1 to 31"
-                    row.dueDay.requestFocus()
-                    return@setOnClickListener
-                }
-                // Limit and due day are kept on this phone only; the server never needs them.
-                editor.putLong("limit_" + row.account.id, limit).putInt("due_" + row.account.id, due)
                 values += Triple(row.account, bill, active)
             }
-            editor.apply()
             saveRows(dialog, values, "Credit card amounts updated", "Could not update credit cards: ") { client, (account, bill, active) ->
                 client.updateAccountBalance(
                     account = account,
