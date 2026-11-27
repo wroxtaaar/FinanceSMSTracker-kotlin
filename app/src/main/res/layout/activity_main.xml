@@ -51,7 +51,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:background="@drawable/bg_summary_card"
+        android:background="?attr/heroBackground"
         android:orientation="vertical"
         android:padding="16dp"
         app:layout_constraintEnd_toEndOf="parent"
@@ -64,7 +64,7 @@
             android:layout_height="wrap_content"
             android:alpha="0.75"
             android:text="Oracle ledger: Loading..."
-            android:textColor="@android:color/white"
+            android:textColor="?attr/heroText"
             android:textSize="12sp" />
 
         <TextView
@@ -73,7 +73,7 @@
             android:layout_marginTop="10dp"
             android:alpha="0.8"
             android:text="True available"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/heroText"
             android:textSize="13sp" />
 
         <TextView
@@ -83,14 +83,14 @@
             android:layout_marginBottom="10dp"
             android:fontFeatureSettings="tnum"
             android:text="—"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/heroText"
             android:textSize="32sp"
             android:textStyle="bold" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="0.5dp"
-            android:background="#33FFFFFF" />
+            android:background="?attr/heroDivider" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -104,7 +104,7 @@
                 android:layout_weight="1"
                 android:alpha="0.8"
                 android:text="Bank cash"
-                android:textColor="@android:color/white"
+                android:textColor="?attr/heroText"
                 android:textSize="13sp" />
 
             <TextView
@@ -113,7 +113,7 @@
                 android:layout_height="wrap_content"
                 android:fontFeatureSettings="tnum"
                 android:text="—"
-                android:textColor="@color/hero_positive"
+                android:textColor="?attr/heroPositive"
                 android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -121,7 +121,7 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="0.5dp"
-            android:background="#33FFFFFF" />
+            android:background="?attr/heroDivider" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -135,7 +135,7 @@
                 android:layout_weight="1"
                 android:alpha="0.8"
                 android:text="Splitwise owed"
-                android:textColor="@android:color/white"
+                android:textColor="?attr/heroText"
                 android:textSize="13sp" />
 
             <TextView
@@ -144,7 +144,7 @@
                 android:layout_height="wrap_content"
                 android:fontFeatureSettings="tnum"
                 android:text="—"
-                android:textColor="@color/hero_positive"
+                android:textColor="?attr/heroPositive"
                 android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -152,7 +152,7 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="0.5dp"
-            android:background="#33FFFFFF" />
+            android:background="?attr/heroDivider" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -166,7 +166,7 @@
                 android:layout_weight="1"
                 android:alpha="0.8"
                 android:text="Card outstanding"
-                android:textColor="@android:color/white"
+                android:textColor="?attr/heroText"
                 android:textSize="13sp" />
 
             <TextView
@@ -175,7 +175,7 @@
                 android:layout_height="wrap_content"
                 android:fontFeatureSettings="tnum"
                 android:text="—"
-                android:textColor="@color/hero_negative"
+                android:textColor="?attr/heroNegative"
                 android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -186,7 +186,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:alpha="0.8"
-            android:textColor="@android:color/white"
+            android:textColor="?attr/heroText"
             android:textSize="12sp"
             android:visibility="gone" />
     </LinearLayout>

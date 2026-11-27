@@ -284,6 +284,13 @@ internal fun MainActivity.showOracleSettingsDialog() {
 
     container.addView(urlInput)
     container.addView(tokenInput)
+    container.addView(TextView(this).apply {
+        text = "Theme: ${AppTheme.current(this@showOracleSettingsDialog).label} ›"
+        setPadding(0, 20, 0, 20)
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { AppTheme.showPicker(this@showOracleSettingsDialog) }
+    })
 
     val dialog = AlertDialog.Builder(this)
         .setTitle("Oracle Sync Settings")

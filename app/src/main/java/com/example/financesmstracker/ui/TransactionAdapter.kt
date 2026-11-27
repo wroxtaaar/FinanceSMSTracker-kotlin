@@ -1,6 +1,5 @@
 package com.example.financesmstracker.ui
 
-import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
@@ -19,6 +18,7 @@ import com.example.financesmstracker.integration.FinanceSyncClient
 import com.example.financesmstracker.parser.AccountType
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.util.IndianMoney
+import com.google.android.material.color.MaterialColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -101,9 +101,14 @@ class TransactionAdapter(
     }
 
     /** One rounded surface per day: only the first row has rounded top corners, only the last rounded bottom ones. */
-    private fun rowBackground(context: Context, first: Boolean, last: Boolean, isSelected: Boolean): GradientDrawable {
+    private fun rowBackground(view: View, first: Boolean, last: Boolean, isSelected: Boolean): GradientDrawable {
+        val context = view.context
         val radius = context.resources.displayMetrics.density * 16f
-        val base = ContextCompat.getColor(context, R.color.surface_container)
+        val base = MaterialColors.getColor(
+            view,
+            R.attr.cardSurface,
+            ContextCompat.getColor(context, R.color.surface_container)
+        )
         val top = if (first) radius else 0f
         val bottom = if (last) radius else 0f
         return GradientDrawable().apply {
@@ -151,7 +156,11 @@ class TransactionAdapter(
             )
         }
         holder.amount.setTextColor(
-            Color.parseColor(if (credit) "#2E9E5B" else "#D64545")
+            MaterialColors.getColor(
+                holder.itemView,
+                if (credit) R.attr.creditColor else R.attr.debitColor,
+                Color.parseColor(if (credit) "#2E9E5B" else "#D64545")
+            )
         )
 
         // "Groceries · Axis ••9206 · Card": the source (SMS / e-mail) lives in the details.
@@ -169,7 +178,7 @@ class TransactionAdapter(
         val first = position == 0 || rows[position - 1] !is Transaction
         val last = position == rows.size - 1 || rows[position + 1] !is Transaction
         holder.divider.visibility = if (last) View.GONE else View.VISIBLE
-        holder.itemView.background = rowBackground(holder.itemView.context, first, last, tx.id in selected)
+        holder.itemView.background = rowBackground(holder.itemView, first, last, tx.id in selected)
 
         holder.itemView.setOnClickListener { if (selected.isEmpty()) onClick(tx) else toggle(tx) }
         holder.itemView.setOnLongClickListener { toggle(tx); true }

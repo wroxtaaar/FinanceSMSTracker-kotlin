@@ -16,4 +16,26 @@
     <color name="review_chip_text">#FF8A5A00</color>
     <color name="hero_positive">#FFA5E8C0</color>
     <color name="hero_negative">#FFFFB4AB</color>
+
+    <!-- Dark Ledger (always dark) -->
+    <color name="ledger_background">#FF0E0F12</color>
+    <color name="ledger_card">#FF16181C</color>
+    <color name="ledger_field">#FF1E2126</color>
+    <color name="ledger_line">#FF2A2D33</color>
+    <color name="ledger_text">#FFE8EAED</color>
+    <color name="ledger_muted">#FFA3A8AF</color>
+    <color name="ledger_mint">#FF5CE0B0</color>
+    <color name="ledger_red">#FFFF8A80</color>
+    <color name="ledger_amber">#FFF6C26B</color>
+
+    <!-- Warm Paper (always light) -->
+    <color name="paper_background">#FFFAF6EF</color>
+    <color name="paper_card">#FFFFFFFF</color>
+    <color name="paper_field">#FFF0E6D6</color>
+    <color name="paper_line">#FFE6DCCB</color>
+    <color name="paper_ink">#FF2B2622</color>
+    <color name="paper_muted">#FF6B6258</color>
+    <color name="paper_terracotta">#FFA8451F</color>
+    <color name="paper_green">#FF3F6B3C</color>
+    <color name="paper_amber">#FF8A5A00</color>
 </resources>

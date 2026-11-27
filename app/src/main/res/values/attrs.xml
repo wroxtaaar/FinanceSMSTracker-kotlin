@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Per-theme design tokens (see Theme.FinanceSMSTracker and its .Ledger / .Paper variants). -->
+    <attr name="heroBackground" format="reference" />
+    <attr name="heroText" format="color" />
+    <attr name="heroDivider" format="color" />
+    <attr name="heroPositive" format="color" />
+    <attr name="heroNegative" format="color" />
+    <attr name="cardSurface" format="color" />
+    <attr name="fieldSurface" format="color" />
+    <attr name="dividerColor" format="color" />
+    <attr name="reviewChipText" format="color" />
+    <attr name="debitColor" format="color" />
+    <attr name="creditColor" format="color" />
+</resources>
