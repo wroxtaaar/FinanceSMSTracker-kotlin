@@ -155,6 +155,7 @@ class MainActivity : AppCompatActivity() {
         buttonClearLocalHistory = findViewById(R.id.buttonClearLocalHistory)
         buttonRestoreHistory = findViewById(R.id.buttonRestoreHistory)
         buttonRestoreHistory.setOnClickListener { restoreHistoryFromServer() }
+        setupMoreMenu()
 
         buttonEditSplitwise.setOnClickListener {
             showManualSplitwiseDialog()
@@ -243,6 +244,13 @@ class MainActivity : AppCompatActivity() {
         } else {
             "Review"
         }
+        // The count is the badge: it shows on the always-visible More button, in red.
+        val more = findViewById<Button>(R.id.buttonMore)
+        more.text = if (count > 0) "More ($count)" else "More"
+        more.setTextColor(
+            if (count > 0) Color.parseColor("#D64545")
+            else com.google.android.material.color.MaterialColors.getColor(more, com.google.android.material.R.attr.colorOnSecondaryContainer)
+        )
     }
 
     internal fun loadOracleSummary() {
@@ -264,10 +272,10 @@ class MainActivity : AppCompatActivity() {
 
     internal fun renderOracleSummary(summary: OracleLedgerSummary) {
         textViewOracleStatus.text = "Oracle ledger: Connected"
-        textViewTrueAvailable.text = "True available: " + formatMinor(summary.trueAvailableMinor)
-        textViewBankCash.text = "Bank cash: " + formatMinor(summary.bankCashMinor)
-        textViewCardOutstanding.text = "Card outstanding: " + formatMinor(summary.creditCardOutstandingMinor)
-        textViewSplitwiseReceivable.text = "Splitwise receivable: " + formatMinor(summary.splitwiseReceivableMinor)
+        textViewTrueAvailable.text = twoLine("True available", formatMinor(summary.trueAvailableMinor), 0.42f)
+        textViewBankCash.text = twoLine("Bank cash", formatMinor(summary.bankCashMinor), 0.85f)
+        textViewCardOutstanding.text = twoLine("Card outstanding", formatMinor(summary.creditCardOutstandingMinor), 0.85f)
+        textViewSplitwiseReceivable.text = twoLine("Splitwise", formatMinor(summary.splitwiseReceivableMinor), 0.85f)
         renderEmiNote(summary.emiReservations)
     }
 

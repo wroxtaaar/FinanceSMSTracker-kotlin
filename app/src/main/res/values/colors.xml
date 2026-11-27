@@ -2,4 +2,9 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="finance_teal">#FF0E7C86</color>
+    <color name="finance_teal_dark">#FF0B3B5C</color>
+    <color name="finance_teal_light">#FF5CD6D1</color>
+    <color name="debit_red">#FFD64545</color>
+    <color name="credit_green">#FF2E9E5B</color>
 </resources>

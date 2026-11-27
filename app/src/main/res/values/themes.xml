@@ -2,7 +2,9 @@
     <!-- Base application theme. -->
     <style name="Base.Theme.FinanceSMSTracker" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="colorPrimary">@color/finance_teal</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/finance_teal_dark</item>
     </style>
 
     <style name="Theme.FinanceSMSTracker" parent="Base.Theme.FinanceSMSTracker" />

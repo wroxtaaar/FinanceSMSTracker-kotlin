@@ -20,7 +20,26 @@ import java.util.Locale
 class TransactionAdapter(
     private var transactions: List<Transaction>,
     private val onClick: (Transaction) -> Unit
-) : RecyclerView.Adapter<TransactionAdapter.TransactionViewHolder>() {
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+    /** What the list shows: day headings (String) between transactions. */
+    private var rows: List<Any> = build(transactions)
+
+    private fun build(list: List<Transaction>): List<Any> {
+        val now = System.currentTimeMillis()
+        val out = ArrayList<Any>(list.size + 8)
+        var last: String? = null
+        for (tx in list) {
+            val label = HomeFormat.dayLabel(tx.timestamp, now)
+            if (label != last) { out.add(label); last = label }
+            out.add(tx)
+        }
+        return out
+    }
+
+    class HeaderViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val text: TextView = view as TextView
+    }
 
     /** Long-press selects rows (to send several to Expense as one expense); taps then toggle. */
     private val selected = linkedSetOf<Long>()
@@ -51,6 +70,7 @@ class TransactionAdapter(
 
     class TransactionViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val defaultCardColor = (view as? androidx.cardview.widget.CardView)?.cardBackgroundColor
+        val textViewCategoryIcon: TextView = view.findViewById(R.id.textViewCategoryIcon)
         val textViewMerchant: TextView = view.findViewById(R.id.textViewMerchant)
         val textViewAmount: TextView = view.findViewById(R.id.textViewAmount)
         val textViewCategory: TextView = view.findViewById(R.id.textViewCategory)
@@ -60,17 +80,35 @@ class TransactionAdapter(
         val textViewDateTime: TextView = view.findViewById(R.id.textViewDateTime)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TransactionViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_transaction, parent, false)
-        return TransactionViewHolder(view)
+    override fun getItemViewType(position: Int): Int = if (rows[position] is String) 0 else 1
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        val inflater = LayoutInflater.from(parent.context)
+        return if (viewType == 0) {
+            HeaderViewHolder(inflater.inflate(R.layout.item_day_header, parent, false))
+        } else {
+            TransactionViewHolder(inflater.inflate(R.layout.item_transaction, parent, false))
+        }
     }
 
-    override fun onBindViewHolder(holder: TransactionViewHolder, position: Int) {
-        val tx = transactions[position]
+    override fun onBindViewHolder(viewHolder: RecyclerView.ViewHolder, position: Int) {
+        val row = rows[position]
+        if (row is String) {
+            (viewHolder as HeaderViewHolder).text.text = row
+            return
+        }
+        val holder = viewHolder as TransactionViewHolder
+        val tx = row as Transaction
 
-        val merchantDisplay = listOfNotNull(tx.merchantName, tx.payeeId, tx.bank, "Transaction").firstOrNull { !it.isBlank() } ?: "Transaction"
-        holder.textViewMerchant.text = merchantDisplay
+        val payee = HomeFormat.payeeOrNull(tx)
+        holder.textViewMerchant.text = payee ?: "Unknown payee"
+        holder.textViewMerchant.alpha = if (payee == null) 0.55f else 1f
+        val style = HomeFormat.categoryStyle(tx.category)
+        holder.textViewCategoryIcon.text = style.symbol
+        holder.textViewCategoryIcon.background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(style.color)
+        }
 
         val rupees = tx.amountPaise / 100.0
         val sign = if (tx.transactionType == TransactionType.CREDIT) "+" else "-"
@@ -97,12 +135,12 @@ class TransactionAdapter(
                 String.format(Locale.getDefault(), "%s%s%.2f", sign, symbol, rupees)
         }
         if (tx.transactionType == TransactionType.CREDIT) {
-            holder.textViewAmount.setTextColor(Color.parseColor("#2E7D32")) // Green
+            holder.textViewAmount.setTextColor(Color.parseColor("#2E9E5B")) // Green
         } else {
-            holder.textViewAmount.setTextColor(Color.parseColor("#C62828")) // Red
+            holder.textViewAmount.setTextColor(Color.parseColor("#D64545")) // Red
         }
 
-        holder.textViewCategory.text = tx.category ?: "OTHER"
+        holder.textViewCategory.text = (tx.category ?: "OTHER").replace('_', ' ')
         holder.textViewType.text = tx.transactionType.name
         // Shown on the right, under the bank name: "Credit card" for card
         // accounts, otherwise how it was paid (UPI, NEFT, ...).
@@ -111,11 +149,18 @@ class TransactionAdapter(
         } else {
             tx.paymentMethod.name
         }
-        holder.textViewPaymentMethod.text =
-            how + " · " + com.example.financesmstracker.data.TransactionSource.label(tx.smsHash)
+        val account = listOfNotNull(
+            tx.bank?.takeIf { it.isNotBlank() },
+            tx.accountLastFour?.takeIf { it.isNotBlank() }?.let { "·$it" }
+        ).joinToString(" ")
+        holder.textViewPaymentMethod.text = listOf(
+            account.takeIf { it.isNotBlank() },
+            how,
+            com.example.financesmstracker.data.TransactionSource.label(tx.smsHash)
+        ).filterNotNull().joinToString(" · ")
         holder.textViewBank.text = tx.bank ?: ""
 
-        val sdf = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
         holder.textViewDateTime.text = sdf.format(Date(tx.timestamp))
 
         (holder.itemView as? androidx.cardview.widget.CardView)?.let { card ->
@@ -126,10 +171,11 @@ class TransactionAdapter(
         holder.itemView.setOnLongClickListener { toggle(tx); true }
     }
 
-    override fun getItemCount(): Int = transactions.size
+    override fun getItemCount(): Int = rows.size
 
     fun updateData(newTransactions: List<Transaction>) {
         transactions = newTransactions
+        rows = build(newTransactions)
         val ids = newTransactions.map { it.id }.toSet()
         if (selected.retainAll(ids)) onSelectionChanged(selected.size)
         notifyDataSetChanged()
