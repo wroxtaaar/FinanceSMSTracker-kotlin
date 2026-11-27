@@ -209,7 +209,7 @@ private fun MainActivity.showMissingSwipeDialog(
     val swipe = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT) {
         override fun onMove(r: RecyclerView, v: RecyclerView.ViewHolder, t: RecyclerView.ViewHolder) = false
         override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) {
-            val position = holder.bindingAdapterPosition
+            val position = holder.adapterPosition
             if (position == RecyclerView.NO_POSITION) return
             val item = items[position]
             if (direction == ItemTouchHelper.RIGHT) {
