@@ -91,6 +91,7 @@ dependencies {
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.constraintlayout)
+    implementation(libs.androidx.swiperefreshlayout)
     implementation(libs.androidx.core.ktx)
     implementation(libs.material)
     // API-only library in every variant; the full SDK (the part that actually

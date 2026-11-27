@@ -7,4 +7,13 @@
     <color name="finance_teal_light">#FF5CD6D1</color>
     <color name="debit_red">#FFD64545</color>
     <color name="credit_green">#FF2E9E5B</color>
+
+    <!-- Surfaces: one palette, light here and dark in values-night. -->
+    <color name="app_background">#FFF4F7F7</color>
+    <color name="surface_container">#FFFFFFFF</color>
+    <color name="surface_container_high">#FFEAF0F0</color>
+    <color name="outline_soft">#FFDDE3E3</color>
+    <color name="review_chip_text">#FF8A5A00</color>
+    <color name="hero_positive">#FFA5E8C0</color>
+    <color name="hero_negative">#FFFFB4AB</color>
 </resources>

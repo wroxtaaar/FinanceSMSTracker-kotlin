@@ -1,10 +1,11 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.FinanceSMSTracker" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
         <item name="colorPrimary">@color/finance_teal</item>
         <item name="colorOnPrimary">@color/white</item>
         <item name="colorSecondary">@color/finance_teal_dark</item>
+        <item name="android:colorBackground">@color/app_background</item>
+        <item name="colorSurface">@color/app_background</item>
     </style>
 
     <style name="Theme.FinanceSMSTracker" parent="Base.Theme.FinanceSMSTracker" />

@@ -18,6 +18,23 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+    <!-- Notification-trigger status: a small pill instead of a line of coloured text. -->
+    <TextView
+        android:id="@+id/textViewNotificationStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_pill"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="5dp"
+        android:text="● Checking…"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="12sp"
+        app:layout_constraintBottom_toBottomOf="@id/textViewTitle"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/textViewTitle" />
+
     <Button
         android:id="@+id/buttonOpenNotificationSettings"
         android:layout_width="0dp"
@@ -29,30 +46,17 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/textViewTitle" />
 
-    <TextView
-        android:id="@+id/textViewNotificationStatus"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:text="Notification Access: Checking..."
-        android:textSize="12sp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/buttonOpenNotificationSettings" />
-
     <LinearLayout
         android:id="@+id/oracleLedgerPanel"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="12dp"
         android:background="@drawable/bg_summary_card"
         android:orientation="vertical"
         android:padding="16dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/textViewNotificationStatus">
+        app:layout_constraintTop_toBottomOf="@id/buttonOpenNotificationSettings">
 
         <TextView
             android:id="@+id/textViewOracleStatus"
@@ -64,60 +68,116 @@
             android:textSize="12sp" />
 
         <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:alpha="0.8"
+            android:text="True available"
+            android:textColor="@android:color/white"
+            android:textSize="13sp" />
+
+        <TextView
             android:id="@+id/textViewTrueAvailable"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="True available\n—"
+            android:layout_marginBottom="10dp"
+            android:fontFeatureSettings="tnum"
+            android:text="—"
             android:textColor="@android:color/white"
-            android:textSize="30sp"
+            android:textSize="32sp"
             android:textStyle="bold" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0.5dp"
+            android:background="#33FFFFFF" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingVertical="6dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:alpha="0.8"
+                android:text="Bank cash"
+                android:textColor="@android:color/white"
+                android:textSize="13sp" />
 
             <TextView
                 android:id="@+id/textViewBankCash"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="0dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_chip"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="8dp"
-                android:text="Bank cash\n—"
-                android:textColor="@android:color/white"
-                android:textSize="12sp" />
+                android:fontFeatureSettings="tnum"
+                android:text="—"
+                android:textColor="@color/hero_positive"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0.5dp"
+            android:background="#33FFFFFF" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingVertical="6dp">
 
             <TextView
-                android:id="@+id/textViewCardOutstanding"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
                 android:layout_weight="1"
-                android:background="@drawable/bg_chip"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="8dp"
-                android:text="Card outstanding\n—"
+                android:alpha="0.8"
+                android:text="Splitwise owed"
                 android:textColor="@android:color/white"
-                android:textSize="12sp" />
+                android:textSize="13sp" />
 
             <TextView
                 android:id="@+id/textViewSplitwiseReceivable"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFeatureSettings="tnum"
+                android:text="—"
+                android:textColor="@color/hero_positive"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0.5dp"
+            android:background="#33FFFFFF" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingVertical="6dp">
+
+            <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
                 android:layout_weight="1"
-                android:background="@drawable/bg_chip"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="8dp"
-                android:text="Splitwise\n—"
+                android:alpha="0.8"
+                android:text="Card outstanding"
                 android:textColor="@android:color/white"
-                android:textSize="12sp" />
+                android:textSize="13sp" />
 
+            <TextView
+                android:id="@+id/textViewCardOutstanding"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFeatureSettings="tnum"
+                android:text="—"
+                android:textColor="@color/hero_negative"
+                android:textSize="13sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <TextView
@@ -135,7 +195,7 @@
         android:id="@+id/oracleControlsRow"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="12dp"
         android:orientation="horizontal"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -143,76 +203,88 @@
 
         <Button
             android:id="@+id/buttonEditSplitwise"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
-            android:layout_height="40dp"
-            android:layout_weight="1"
+            android:layout_height="64dp"
             android:layout_marginStart="0dp"
+            android:layout_weight="1"
             android:insetTop="0dp"
             android:insetBottom="0dp"
-            android:minHeight="0dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:paddingTop="0dp"
-            android:paddingBottom="0dp"
             android:maxLines="1"
+            android:paddingHorizontal="4dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp"
             android:text="Splitwise"
-            android:textSize="13sp" />
-
+            android:textSize="12sp"
+            app:cornerRadius="16dp"
+            app:icon="@drawable/ic_group"
+            app:iconGravity="top"
+            app:iconPadding="2dp"
+            app:iconSize="22dp" />
         <Button
             android:id="@+id/buttonEditBankAccounts"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
-            android:layout_height="40dp"
+            android:layout_height="64dp"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
-            android:minHeight="0dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:paddingTop="0dp"
-            android:paddingBottom="0dp"
             android:maxLines="1"
+            android:paddingHorizontal="4dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp"
             android:text="Banks"
-            android:textSize="13sp" />
-
+            android:textSize="12sp"
+            app:cornerRadius="16dp"
+            app:icon="@drawable/ic_bank"
+            app:iconGravity="top"
+            app:iconPadding="2dp"
+            app:iconSize="22dp" />
         <Button
             android:id="@+id/buttonEditCreditCards"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
-            android:layout_height="40dp"
+            android:layout_height="64dp"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
-            android:minHeight="0dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:paddingTop="0dp"
-            android:paddingBottom="0dp"
             android:maxLines="1"
+            android:paddingHorizontal="4dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp"
             android:text="Cards"
-            android:textSize="13sp" />
-
+            android:textSize="12sp"
+            app:cornerRadius="16dp"
+            app:icon="@drawable/ic_card"
+            app:iconGravity="top"
+            app:iconPadding="2dp"
+            app:iconSize="22dp" />
         <Button
             android:id="@+id/buttonMore"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
-            android:layout_height="40dp"
+            android:layout_height="64dp"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
-            android:minHeight="0dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:paddingTop="0dp"
-            android:paddingBottom="0dp"
             android:maxLines="1"
+            android:paddingHorizontal="4dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="6dp"
             android:text="More"
-            android:textSize="13sp"
-            style="@style/Widget.Material3.Button.TonalButton" />
+            android:textSize="12sp"
+            app:cornerRadius="16dp"
+            app:icon="@drawable/ic_more"
+            app:iconGravity="top"
+            app:iconPadding="2dp"
+            app:iconSize="22dp" />
 
     </LinearLayout>
 
-    <!-- The rest of the old buttons live in the More menu; the views stay here so the menu can use them. -->
+    <!-- The rest of the old buttons live in the More sheet; the views stay here so it can use them. -->
     <LinearLayout
         android:id="@+id/oracleControlsRow2"
         android:layout_width="wrap_content"
@@ -260,17 +332,44 @@
 
     </LinearLayout>
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerViewTransactions"
+    <!-- Credit-card limit / due-date tiles; filled in by code and hidden until a card has a limit or due day. -->
+    <HorizontalScrollView
+        android:id="@+id/cardsScroll"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:overScrollMode="never"
+        android:scrollbars="none"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow">
+
+        <LinearLayout
+            android:id="@+id/cardsRow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" />
+    </HorizontalScrollView>
+
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeRefresh"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_marginTop="4dp"
-        android:clipToPadding="false"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/oracleControlsRow"
-        tools:listitem="@layout/item_transaction" />
+        app:layout_constraintTop_toBottomOf="@id/cardsScroll">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerViewTransactions"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingBottom="16dp"
+            tools:listitem="@layout/item_transaction" />
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
     <TextView
         android:id="@+id/textViewEmpty"
@@ -282,7 +381,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="@id/recyclerViewTransactions" />
+        app:layout_constraintTop_toTopOf="@id/swipeRefresh" />
 
     <LinearLayout
         android:id="@+id/selectionBar"

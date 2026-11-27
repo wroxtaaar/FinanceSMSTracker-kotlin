@@ -1,115 +1,90 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:padding="20dp">
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="20dp">
 
-        <TextView
+        <com.google.android.material.bottomsheet.BottomSheetDragHandleView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Transaction Details"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:paddingBottom="12dp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/detailCategoryIcon"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:gravity="center"
+                android:textSize="20sp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/detailTextMerchant"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="2"
+                    android:textColor="?attr/colorOnSurface"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/detailTextDateTime"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
 
         <TextView
             android:id="@+id/detailTextAmount"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:paddingBottom="6dp"
-            android:text="Amount: ₹0.00" />
+            android:layout_marginTop="14dp"
+            android:fontFeatureSettings="tnum"
+            android:textSize="30sp"
+            android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/detailTextType"
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/detailChips"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="Type: DEBIT" />
-
-        <TextView
-            android:id="@+id/detailTextPaymentMethod"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="Payment Method: UPI" />
-
-        <TextView
-            android:id="@+id/detailTextAccountType"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="Account Type: BANK_ACCOUNT" />
-
-        <TextView
-            android:id="@+id/detailTextBank"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="Bank: HDFC" />
-
-        <TextView
-            android:id="@+id/detailTextMerchant"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="Merchant/Payee: Not provided" />
-
-        <TextView
-            android:id="@+id/detailTextPayeeId"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="UPI VPA: Not provided" />
-
-        <TextView
-            android:id="@+id/detailTextIdentifierType"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="Identifier Type: NONE" />
-
-        <TextView
-            android:id="@+id/detailTextAccountLastFour"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="A/C Last 4: -" />
-
-        <TextView
-            android:id="@+id/detailTextRefNumber"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="Reference: -" />
-
-        <TextView
-            android:id="@+id/detailTextDateTime"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="12dp"
-            android:text="Date/Time: -" />
+            android:layout_marginTop="4dp" />
 
         <LinearLayout
             android:id="@+id/foreignAmountSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:orientation="vertical"
-            android:paddingBottom="12dp"
             android:visibility="gone">
 
             <TextView
                 android:id="@+id/foreignAmountSummary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textStyle="bold"
-                android:text="Foreign spend" />
+                android:text="Foreign spend"
+                android:textStyle="bold" />
 
             <EditText
                 android:id="@+id/foreignAmountInput"
@@ -120,6 +95,7 @@
 
             <Button
                 android:id="@+id/foreignAmountSave"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Save exact ₹ amount" />
@@ -129,16 +105,16 @@
             android:id="@+id/salaryShareSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:orientation="vertical"
-            android:paddingBottom="12dp"
             android:visibility="gone">
 
             <TextView
                 android:id="@+id/salaryShareSummary"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textStyle="bold"
-                android:text="Salary in Splitwise" />
+                android:text="Salary in Splitwise"
+                android:textStyle="bold" />
 
             <EditText
                 android:id="@+id/salaryShareInput"
@@ -149,6 +125,7 @@
 
             <Button
                 android:id="@+id/salaryShareSave"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Save Splitwise amount" />
@@ -157,33 +134,149 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Category:"
-            android:textStyle="bold"
-            android:paddingBottom="4dp" />
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="6dp"
+            android:text="Category"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp" />
 
-        <Spinner
-            android:id="@+id/spinnerCategory"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingBottom="12dp" />
+            android:background="@drawable/bg_field"
+            android:paddingHorizontal="4dp">
 
-        <CheckBox
+            <Spinner
+                android:id="@+id/spinnerCategory"
+                android:layout_width="match_parent"
+                android:layout_height="48dp" />
+        </FrameLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/checkboxRememberPayee"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Remember this category for this payee"
-            android:paddingBottom="16dp" />
+            android:layout_marginTop="6dp"
+            android:text="Remember for this payee"
+            android:textSize="14sp" />
 
-        <Button
-            android:id="@+id/buttonMarkCardPayment"
+        <!-- The raw fields live behind one row instead of filling the sheet. -->
+        <LinearLayout
+            android:id="@+id/detailMoreToggle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:visibility="gone"
-            android:text="This was a credit card bill payment" />
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingVertical="12dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="More details"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Reference, account, identifiers"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/detailMoreChevron"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="›"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="22sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/detailMoreBody"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/detailTextType"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="4dp"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/detailTextPaymentMethod"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="4dp"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/detailTextAccountType"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="4dp"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/detailTextBank"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="4dp"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/detailTextPayeeId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="4dp"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/detailTextAccountLastFour"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="4dp"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/detailTextRefNumber"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="4dp"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textIsSelectable="true"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- One filled button; the rest are quieter. -->
+        <Button
+            android:id="@+id/buttonSaveCategory"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="12dp"
+            android:text="Save changes" />
 
         <Button
             android:id="@+id/buttonAddToExpense"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -191,7 +284,17 @@
             android:visibility="gone" />
 
         <Button
+            android:id="@+id/buttonMarkCardPayment"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="This was a credit card bill payment"
+            android:visibility="gone" />
+
+        <Button
             android:id="@+id/buttonExpenseHandled"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Skip: already in Expense / not for Expense"
@@ -199,16 +302,12 @@
 
         <Button
             android:id="@+id/buttonVoidTransaction"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Delete Transaction" />
-
-        <Button
-            android:id="@+id/buttonSaveCategory"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Save Changes" />
+            android:layout_marginTop="4dp"
+            android:text="Delete transaction"
+            android:textColor="@color/debit_red" />
 
     </LinearLayout>
 </ScrollView>

@@ -78,6 +78,9 @@ object TransactionCategorizer {
 
             hasStem("medic") ||
             hasStem("pharm") ||
+            // "Maxhealthcare", "Apollohealth": the brand runs into the word, so a word-start match misses it.
+            combined.contains("healthcare") ||
+            has("health") ||
             has("chemist") ||
             has("hospital") ||
             has("clinic") ||

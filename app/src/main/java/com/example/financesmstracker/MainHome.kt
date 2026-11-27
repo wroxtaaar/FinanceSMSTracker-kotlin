@@ -10,7 +10,6 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
@@ -29,27 +28,23 @@ internal fun twoLine(label: String, value: String, labelScale: Float): CharSeque
 /** Splitwise / Banks / Cards stay on screen; everything else lives behind "More". */
 internal fun MainActivity.setupMoreMenu() {
     val more = findViewById<Button>(R.id.buttonMore)
-    more.setOnClickListener { anchor ->
-        val menu = PopupMenu(this, anchor)
-        val review = buttonReviewReconcile.text.toString()
-        val items = listOf(
-            review to { buttonReviewReconcile.performClick() },
-            "Spending" to { showSpendingDialog(0) },
-            "Sync Gmail" to {
-                if (buttonGmailSync.isEnabled) buttonGmailSync.performClick()
-                else Toast.makeText(this, "Already syncing…", Toast.LENGTH_SHORT).show()
-            },
-            "SMS log" to { findViewById<Button>(R.id.buttonSmsLog).performClick() },
-            "Restore history" to { buttonRestoreHistory.performClick() },
-            "Clear history" to { buttonClearLocalHistory.performClick() },
-            "Settings" to { buttonOracleSettings.performClick() }
+    more.setOnClickListener {
+        val pending = repository.getUnresolvedEvidenceCount() + repository.getUnresolvedUnrecognizedSmsCount()
+        actionSheet(
+            null,
+            listOf(
+                SheetAction("📝", "Review", badge = pending.takeIf { it > 0 }?.toString()) { buttonReviewReconcile.performClick() },
+                SheetAction("📊", "Spending") { showSpendingDialog(0) },
+                SheetAction("✉️", "Sync Gmail") {
+                    if (buttonGmailSync.isEnabled) buttonGmailSync.performClick()
+                    else Toast.makeText(this, "Already syncing…", Toast.LENGTH_SHORT).show()
+                },
+                SheetAction("💬", "SMS log") { findViewById<Button>(R.id.buttonSmsLog).performClick() },
+                SheetAction("⏪", "Restore history") { buttonRestoreHistory.performClick() },
+                SheetAction("⚙️", "Settings") { buttonOracleSettings.performClick() },
+                SheetAction("🗑️", "Clear history", destructive = true) { buttonClearLocalHistory.performClick() }
+            )
         )
-        items.forEachIndexed { index, (title, _) -> menu.menu.add(0, index, index, title) }
-        menu.setOnMenuItemClickListener { item ->
-            items[item.itemId].second()
-            true
-        }
-        menu.show()
     }
 }
 

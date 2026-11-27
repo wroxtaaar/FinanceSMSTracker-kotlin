@@ -39,63 +39,65 @@ internal fun MainActivity.showManualSplitwiseDialog() {
                     addView(input)
                 }
 
-                val dialog = MaterialAlertDialogBuilder(this@showManualSplitwiseDialog)
-                    .setTitle("Splitwise Owed")
-                    .setMessage(
-                        "Set it once; after that it moves with every transaction. Spending adds to it, " +
-                            "money coming in subtracts, and transfers between your own accounts cancel out. " +
-                            "Category OTHER keeps a transaction out."
-                    )
-                    .setView(container)
-                    .setNegativeButton("Cancel", null)
-                    .setNeutralButton("Changes since set", null)
-                    .setPositiveButton("Save", null)
-                    .create()
-
-                dialog.setOnShowListener {
-                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                        showSplitwiseChangesDialog()
+                // The long explanation stays one tap away instead of filling the sheet.
+                val explanation = caption(
+                    "Set it once; after that it moves with every transaction. Spending adds to it, " +
+                        "money coming in subtracts, and transfers between your own accounts cancel out. " +
+                        "Category OTHER keeps a transaction out."
+                ).apply {
+                    visibility = android.view.View.GONE
+                    setPadding(0, dp(6), 0, 0)
+                }
+                container.addView(caption("How this works ›").apply {
+                    textSize = 13f
+                    setPadding(0, dp(14), 0, 0)
+                    setOnClickListener {
+                        explanation.visibility =
+                            if (explanation.visibility == android.view.View.VISIBLE) android.view.View.GONE
+                            else android.view.View.VISIBLE
                     }
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        val amount = input.text.toString().trim().replace(",", "").toDoubleOrNull()
+                })
+                container.addView(explanation)
 
-                        if (amount == null || amount < 0) {
-                            input.error = "Enter a valid amount"
-                            input.requestFocus()
-                            return@setOnClickListener
-                        }
+                formSheet(
+                    title = "Splitwise owed",
+                    subtitle = "Set it once. It then moves with every transaction.",
+                    body = container,
+                    neutralText = "Changes since set",
+                    onNeutral = { showSplitwiseChangesDialog() }
+                ) { sheet ->
+                    val amount = input.text.toString().trim().replace(",", "").toDoubleOrNull()
 
-                        val amountMinor = kotlin.math.round(amount * 100.0).toLong()
-                        buttonEditSplitwise.isEnabled = false
+                    if (amount == null || amount < 0) {
+                        input.error = "Enter a valid amount"
+                        input.requestFocus()
+                        return@formSheet
+                    }
 
-                        oracleExecutor.execute {
-                            val saveResult = FinanceSyncClient(this@showManualSplitwiseDialog)
-                                .updateManualSplitwiseTotal(amountMinor)
+                    val amountMinor = kotlin.math.round(amount * 100.0).toLong()
+                    buttonEditSplitwise.isEnabled = false
 
-                            runOnUiThread {
-                                buttonEditSplitwise.isEnabled = true
-                                saveResult.onSuccess {
-                                    dialog.dismiss()
-                                    loadOracleSummary()
-                                    Toast.makeText(
-                                        this@showManualSplitwiseDialog,
-                                        "Splitwise owed updated",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }.onFailure { error ->
-                                    Toast.makeText(
-                                        this@showManualSplitwiseDialog,
-                                        "Could not update Splitwise: " +
-                                            (error.message ?: "Unavailable"),
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
+                    oracleExecutor.execute {
+                        val saveResult = FinanceSyncClient(this@showManualSplitwiseDialog)
+                            .updateManualSplitwiseTotal(amountMinor)
+
+                        runOnUiThread {
+                            buttonEditSplitwise.isEnabled = true
+                            saveResult.onSuccess {
+                                sheet.dismiss()
+                                loadOracleSummary()
+                                showSnack("Splitwise owed updated")
+                            }.onFailure { error ->
+                                Toast.makeText(
+                                    this@showManualSplitwiseDialog,
+                                    "Could not update Splitwise: " +
+                                        (error.message ?: "Unavailable"),
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
                         }
                     }
                 }
-
-                dialog.show()
             }.onFailure { error ->
                 Toast.makeText(
                     this@showManualSplitwiseDialog,

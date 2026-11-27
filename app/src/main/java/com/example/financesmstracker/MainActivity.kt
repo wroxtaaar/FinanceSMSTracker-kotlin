@@ -10,6 +10,9 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.text.InputType
@@ -18,6 +21,7 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.Spinner
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -30,6 +34,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.example.financesmstracker.categorizer.CategoryMemoryKey
 import com.example.financesmstracker.data.FinanceDatabaseHelper
 import com.example.financesmstracker.data.Transaction
@@ -76,6 +81,12 @@ class MainActivity : AppCompatActivity() {
     internal lateinit var buttonEditCreditCards: Button
     internal lateinit var buttonClearLocalHistory: Button
     internal lateinit var buttonRestoreHistory: Button
+    internal lateinit var swipeRefresh: SwipeRefreshLayout
+    internal lateinit var cardsScroll: HorizontalScrollView
+    internal lateinit var cardsRow: LinearLayout
+
+    /** Credit cards from Oracle, for the limit / due-date tiles on the home screen. */
+    internal var cardAccounts: List<OracleAccount> = emptyList()
 
     internal val oracleExecutor = Executors.newSingleThreadExecutor()
 
@@ -136,6 +147,10 @@ class MainActivity : AppCompatActivity() {
         repository = TransactionRepository(dbHelper, this)
 
         recyclerView = findViewById(R.id.recyclerViewTransactions)
+        swipeRefresh = findViewById(R.id.swipeRefresh)
+        cardsScroll = findViewById(R.id.cardsScroll)
+        cardsRow = findViewById(R.id.cardsRow)
+        swipeRefresh.setOnRefreshListener { refreshAll() }
         textViewEmpty = findViewById(R.id.textViewEmpty)
         textViewNotificationStatus = findViewById(R.id.textViewNotificationStatus)
         buttonOpenNotificationSettings = findViewById(R.id.buttonOpenNotificationSettings)
@@ -253,11 +268,20 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    internal fun loadOracleSummary() {
+    /** Pull-to-refresh: reload the list and the ledger, and ask the server to scan Gmail. */
+    internal fun refreshAll() {
+        loadTransactions()
+        if (buttonGmailSync.isEnabled) triggerManualGmailSync()
+        loadOracleSummary { swipeRefresh.isRefreshing = false }
+    }
+
+    internal fun loadOracleSummary(onDone: () -> Unit = {}) {
         textViewOracleStatus.text = "Oracle ledger: Loading..."
 
         oracleExecutor.execute {
-            val result = FinanceSyncClient(this@MainActivity).fetchSummary()
+            val client = FinanceSyncClient(this@MainActivity)
+            val result = client.fetchSummary()
+            val accounts = if (result.isSuccess) client.fetchAccounts().getOrNull() else null
 
             runOnUiThread {
                 result.onSuccess { summary ->
@@ -266,16 +290,21 @@ class MainActivity : AppCompatActivity() {
                 }.onFailure { error ->
                     textViewOracleStatus.text = "Oracle ledger: " + (error.message ?: "Unavailable")
                 }
+                if (accounts != null) {
+                    cardAccounts = accounts.filter { it.accountType == "CREDIT_CARD" }
+                    renderCardCarousel()
+                }
+                onDone()
             }
         }
     }
 
     internal fun renderOracleSummary(summary: OracleLedgerSummary) {
         textViewOracleStatus.text = "Oracle ledger: Connected"
-        textViewTrueAvailable.text = twoLine("True available", formatMinor(summary.trueAvailableMinor), 0.42f)
-        textViewBankCash.text = twoLine("Bank cash", formatMinor(summary.bankCashMinor), 0.85f)
-        textViewCardOutstanding.text = twoLine("Card outstanding", formatMinor(summary.creditCardOutstandingMinor), 0.85f)
-        textViewSplitwiseReceivable.text = twoLine("Splitwise", formatMinor(summary.splitwiseReceivableMinor), 0.85f)
+        textViewTrueAvailable.text = formatMinor(summary.trueAvailableMinor)
+        textViewBankCash.text = "+ " + formatMinor(summary.bankCashMinor)
+        textViewSplitwiseReceivable.text = "+ " + formatMinor(summary.splitwiseReceivableMinor)
+        textViewCardOutstanding.text = "− " + formatMinor(summary.creditCardOutstandingMinor)
         renderEmiNote(summary.emiReservations)
     }
 
@@ -289,26 +318,36 @@ class MainActivity : AppCompatActivity() {
         textViewEmiNote.visibility = View.VISIBLE
     }
 
+    private fun statusPill(dotColor: Int, label: String): CharSequence =
+        SpannableString("● $label").apply {
+            setSpan(ForegroundColorSpan(dotColor), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+
     internal fun updateNotificationAccessStatus() {
         val granted = NotificationAccessHelper.isNotificationAccessGranted(this)
         val connected = NotificationAccessHelper.isListenerConnected(this)
         if (granted && connected) {
             val lastTitle = NotificationAccessHelper.lastGmailNotificationTitle(this)
             val detail = if (NotificationAccessHelper.lastGmailNotificationAt(this) > 0L) {
-                " • last Gmail: " + lastTitle.ifBlank { "received" }
+                "Last Gmail alert: " + lastTitle.ifBlank { "received" }
             } else {
-                " • no Gmail event yet"
+                "No Gmail alert received yet"
             }
-            textViewNotificationStatus.text = "Bank/card notification trigger: Enabled" + detail
-            textViewNotificationStatus.setTextColor(Color.parseColor("#2E7D32"))
+            textViewNotificationStatus.text = statusPill(Color.parseColor("#2E9E5B"), "Alerts on")
+            textViewNotificationStatus.setOnClickListener {
+                Toast.makeText(this, "Bank/card notification trigger is on. $detail", Toast.LENGTH_LONG).show()
+            }
             buttonOpenNotificationSettings.visibility = View.GONE
         } else if (granted) {
-            textViewNotificationStatus.text = "Bank/card notification trigger: Enabled (reconnecting...)"
-            textViewNotificationStatus.setTextColor(Color.parseColor("#EF6C00"))
+            textViewNotificationStatus.text = statusPill(Color.parseColor("#E08A1E"), "Reconnecting…")
+            textViewNotificationStatus.setOnClickListener(null)
+            textViewNotificationStatus.isClickable = false
             buttonOpenNotificationSettings.visibility = View.GONE
         } else {
-            textViewNotificationStatus.text = "Bank/card notification trigger: Disabled"
-            textViewNotificationStatus.setTextColor(Color.parseColor("#C62828"))
+            textViewNotificationStatus.text = statusPill(Color.parseColor("#D64545"), "Alerts off")
+            textViewNotificationStatus.setOnClickListener {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
             buttonOpenNotificationSettings.visibility = View.VISIBLE
         }
     }

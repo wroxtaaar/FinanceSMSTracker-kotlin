@@ -1,6 +1,16 @@
 package com.example.financesmstracker
 
 import android.app.AlertDialog
+import android.app.Dialog
+import android.graphics.Color
+import android.widget.CompoundButton
+import com.example.financesmstracker.ui.HomeFormat
+import com.example.financesmstracker.ui.showCategoryBadge
+import com.example.financesmstracker.util.IndianMoney
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.ArrayAdapter
@@ -149,7 +159,7 @@ internal fun MainActivity.setupSalaryShareSection(dialogView: View, tx: Transact
  * a transfer between own accounts so Splitwise does not rise. Deleting the
  * card credit undoes it.
  */
-internal fun MainActivity.setupMarkCardPaymentButton(dialogView: View, tx: Transaction, dialog: AlertDialog) {
+internal fun MainActivity.setupMarkCardPaymentButton(dialogView: View, tx: Transaction, dialog: Dialog) {
     val button = dialogView.findViewById<Button>(R.id.buttonMarkCardPayment)
     val eligible = tx.transactionType == TransactionType.DEBIT &&
         tx.accountType == com.example.financesmstracker.parser.AccountType.BANK_ACCOUNT &&
@@ -217,7 +227,7 @@ private fun MainActivity.markCardPayment(
     tx: Transaction,
     card: com.example.financesmstracker.integration.OracleAccount,
     button: Button,
-    dialog: AlertDialog
+    dialog: Dialog
 ) {
     val credit = Transaction(
         amountPaise = tx.amountPaise,
@@ -256,9 +266,10 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
     val dialogView = LayoutInflater.from(this)
         .inflate(R.layout.dialog_transaction_detail, null)
 
-    val dialog = AlertDialog.Builder(this)
-        .setView(dialogView)
-        .create()
+    val dialog = BottomSheetDialog(this)
+    dialog.setContentView(dialogView)
+    dialog.behavior.state = BottomSheetBehavior.STATE_EXPANDED
+    dialog.behavior.skipCollapsed = true
 
     val detailTextAmount =
         dialogView.findViewById<TextView>(R.id.detailTextAmount)
@@ -294,7 +305,7 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
         dialogView.findViewById<Spinner>(R.id.spinnerCategory)
 
     val checkboxRememberPayee =
-        dialogView.findViewById<CheckBox>(R.id.checkboxRememberPayee)
+        dialogView.findViewById<CompoundButton>(R.id.checkboxRememberPayee)
 
     val buttonSaveCategory =
         dialogView.findViewById<Button>(R.id.buttonSaveCategory)
@@ -302,54 +313,62 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
     val buttonVoidTransaction =
         dialogView.findViewById<Button>(R.id.buttonVoidTransaction)
 
-    val rupees = tx.amountPaise / 100.0
-
+    val credit = tx.transactionType == TransactionType.CREDIT
     detailTextAmount.text =
         if (tx.currency.equals("INR", ignoreCase = true)) {
-            String.format(Locale.getDefault(), "Amount: ₹%.2f", rupees)
+            IndianMoney.signed(tx.amountPaise, credit)
         } else {
-            String.format(Locale.getDefault(), "Amount: %s %.2f", tx.currency.uppercase(), rupees)
+            String.format(
+                Locale.US, "%s%s %,.2f", if (credit) "+" else "-", tx.currency.uppercase(), tx.amountPaise / 100.0
+            )
         }
+    detailTextAmount.setTextColor(Color.parseColor(if (credit) "#2E9E5B" else "#D64545"))
 
     setupForeignAmountSection(dialogView, tx)
     setupSalaryShareSection(dialogView, tx)
     setupExpenseButtons(dialogView, tx)
 
-    detailTextType.text =
-        "Type: ${tx.transactionType.name}"
+    // Header: who, when, and a few chips. The raw fields sit behind "More details".
+    dialogView.findViewById<TextView>(R.id.detailCategoryIcon).showCategoryBadge(tx.category)
+    detailTextMerchant.text = HomeFormat.payeeOrNull(tx) ?: "Unknown payee"
+    detailTextDateTime.text =
+        SimpleDateFormat("dd MMM yyyy · hh:mm a", Locale.getDefault()).format(Date(tx.timestamp))
 
-    detailTextPaymentMethod.text =
-        "Payment Method: ${tx.paymentMethod.name}"
-
-    detailTextAccountType.text =
-        "Account Type: ${tx.accountType.name}"
-
-    detailTextBank.text =
-        "Bank: ${tx.bank ?: "-"}"
-
-    detailTextMerchant.text =
-        "Merchant: ${tx.merchantName ?: "-"}"
-
-    detailTextPayeeId.text =
-        if (!tx.payeeId.isNullOrBlank()) {
-            "UPI ID: ${tx.payeeId}"
-        } else {
-            "UPI ID: Not provided"
+    val chipGroup = dialogView.findViewById<ChipGroup>(R.id.detailChips)
+    val how = if (tx.accountType == com.example.financesmstracker.parser.AccountType.CREDIT_CARD) {
+        "Card"
+    } else {
+        HomeFormat.sentenceCase(tx.paymentMethod.name)
+    }
+    val accountChip = listOfNotNull(
+        HomeFormat.bankLabel(tx.bank),
+        tx.accountLastFour?.takeIf { it.isNotBlank() }?.let { "••$it" }
+    ).joinToString(" ").takeIf { it.isNotBlank() }
+    listOfNotNull(how, accountChip, com.example.financesmstracker.data.TransactionSource.label(tx.smsHash))
+        .forEach { label ->
+            chipGroup.addView(Chip(this).apply {
+                text = label
+                isClickable = false
+                isCheckable = false
+            })
         }
 
-    detailTextAccountLastFour.text =
-        "A/C Last 4: ${tx.accountLastFour ?: "-"}"
+    detailTextType.text = "Type: " + HomeFormat.sentenceCase(tx.transactionType.name)
+    detailTextPaymentMethod.text = "Payment method: " + HomeFormat.sentenceCase(tx.paymentMethod.name)
+    detailTextAccountType.text = "Account type: " + HomeFormat.sentenceCase(tx.accountType.name)
+    detailTextBank.text = "Bank: ${HomeFormat.bankLabel(tx.bank) ?: "-"}"
+    detailTextPayeeId.text =
+        if (!tx.payeeId.isNullOrBlank()) "UPI ID: ${tx.payeeId}" else "UPI ID: not provided"
+    detailTextAccountLastFour.text = "Account ending: ${tx.accountLastFour ?: "-"}"
+    detailTextRefNumber.text = "Reference: ${tx.refNumber ?: "-"}"
 
-    detailTextRefNumber.text =
-        "Reference: ${tx.refNumber ?: "-"}"
-
-    val sdf = SimpleDateFormat(
-        "dd MMM yyyy, hh:mm a",
-        Locale.getDefault()
-    )
-
-    detailTextDateTime.text =
-        "Date/Time: ${sdf.format(Date(tx.timestamp))}"
+    val moreBody = dialogView.findViewById<View>(R.id.detailMoreBody)
+    val moreChevron = dialogView.findViewById<TextView>(R.id.detailMoreChevron)
+    dialogView.findViewById<View>(R.id.detailMoreToggle).setOnClickListener {
+        val open = moreBody.visibility != View.VISIBLE
+        moreBody.visibility = if (open) View.VISIBLE else View.GONE
+        moreChevron.text = if (open) "⌄" else "›"
+    }
 
     /*
      * Credits can only use:
@@ -430,7 +449,7 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
                     dialog.dismiss()
                     loadTransactions()
                     FinanceSyncBridge.enqueueVoidedTransaction(this, tx.id)
-                    Toast.makeText(this, "Transaction deleted and queued for Oracle sync", Toast.LENGTH_SHORT).show()
+                    showSnack("Transaction deleted. The removal is queued for Oracle.")
                 } else {
                     Toast.makeText(this, "Could not void transaction", Toast.LENGTH_LONG).show()
                 }
@@ -494,22 +513,23 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
             )
         }
 
-        if (
-            hasStableMemoryKey &&
-            checkboxRememberPayee.isChecked &&
-            !memoryKey.isNullOrBlank()
-        ) {
-            Toast.makeText(
-                this,
-                "Category updated and remembered for matching transactions",
-                Toast.LENGTH_LONG
-            ).show()
+        val previousCategory = tx.category
+        val remembered = hasStableMemoryKey && checkboxRememberPayee.isChecked && !memoryKey.isNullOrBlank()
+        if (remembered) {
+            showSnack("Category updated and remembered for matching transactions")
+        } else if (!previousCategory.isNullOrBlank() && previousCategory != selectedCategory) {
+            // Undo only for a single-row change; a remembered change touches several rows.
+            showSnack("Category set to ${HomeFormat.sentenceCase(selectedCategory)}", "Undo") {
+                repository.updateTransactionCategory(tx.id, previousCategory)
+                repository.getTransactionById(tx.id)?.let { restored ->
+                    FinanceSyncBridge.enqueueCategoryUpdate(this, restored) { _ ->
+                        runOnUiThread { loadOracleSummary() }
+                    }
+                }
+                loadTransactions()
+            }
         } else {
-            Toast.makeText(
-                this,
-                "Category updated",
-                Toast.LENGTH_SHORT
-            ).show()
+            showSnack("Category updated")
         }
 
         dialog.dismiss()

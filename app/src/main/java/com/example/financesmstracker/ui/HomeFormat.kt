@@ -60,6 +60,42 @@ object HomeFormat {
     fun payeeOrNull(tx: Transaction): String? =
         listOf(tx.merchantName, tx.payeeId).firstOrNull { !it.isNullOrBlank() }?.trim()
 
+    /** A day heading in the list, with what was spent that day. */
+    data class DayHeader(val label: String, val spentMinor: Long)
+
+    /** Money out that counts as spending: rupee debits that are not transfers or card-bill payments. */
+    fun isSpending(tx: Transaction): Boolean =
+        tx.transactionType == TransactionType.DEBIT &&
+            tx.currency.equals("INR", ignoreCase = true) &&
+            !tx.category.equals("TRANSFER", ignoreCase = true) &&
+            !tx.category.equals("BILL_PAYMENT", ignoreCase = true)
+
+    fun daySpendMinor(day: List<Transaction>): Long = day.filter { isSpending(it) }.sumOf { it.amountPaise }
+
+    /** "Due today", "Due tomorrow", "Due in 5 days". */
+    fun dueLabel(daysUntil: Int): String = when {
+        daysUntil <= 0 -> "Due today"
+        daysUntil == 1 -> "Due tomorrow"
+        else -> "Due in $daysUntil days"
+    }
+
+    fun dueIsUrgent(daysUntil: Int): Boolean = daysUntil <= 3
+
+    private val ACRONYM_BANKS = setOf("SBI", "HDFC", "ICICI", "IDFC", "HSBC", "PNB", "RBL", "IDBI", "BOB", "UCO", "AU", "YES")
+
+    /** "AXIS" -> "Axis", "HDFC" stays "HDFC". */
+    fun bankLabel(bank: String?): String? {
+        val b = bank?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return if (b.uppercase(Locale.ROOT) in ACRONYM_BANKS) b.uppercase(Locale.ROOT) else sentenceCase(b)
+    }
+
+    /** "BANK_TRANSFER" -> "Bank transfer"; short codes such as UPI or NEFT stay uppercase. */
+    fun sentenceCase(raw: String): String {
+        val words = raw.replace('_', ' ').trim()
+        if (words.length <= 4 && !words.contains(' ')) return words.uppercase(Locale.ROOT)
+        return words.lowercase(Locale.ROOT).replaceFirstChar { it.uppercase() }
+    }
+
     data class CategoryTotal(val category: String, val minor: Long)
 
     /**

@@ -1,6 +1,5 @@
 package com.example.financesmstracker
 
-import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.widget.ProgressBar
 import com.example.financesmstracker.ui.HomeFormat
@@ -91,13 +90,13 @@ private fun MainActivity.dialogContent(build: LinearLayout.() -> Unit) = ScrollV
  * [save] is called once per row with a client; the dialog closes only on success.
  */
 private fun <T> MainActivity.saveRows(
-    dialog: AlertDialog,
+    sheet: FormSheet,
     rows: List<T>,
     successMessage: String,
     failureMessage: String,
     save: (FinanceSyncClient, T) -> Result<*>
 ) {
-    dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+    sheet.positiveEnabled = false
     oracleExecutor.execute {
         var failure: Throwable? = null
         val client = FinanceSyncClient(this@saveRows)
@@ -109,11 +108,11 @@ private fun <T> MainActivity.saveRows(
             }
         }
         runOnUiThread {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+            sheet.positiveEnabled = true
             if (failure == null) {
-                dialog.dismiss()
+                sheet.dismiss()
                 loadOracleSummary()
-                Toast.makeText(this@saveRows, successMessage, Toast.LENGTH_SHORT).show()
+                showSnack(successMessage)
             } else {
                 Toast.makeText(
                     this@saveRows,
@@ -141,8 +140,6 @@ private class CardRow(
     /** Usage bar + due date; rebuilt whenever the card's limit, due day or sharing changes. */
     val summary: LinearLayout
 )
-
-private fun MainActivity.cardMeta() = CardMeta(getSharedPreferences("card_meta", android.content.Context.MODE_PRIVATE))
 
 private fun MainActivity.cardTitle(account: OracleAccount) = buildString {
     append(displayAccountName(account.name))
@@ -288,49 +285,39 @@ private fun MainActivity.showCardSettingsDialog(
         }
     }
 
-    val dialog = MaterialAlertDialogBuilder(this)
-        .setTitle(cardTitle(account))
-        .setView(content)
-        .setNegativeButton("Cancel", null)
-        .setPositiveButton("Save", null)
-        .create()
-
-    dialog.setOnShowListener {
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val limitText = limit.text.toString().trim()
-            val limitMinor = if (limitText.isEmpty()) 0L else MoneyInput.parseMinor(limitText)
-            if (limitMinor == null) {
-                limit.error = "Enter a valid limit"
-                limit.requestFocus()
-                return@setOnClickListener
-            }
-            val availText = available.text.toString().trim()
-            val availMinor = if (availText.isEmpty()) null else MoneyInput.parseMinor(availText)
-            if (availText.isNotEmpty() && availMinor == null) {
-                available.error = "Enter a valid amount"
-                available.requestFocus()
-                return@setOnClickListener
-            }
-            val dueText = due.text.toString().trim()
-            val dueDay = if (dueText.isEmpty()) 0 else dueText.toIntOrNull()
-            if (dueDay == null || (dueDay != 0 && dueDay !in 1..31)) {
-                due.error = "Use a day from 1 to 31"
-                due.requestFocus()
-                return@setOnClickListener
-            }
-            // Limit, due day and sharing are kept on this phone only; the server never needs them.
-            meta.save(
-                account.id, limitMinor, dueDay,
-                checks.filter { it.second.isChecked }.map { it.first.id }.toSet(),
-                accounts.map { it.id }
-            )
-            val newIds = meta.sharedWith(account.id, accounts.map { it.id })
-            meta.setAvailable(account.id, availMinor, accounts.filter { it.id in newIds }.sumOf { it.balanceMinor })
-            dialog.dismiss()
-            onSaved()
+    formSheet(title = cardTitle(account), subtitle = "Limit, due date and shared limit", body = content) { sheet ->
+        val limitText = limit.text.toString().trim()
+        val limitMinor = if (limitText.isEmpty()) 0L else MoneyInput.parseMinor(limitText)
+        if (limitMinor == null) {
+            limit.error = "Enter a valid limit"
+            limit.requestFocus()
+            return@formSheet
         }
+        val availText = available.text.toString().trim()
+        val availMinor = if (availText.isEmpty()) null else MoneyInput.parseMinor(availText)
+        if (availText.isNotEmpty() && availMinor == null) {
+            available.error = "Enter a valid amount"
+            available.requestFocus()
+            return@formSheet
+        }
+        val dueText = due.text.toString().trim()
+        val dueDay = if (dueText.isEmpty()) 0 else dueText.toIntOrNull()
+        if (dueDay == null || (dueDay != 0 && dueDay !in 1..31)) {
+            due.error = "Use a day from 1 to 31"
+            due.requestFocus()
+            return@formSheet
+        }
+        // Limit, due day and sharing are kept on this phone only; the server never needs them.
+        meta.save(
+            account.id, limitMinor, dueDay,
+            checks.filter { it.second.isChecked }.map { it.first.id }.toSet(),
+            accounts.map { it.id }
+        )
+        val newIds = meta.sharedWith(account.id, accounts.map { it.id })
+        meta.setAvailable(account.id, availMinor, accounts.filter { it.id in newIds }.sumOf { it.balanceMinor })
+        sheet.dismiss()
+        onSaved()
     }
-    dialog.show()
 }
 
 private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, title: String) {
@@ -379,41 +366,31 @@ private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, ti
     }
     renderSummaries()
 
-    val dialog = MaterialAlertDialogBuilder(this)
-        .setTitle(title)
-        .setView(scrollView)
-        .setNegativeButton("Cancel", null)
-        .setPositiveButton("Save", null)
-        .create()
-
-    dialog.setOnShowListener {
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val values = mutableListOf<Triple<OracleAccount, Long, Long>>()
-            for (row in rows) {
-                val bill = MoneyInput.parseMinor(row.bill.text.toString())
-                val active = MoneyInput.parseMinor(row.active.text.toString(), allowNegative = true)
-                if (bill == null) {
-                    row.bill.error = "Enter a valid bill amount"
-                    row.bill.requestFocus()
-                    return@setOnClickListener
-                }
-                if (active == null) {
-                    row.active.error = "Enter a valid active amount"
-                    row.active.requestFocus()
-                    return@setOnClickListener
-                }
-                values += Triple(row.account, bill, active)
+    formSheet(title = title, subtitle = "Tap a card name to set its limit and due date", body = scrollView) { sheet ->
+        val values = mutableListOf<Triple<OracleAccount, Long, Long>>()
+        for (row in rows) {
+            val bill = MoneyInput.parseMinor(row.bill.text.toString())
+            val active = MoneyInput.parseMinor(row.active.text.toString(), allowNegative = true)
+            if (bill == null) {
+                row.bill.error = "Enter a valid bill amount"
+                row.bill.requestFocus()
+                return@formSheet
             }
-            saveRows(dialog, values, "Credit card amounts updated", "Could not update credit cards: ") { client, (account, bill, active) ->
-                client.updateAccountBalance(
-                    account = account,
-                    balanceMinor = bill + active,
-                    billBalanceMinor = bill
-                )
+            if (active == null) {
+                row.active.error = "Enter a valid active amount"
+                row.active.requestFocus()
+                return@formSheet
             }
+            values += Triple(row.account, bill, active)
+        }
+        saveRows(sheet, values, "Credit card amounts updated", "Could not update credit cards: ") { client, (account, bill, active) ->
+            client.updateAccountBalance(
+                account = account,
+                balanceMinor = bill + active,
+                billBalanceMinor = bill
+            )
         }
     }
-    dialog.show()
 }
 
 /** Bank accounts keep the single current-balance editor. */
@@ -430,30 +407,19 @@ private fun MainActivity.showBankAccountsDialog(accounts: List<OracleAccount>, t
         }
     }
 
-    val dialog = MaterialAlertDialogBuilder(this)
-        .setTitle(title)
-        .setMessage("Manually set the current balance for each bank account.")
-        .setView(scrollView)
-        .setNegativeButton("Cancel", null)
-        .setPositiveButton("Save", null)
-        .create()
-
-    dialog.setOnShowListener {
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val values = mutableListOf<Pair<OracleAccount, Long>>()
-            for ((account, input) in inputs) {
-                val amount = MoneyInput.parseMinor(input.text.toString())
-                if (amount == null) {
-                    input.error = "Enter a valid amount"
-                    input.requestFocus()
-                    return@setOnClickListener
-                }
-                values += account to amount
+    formSheet(title = title, subtitle = "Manually set the current balance for each bank account.", body = scrollView) { sheet ->
+        val values = mutableListOf<Pair<OracleAccount, Long>>()
+        for ((account, input) in inputs) {
+            val amount = MoneyInput.parseMinor(input.text.toString())
+            if (amount == null) {
+                input.error = "Enter a valid amount"
+                input.requestFocus()
+                return@formSheet
             }
-            saveRows(dialog, values, "Account balances updated", "Could not update accounts: ") { client, (account, balance) ->
-                client.updateAccountBalance(account, balance)
-            }
+            values += account to amount
+        }
+        saveRows(sheet, values, "Account balances updated", "Could not update accounts: ") { client, (account, balance) ->
+            client.updateAccountBalance(account, balance)
         }
     }
-    dialog.show()
 }

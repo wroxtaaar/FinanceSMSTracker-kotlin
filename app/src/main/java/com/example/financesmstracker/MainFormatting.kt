@@ -1,5 +1,6 @@
 package com.example.financesmstracker
 
+import com.example.financesmstracker.util.IndianMoney
 import java.util.Locale
 
 internal fun displayAccountName(rawName: String): String {
@@ -9,9 +10,9 @@ internal fun displayAccountName(rawName: String): String {
     ) { it.value.uppercase() }
 }
 
+/** Plain "1234.50" for text inputs (no grouping, so it can be edited and parsed back). */
 internal fun formatDecimalMinor(minor: Long): String =
-    String.format(Locale.getDefault(), "%.2f", minor / 100.0)
+    String.format(Locale.US, "%.2f", minor / 100.0)
 
-internal fun formatMinor(minor: Long): String {
-    return String.format(Locale.getDefault(), "₹%,.2f", minor / 100.0)
-}
+/** Display amount in Indian grouping: ₹1,52,922.05. */
+internal fun formatMinor(minor: Long): String = IndianMoney.format(minor)
