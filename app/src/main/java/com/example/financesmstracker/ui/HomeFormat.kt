@@ -86,7 +86,9 @@ object HomeFormat {
     /** "AXIS" -> "Axis", "HDFC" stays "HDFC". */
     fun bankLabel(bank: String?): String? {
         val b = bank?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        return if (b.uppercase(Locale.ROOT) in ACRONYM_BANKS) b.uppercase(Locale.ROOT) else sentenceCase(b)
+        if (b.uppercase(Locale.ROOT) in ACRONYM_BANKS) return b.uppercase(Locale.ROOT)
+        // Not sentenceCase(): that keeps words of four letters or fewer uppercase (right for UPI, wrong for Axis).
+        return b.replace('_', ' ').lowercase(Locale.ROOT).replaceFirstChar { it.uppercase() }
     }
 
     /** "BANK_TRANSFER" -> "Bank transfer"; short codes such as UPI or NEFT stay uppercase. */
