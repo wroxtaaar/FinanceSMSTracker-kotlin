@@ -98,4 +98,33 @@ object HomeFormat {
         c.timeInMillis = start
         return "${MONTHS[c.get(Calendar.MONTH)]} ${c.get(Calendar.YEAR)}"
     }
+
+    /** Whole days from [now] until the next [dueDay] of a month (0 = today). A day past month end falls on its last day. */
+    fun daysUntilDue(dueDay: Int, now: Long, zone: TimeZone = TimeZone.getDefault()): Int {
+        val today = dayStart(now, zone)
+        val c = Calendar.getInstance(zone)
+        c.timeInMillis = today
+        fun dueIn(monthOffset: Int): Long {
+            val d = Calendar.getInstance(zone)
+            d.timeInMillis = today
+            d.set(Calendar.DAY_OF_MONTH, 1)
+            d.add(Calendar.MONTH, monthOffset)
+            d.set(Calendar.DAY_OF_MONTH, minOf(dueDay, d.getActualMaximum(Calendar.DAY_OF_MONTH)))
+            return d.timeInMillis
+        }
+        var due = dueIn(0)
+        if (due < today) due = dueIn(1)
+        val dst = Calendar.getInstance(zone)
+        dst.timeInMillis = due
+        // Count calendar days, not 24-hour blocks, so a DST change cannot shift the answer.
+        var days = 0
+        val walk = Calendar.getInstance(zone)
+        walk.timeInMillis = today
+        while (walk.timeInMillis < due && days < 400) { walk.add(Calendar.DAY_OF_YEAR, 1); days++ }
+        return days
+    }
+
+    /** Share of the limit in use, 0..100 (rounded); 0 when no limit is set. A credit balance counts as 0. */
+    fun utilisationPercent(outstandingMinor: Long, limitMinor: Long): Int =
+        if (limitMinor <= 0) 0 else (outstandingMinor.coerceAtLeast(0) * 100 / limitMinor).coerceIn(0, 100).toInt()
 }

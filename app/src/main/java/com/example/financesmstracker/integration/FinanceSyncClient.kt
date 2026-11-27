@@ -579,7 +579,7 @@ data class ExpenseLink(
 }
 
 /** One expense on either side of the ledger / Expense comparison. */
-data class ExpenseCheckItem(val timestamp: Long, val label: String, val amountMinor: Long)
+data class ExpenseCheckItem(val timestamp: Long, val label: String, val amountMinor: Long, val id: String = "")
 
 data class ExpenseCheck(
     val configured: Boolean,
@@ -596,7 +596,7 @@ data class ExpenseCheck(
                 val array = json.optJSONArray(name) ?: return emptyList()
                 return (0 until array.length()).map { i ->
                     val o = array.getJSONObject(i)
-                    ExpenseCheckItem(stamp(o), label(o), o.optLong("amountMinor", 0))
+                    ExpenseCheckItem(stamp(o), label(o), o.optLong("amountMinor", 0), o.optString("id"))
                 }
             }
             return ExpenseCheck(

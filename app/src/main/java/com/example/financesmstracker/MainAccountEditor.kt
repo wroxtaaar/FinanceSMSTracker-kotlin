@@ -1,6 +1,10 @@
 package com.example.financesmstracker
 
-import android.app.AlertDialog
+import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import android.widget.ProgressBar
+import com.example.financesmstracker.ui.HomeFormat
+import android.graphics.Color
 import android.text.InputType
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -37,7 +41,7 @@ internal fun MainActivity.showManualAccountsDialog(
     val title = if (accountType == "BANK_ACCOUNT") "Edit Bank Accounts" else "Credit Cards"
 
     if (accounts.isEmpty()) {
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle(title)
             .setMessage("No matching accounts configured on Oracle.")
             .setPositiveButton("OK", null)
@@ -52,9 +56,10 @@ private fun MainActivity.accountLabel(account: OracleAccount, topPadding: Int, b
     TextView(this).apply {
         text = buildString {
             append(displayAccountName(account.name))
-            account.last4?.let { append(" ••••").append(it) }
+            account.last4?.let { append("  ••••").append(it) }
         }
-        textSize = 14f
+        textSize = 15f
+        setTypeface(typeface, android.graphics.Typeface.BOLD)
         setPadding(0, topPadding, 0, bottomPadding)
     }
 
@@ -72,7 +77,7 @@ private fun MainActivity.dialogContent(build: LinearLayout.() -> Unit) = ScrollV
     isFillViewport = true
     addView(LinearLayout(this@dialogContent).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(48, 0, 48, 0)
+        setPadding(dp(20), dp(8), dp(20), 0)
         build()
     })
 }
@@ -125,9 +130,20 @@ private fun <T> MainActivity.saveRows(
  * Bill + Active Spend. Card debits increase Active Spend; card credits and
  * payments reduce Bill first.
  */
-private class CardRow(val account: OracleAccount, val bill: EditText, val active: EditText)
+private class CardRow(
+    val account: OracleAccount,
+    val bill: EditText,
+    val active: EditText,
+    val limit: EditText,
+    val dueDay: EditText
+)
+
+private const val CARD_META_PREFS = "card_meta"
+
+private fun MainActivity.cardMeta() = getSharedPreferences(CARD_META_PREFS, android.content.Context.MODE_PRIVATE)
 
 private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, title: String) {
+    val meta = cardMeta()
     val rows = accounts.map { account ->
         // Bill is never negative. Active Spend = outstanding - Bill and may be
         // negative: paying more than the bill, or a refund, leaves a credit.
@@ -135,41 +151,72 @@ private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, ti
         CardRow(
             account,
             amountInput("Bill", billMinor),
-            amountInput("Active spend", account.balanceMinor - billMinor, signed = true)
+            amountInput("Active spend", account.balanceMinor - billMinor, signed = true),
+            amountInput("Credit limit (optional)", meta.getLong("limit_" + account.id, 0L)).apply {
+                if (meta.getLong("limit_" + account.id, 0L) == 0L) setText("")
+            },
+            EditText(this).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER
+                setSingleLine(true)
+                hint = "1-31"
+                val d = meta.getInt("due_" + account.id, 0)
+                if (d in 1..31) setText(d.toString())
+            }
         )
     }
 
     val scrollView = dialogContent {
-        addView(LinearLayout(this@showCreditCardsDialog).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(
-                TextView(this@showCreditCardsDialog).apply { text = "Bill"; textSize = 12f },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            )
-            addView(
-                TextView(this@showCreditCardsDialog).apply { text = "Active Spend"; textSize = 12f },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = 12 }
-            )
-        })
         rows.forEach { row ->
-            addView(accountLabel(row.account, 10, 4))
-            addView(LinearLayout(this@showCreditCardsDialog).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                row.bill.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { marginEnd = 6 }
-                row.active.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { marginStart = 6 }
-                addView(row.bill)
-                addView(row.active)
+            addView(tile {
+                addView(accountLabel(row.account, 0, 4))
+
+                val outstanding = row.account.balanceMinor
+                val limitMinor = meta.getLong("limit_" + row.account.id, 0L)
+                if (limitMinor > 0) {
+                    val percent = HomeFormat.utilisationPercent(outstanding, limitMinor)
+                    addView(ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
+                        max = 100
+                        progress = percent
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(8))
+                    })
+                    addView(caption("${formatMinor(maxOf(outstanding, 0))} of ${formatMinor(limitMinor)} used ($percent%)"))
+                }
+                val dueDay = meta.getInt("due_" + row.account.id, 0)
+                if (dueDay in 1..31 && row.account.billBalanceMinor > 0) {
+                    val days = HomeFormat.daysUntilDue(dueDay, System.currentTimeMillis())
+                    addView(TextView(context).apply {
+                        text = when (days) {
+                            0 -> "Bill due today"
+                            1 -> "Bill due tomorrow"
+                            else -> "Bill due in $days days"
+                        }
+                        textSize = 13f
+                        setTypeface(typeface, android.graphics.Typeface.BOLD)
+                        if (days <= 3) setTextColor(Color.parseColor("#D64545"))
+                    })
+                }
+
+                fun pair(leftLabel: String, left: EditText, rightLabel: String, right: EditText) {
+                    addView(LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        setPadding(0, dp(8), 0, 0)
+                        addView(LinearLayout(context).apply {
+                            orientation = LinearLayout.VERTICAL
+                            addView(caption(leftLabel)); addView(left)
+                        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6) })
+                        addView(LinearLayout(context).apply {
+                            orientation = LinearLayout.VERTICAL
+                            addView(caption(rightLabel)); addView(right)
+                        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(6) })
+                    })
+                }
+                pair("Bill", row.bill, "Active spend", row.active)
+                pair("Credit limit", row.limit, "Bill due day", row.dueDay)
             })
         }
     }
 
-    val dialog = AlertDialog.Builder(this)
+    val dialog = MaterialAlertDialogBuilder(this)
         .setTitle(title)
         .setView(scrollView)
         .setNegativeButton("Cancel", null)
@@ -179,6 +226,7 @@ private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, ti
     dialog.setOnShowListener {
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val values = mutableListOf<Triple<OracleAccount, Long, Long>>()
+            val editor = meta.edit()
             for (row in rows) {
                 val bill = MoneyInput.parseMinor(row.bill.text.toString())
                 val active = MoneyInput.parseMinor(row.active.text.toString(), allowNegative = true)
@@ -192,8 +240,25 @@ private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, ti
                     row.active.requestFocus()
                     return@setOnClickListener
                 }
+                val limitText = row.limit.text.toString().trim()
+                val limit = if (limitText.isEmpty()) 0L else MoneyInput.parseMinor(limitText)
+                if (limit == null) {
+                    row.limit.error = "Enter a valid limit"
+                    row.limit.requestFocus()
+                    return@setOnClickListener
+                }
+                val dueText = row.dueDay.text.toString().trim()
+                val due = if (dueText.isEmpty()) 0 else dueText.toIntOrNull()
+                if (due == null || (due != 0 && due !in 1..31)) {
+                    row.dueDay.error = "Use a day from 1 to 31"
+                    row.dueDay.requestFocus()
+                    return@setOnClickListener
+                }
+                // Limit and due day are kept on this phone only; the server never needs them.
+                editor.putLong("limit_" + row.account.id, limit).putInt("due_" + row.account.id, due)
                 values += Triple(row.account, bill, active)
             }
+            editor.apply()
             saveRows(dialog, values, "Credit card amounts updated", "Could not update credit cards: ") { client, (account, bill, active) ->
                 client.updateAccountBalance(
                     account = account,
@@ -212,12 +277,15 @@ private fun MainActivity.showBankAccountsDialog(accounts: List<OracleAccount>, t
 
     val scrollView = dialogContent {
         inputs.forEach { (account, input) ->
-            addView(accountLabel(account, 8, 2))
-            addView(input)
+            addView(tile {
+                addView(accountLabel(account, 0, 2))
+                addView(caption("Current balance"))
+                addView(input)
+            })
         }
     }
 
-    val dialog = AlertDialog.Builder(this)
+    val dialog = MaterialAlertDialogBuilder(this)
         .setTitle(title)
         .setMessage("Manually set the current balance for each bank account.")
         .setView(scrollView)

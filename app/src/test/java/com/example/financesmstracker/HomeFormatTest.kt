@@ -63,4 +63,21 @@ class HomeFormatTest {
         assertNull(HomeFormat.payeeOrNull(tx(1, 1, "FOOD", merchant = "  ")))
         assertEquals("TANVEER HOTEL", HomeFormat.payeeOrNull(tx(1, 1, "FOOD", merchant = "TANVEER HOTEL")))
     }
+
+    @Test
+    fun dueDayCountsToTheNextOccurrence() {
+        val now = at(2026, Calendar.NOVEMBER, 27, 9)
+        assertEquals(3, HomeFormat.daysUntilDue(30, now, ist))
+        assertEquals(0, HomeFormat.daysUntilDue(27, now, ist))
+        assertEquals(8, HomeFormat.daysUntilDue(5, now, ist)) // 5 Dec
+        assertEquals(3, HomeFormat.daysUntilDue(31, at(2026, Calendar.FEBRUARY, 25), ist)) // 28 Feb
+    }
+
+    @Test
+    fun utilisationIsClampedAndZeroWithoutALimit() {
+        assertEquals(0, HomeFormat.utilisationPercent(5_000, 0))
+        assertEquals(25, HomeFormat.utilisationPercent(25_000, 100_000))
+        assertEquals(100, HomeFormat.utilisationPercent(250_000, 100_000))
+        assertEquals(0, HomeFormat.utilisationPercent(-500, 100_000))
+    }
 }

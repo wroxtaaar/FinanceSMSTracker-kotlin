@@ -25,7 +25,7 @@ private const val EXPENSE_PREFS = "expense_prefs"
 private const val KEY_LAST_GROUP = "last_group"
 private const val KEY_LAST_PAYER = "last_payer"
 
-private fun MainActivity.oracleIdOf(tx: Transaction): String =
+internal fun MainActivity.oracleIdOf(tx: Transaction): String =
     FinanceSyncBridge.oracleVoidId(tx.id, repository.getSmsHashById(tx.id), OracleIds.scheme(this))
 
 private fun rupees(minor: Long): String = "₹" + String.format(Locale.US, "%.2f", minor / 100.0)

@@ -1,6 +1,6 @@
 package com.example.financesmstracker
 
-import android.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.graphics.Color
 import android.text.SpannableStringBuilder
 import android.text.Spanned
@@ -98,7 +98,7 @@ internal fun MainActivity.showSpendingDialog(monthOffset: Int) {
         })
     }
 
-    AlertDialog.Builder(this)
+    MaterialAlertDialogBuilder(this)
         .setTitle("Spending · " + HomeFormat.monthTitle(start))
         .setView(ScrollView(this).apply { addView(box) })
         .setNegativeButton("◀ Earlier") { _, _ -> showSpendingDialog(monthOffset - 1) }
