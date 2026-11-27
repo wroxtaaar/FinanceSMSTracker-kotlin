@@ -18,6 +18,36 @@ internal class CardMeta(private val prefs: SharedPreferences) {
     /** The limit that applies to [id]: the shared group's limit, or its own. 0 = not set. */
     fun limitMinor(id: String): Long = prefs.getLong("limit_" + (groupOf(id) ?: id), 0L)
 
+    private fun poolKey(id: String) = groupOf(id) ?: id
+
+    /**
+     * The limit still available right now, or null when the user never entered one. The user types
+     * the available limit once; after that it follows the ledger: every spend lowers it and every
+     * bill payment raises it. [combinedOutstandingNow] is the signed outstanding of all cards on
+     * the shared limit. Money locked in an EMI is never in the outstanding, so it stays blocked.
+     */
+    fun availableMinor(id: String, combinedOutstandingNow: Long): Long? {
+        val key = poolKey(id)
+        if (!prefs.contains("avail_$key")) return null
+        val atSet = prefs.getLong("avail_$key", 0L)
+        val outstandingAtSet = prefs.getLong("availOut_$key", 0L)
+        val now = atSet - (combinedOutstandingNow - outstandingAtSet)
+        val limit = limitMinor(id)
+        return if (limit > 0) now.coerceIn(0L, limit) else now.coerceAtLeast(0L)
+    }
+
+    /** Remember the available limit typed by the user (null clears it). */
+    fun setAvailable(id: String, availableMinor: Long?, combinedOutstandingNow: Long) {
+        val key = poolKey(id)
+        val editor = prefs.edit()
+        if (availableMinor == null) {
+            editor.remove("avail_$key").remove("availOut_$key")
+        } else {
+            editor.putLong("avail_$key", availableMinor).putLong("availOut_$key", combinedOutstandingNow)
+        }
+        editor.apply()
+    }
+
     /** Bill due day 1..31, or 0 when not set. */
     fun dueDay(id: String): Int = prefs.getInt("due_$id", 0).takeIf { it in 1..31 } ?: 0
 

@@ -60,6 +60,27 @@ class CardMetaTest {
         assertEquals(200_000_00L, meta.limitMinor("ace"))
         assertEquals(50_000_00L, meta.limitMinor("hdfc"))
     }
+
+    @Test
+    fun availableLimitFallsWithSpendsAndRisesWithPayments() {
+        meta.save("a", 100_000, 5, emptySet(), listOf("a"))
+        assertEquals(null, meta.availableMinor("a", 20_000))
+        meta.setAvailable("a", 60_000, 20_000)
+        assertEquals(60_000L, meta.availableMinor("a", 20_000))
+        assertEquals(50_000L, meta.availableMinor("a", 30_000)) // spent 10,000
+        assertEquals(70_000L, meta.availableMinor("a", 10_000)) // paid 10,000
+        assertEquals(100_000L, meta.availableMinor("a", -50_000)) // clamped to the limit
+        assertEquals(0L, meta.availableMinor("a", 500_000)) // clamped at zero
+    }
+
+    @Test
+    fun availableLimitIsPooledForSharedCardsAndCanBeCleared() {
+        meta.save("a", 200_000, 0, setOf("b"), listOf("a", "b"))
+        meta.setAvailable("a", 150_000, 10_000)
+        assertEquals(140_000L, meta.availableMinor("b", 20_000))
+        meta.setAvailable("b", null, 20_000)
+        assertEquals(null, meta.availableMinor("a", 20_000))
+    }
 }
 
 /** In-memory SharedPreferences, so these tests run on the plain JVM (Robolectric cannot load on this build's SDK). */

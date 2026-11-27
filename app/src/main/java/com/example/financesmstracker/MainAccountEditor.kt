@@ -167,8 +167,19 @@ private fun MainActivity.renderCardSummary(
     val own = account.balanceMinor.coerceAtLeast(0L)
     val combined = group.sumOf { it.balanceMinor.coerceAtLeast(0L) }
 
+    val combinedSigned = group.sumOf { it.balanceMinor }
+    val available = meta.availableMinor(account.id, combinedSigned)
+
     var usage: String? = null
-    if (limitMinor > 0) {
+    if (limitMinor > 0 && available != null) {
+        val usedPercent = HomeFormat.utilisationPercent(limitMinor - available, limitMinor)
+        container.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = usedPercent
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(8))
+        })
+        usage = "${formatMinor(available)} available of ${formatMinor(limitMinor)}" + if (shared) " (shared)" else ""
+    } else if (limitMinor > 0) {
         val ownPercent = HomeFormat.utilisationPercent(own, limitMinor)
         val groupPercent = HomeFormat.utilisationPercent(combined, limitMinor)
         container.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -242,6 +253,11 @@ private fun MainActivity.showCardSettingsDialog(
     val limit = amountInput("Credit limit (optional)", currentLimit).apply {
         if (currentLimit == 0L) setText("")
     }
+    val groupNow = accounts.filter { it.id in meta.sharedWith(account.id, accounts.map { a -> a.id }) }
+    val currentAvailable = meta.availableMinor(account.id, groupNow.sumOf { it.balanceMinor })
+    val available = amountInput("Available limit now (optional)", currentAvailable ?: 0L).apply {
+        if (currentAvailable == null) setText("")
+    }
     val due = EditText(this).apply {
         inputType = InputType.TYPE_CLASS_NUMBER
         setSingleLine(true)
@@ -260,6 +276,9 @@ private fun MainActivity.showCardSettingsDialog(
     val content = dialogContent {
         addView(caption("Credit limit"))
         addView(limit)
+        addView(caption("Available limit now").apply { setPadding(0, dp(12), 0, 0) })
+        addView(available)
+        addView(caption("Type it once from your bank app. It then drops with spends and rises with bill payments; EMI amounts stay blocked.").apply { textSize = 11f })
         addView(caption("Bill due day").apply { setPadding(0, dp(12), 0, 0) })
         addView(due)
         if (checks.isNotEmpty()) {
@@ -285,6 +304,13 @@ private fun MainActivity.showCardSettingsDialog(
                 limit.requestFocus()
                 return@setOnClickListener
             }
+            val availText = available.text.toString().trim()
+            val availMinor = if (availText.isEmpty()) null else MoneyInput.parseMinor(availText)
+            if (availText.isNotEmpty() && availMinor == null) {
+                available.error = "Enter a valid amount"
+                available.requestFocus()
+                return@setOnClickListener
+            }
             val dueText = due.text.toString().trim()
             val dueDay = if (dueText.isEmpty()) 0 else dueText.toIntOrNull()
             if (dueDay == null || (dueDay != 0 && dueDay !in 1..31)) {
@@ -298,6 +324,8 @@ private fun MainActivity.showCardSettingsDialog(
                 checks.filter { it.second.isChecked }.map { it.first.id }.toSet(),
                 accounts.map { it.id }
             )
+            val newIds = meta.sharedWith(account.id, accounts.map { it.id })
+            meta.setAvailable(account.id, availMinor, accounts.filter { it.id in newIds }.sumOf { it.balanceMinor })
             dialog.dismiss()
             onSaved()
         }
