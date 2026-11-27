@@ -585,3 +585,38 @@ def test_card_spend_email_first_then_sms_is_not_double_counted():
         ).fetchone()["balance_minor"]
     assert card == 5000
     assert (get_manual_splitwise_total("INR") or 0) - before == 5000
+
+
+def test_two_real_purchases_with_one_sms_keep_the_second_email_as_its_own_row():
+    """Two same-amount purchases minutes apart: both e-mails arrive, only the first SMS does."""
+    from app.ledger import repair_duplicate_transactions, sync_transaction, reconcile_duplicate_transaction
+
+    class T:
+        def __init__(self, id, ts):
+            self.id = id
+            self.amountMinor = 35711
+            self.currency = "INR"
+            self.type = "DEBIT"
+            self.paymentMethod = "CARD"
+            self.accountType = "CREDIT_CARD"
+            self.bank = "AXIS"
+            self.merchantOrPayee = None
+            self.accountLast4 = "9206"
+            self.reference = None
+            self.timestamp = ts
+            self.category = "GROCERIES"
+            self.confidence = 0.95
+
+    set_balance("two-buys-card", "Two buys", "INR", "CREDIT_CARD", "AXIS", "9206", 0)
+    base = 1_900_000_000_000
+    sync_transaction(T("sms-first", base + 6_000))
+    sync_transaction(T("gmail:first", base))
+    assert reconcile_duplicate_transaction("gmail:first")["canonical"] == "sms-first"
+    sync_transaction(T("gmail:second", base + 112_000))
+    assert reconcile_duplicate_transaction("gmail:second") is None
+    repair_duplicate_transactions()
+
+    with connection() as conn:
+        rows = {r["id"]: r["duplicate_of"] for r in conn.execute("SELECT id, duplicate_of FROM transactions").fetchall()}
+    assert rows["gmail:first"] == "sms-first"
+    assert rows["gmail:second"] is None

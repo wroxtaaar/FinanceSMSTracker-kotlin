@@ -434,8 +434,17 @@ class _DuplicateRepair:
                 and not _is_card_bill_credit(candidate)
                 and _is_mirror_id(candidate["id"])
                 and _rows_are_duplicate(row, candidate)
+                and not self._second_mirror_of_same_kind(row, candidate)
             )
         ]
+
+    def _second_mirror_of_same_kind(self, row, candidate):
+        """The real row of the pair already absorbed another mirror of this kind."""
+        row_mirror, cand_mirror = _is_mirror_id(row["id"]), _is_mirror_id(candidate["id"])
+        if row_mirror == cand_mirror:
+            return False
+        real, mirror = (candidate, row) if row_mirror else (row, candidate)
+        return _mirror_already_attached(self.conn, real["id"], mirror["id"])
 
     def _collapse_unreferenced_rows(self):
         """An unreferenced row may merge into exactly one distinct reference."""
@@ -503,6 +512,19 @@ def repair_duplicate_transactions():
         return _DuplicateRepair(conn, rows).run()
 
 
+def _mirror_already_attached(conn, real_id, mirror_id):
+    """True when this real row already absorbed another mirror of the same kind (e-mail / notification).
+
+    A bank sends one alert e-mail per transaction, so a second, different e-mail with the same amount and
+    card is a second purchase (the SMS for it may simply not have arrived), not another copy of the first.
+    """
+    kind = _mirror_kind(mirror_id)
+    rows = conn.execute(
+        "SELECT id FROM transactions WHERE duplicate_of=? AND id<>?", (real_id, mirror_id)
+    ).fetchall()
+    return any(_mirror_kind(r["id"]) == kind for r in rows)
+
+
 def _identity_enrichment(canonical, duplicate):
     """Bank/account identity a duplicate can supply to a canonical row lacking it."""
     updates = {}
@@ -540,6 +562,7 @@ def reconcile_duplicate_transaction(transaction_id):
                 (tx["id"],tx["timestamp"])
             ).fetchall()
 
+            candidates=[c for c in candidates if not _mirror_already_attached(conn,c["id"],tx["id"])]
             strong=[]
             for c in candidates:
                 candidate_ref = normalize_reference(c["reference"])
@@ -630,6 +653,7 @@ def reconcile_duplicate_transaction(transaction_id):
                 (tx["id"],tx["amount_minor"],tx["orig_amount_minor"],tx["orig_currency"],tx["currency"],tx["type"],tx["timestamp"],tx["timestamp"])
             ).fetchall()
 
+        candidates=[c for c in candidates if not _mirror_already_attached(conn,c["id"],tx["id"])]
         strong=[]
         for c in candidates:
             score=0
