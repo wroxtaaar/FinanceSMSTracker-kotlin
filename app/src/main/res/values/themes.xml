@@ -8,5 +8,68 @@
         <item name="colorSurface">@color/app_background</item>
     </style>
 
-    <style name="Theme.FinanceSMSTracker" parent="Base.Theme.FinanceSMSTracker" />
+    <!-- Calm Teal: follows the phone's light / dark setting (the original look). -->
+    <style name="Theme.FinanceSMSTracker" parent="Base.Theme.FinanceSMSTracker">
+        <item name="heroBackground">@drawable/bg_summary_card</item>
+        <item name="heroText">@android:color/white</item>
+        <item name="heroDivider">#33FFFFFF</item>
+        <item name="heroPositive">@color/hero_positive</item>
+        <item name="heroNegative">@color/hero_negative</item>
+        <item name="cardSurface">@color/surface_container</item>
+        <item name="fieldSurface">@color/surface_container_high</item>
+        <item name="dividerColor">@color/outline_soft</item>
+        <item name="reviewChipText">@color/review_chip_text</item>
+        <item name="debitColor">@color/debit_red</item>
+        <item name="creditColor">@color/credit_green</item>
+    </style>
+
+    <!-- Dark Ledger: always dark, mint accent. -->
+    <style name="Theme.FinanceSMSTracker.Ledger" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/ledger_mint</item>
+        <item name="colorOnPrimary">@color/ledger_background</item>
+        <item name="colorSecondary">@color/ledger_mint</item>
+        <item name="colorSecondaryContainer">@color/ledger_field</item>
+        <item name="colorOnSecondaryContainer">@color/ledger_text</item>
+        <item name="android:colorBackground">@color/ledger_background</item>
+        <item name="colorSurface">@color/ledger_background</item>
+        <item name="colorOnSurface">@color/ledger_text</item>
+        <item name="colorOnSurfaceVariant">@color/ledger_muted</item>
+        <item name="colorOutline">@color/ledger_line</item>
+        <item name="heroBackground">@drawable/bg_hero_ledger</item>
+        <item name="heroText">@color/ledger_text</item>
+        <item name="heroDivider">@color/ledger_line</item>
+        <item name="heroPositive">@color/ledger_mint</item>
+        <item name="heroNegative">@color/ledger_red</item>
+        <item name="cardSurface">@color/ledger_card</item>
+        <item name="fieldSurface">@color/ledger_field</item>
+        <item name="dividerColor">@color/ledger_line</item>
+        <item name="reviewChipText">@color/ledger_amber</item>
+        <item name="debitColor">@color/ledger_red</item>
+        <item name="creditColor">@color/ledger_mint</item>
+    </style>
+
+    <!-- Warm Paper: always light, cream with terracotta. -->
+    <style name="Theme.FinanceSMSTracker.Paper" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/paper_terracotta</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/paper_ink</item>
+        <item name="colorSecondaryContainer">@color/paper_field</item>
+        <item name="colorOnSecondaryContainer">@color/paper_ink</item>
+        <item name="android:colorBackground">@color/paper_background</item>
+        <item name="colorSurface">@color/paper_background</item>
+        <item name="colorOnSurface">@color/paper_ink</item>
+        <item name="colorOnSurfaceVariant">@color/paper_muted</item>
+        <item name="colorOutline">@color/paper_line</item>
+        <item name="heroBackground">@drawable/bg_hero_paper</item>
+        <item name="heroText">@color/paper_ink</item>
+        <item name="heroDivider">@color/paper_line</item>
+        <item name="heroPositive">@color/paper_green</item>
+        <item name="heroNegative">@color/paper_terracotta</item>
+        <item name="cardSurface">@color/paper_card</item>
+        <item name="fieldSurface">@color/paper_field</item>
+        <item name="dividerColor">@color/paper_line</item>
+        <item name="reviewChipText">@color/paper_amber</item>
+        <item name="debitColor">@color/paper_terracotta</item>
+        <item name="creditColor">@color/paper_green</item>
+    </style>
 </resources>

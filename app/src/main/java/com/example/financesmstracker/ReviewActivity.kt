@@ -54,6 +54,7 @@ class ReviewActivity : AppCompatActivity() {
     private lateinit var emptyConflictText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        AppTheme.apply(this)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_review)
 

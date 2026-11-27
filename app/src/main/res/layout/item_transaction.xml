@@ -54,7 +54,7 @@
                     android:paddingHorizontal="7dp"
                     android:paddingVertical="1dp"
                     android:text="Review"
-                    android:textColor="@color/review_chip_text"
+                    android:textColor="?attr/reviewChipText"
                     android:textSize="10sp"
                     android:textStyle="bold"
                     android:visibility="gone" />
@@ -102,5 +102,5 @@
         android:layout_width="match_parent"
         android:layout_height="0.5dp"
         android:layout_marginStart="66dp"
-        android:background="@color/outline_soft" />
+        android:background="?attr/dividerColor" />
 </LinearLayout>

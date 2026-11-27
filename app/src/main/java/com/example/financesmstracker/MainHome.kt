@@ -41,6 +41,7 @@ internal fun MainActivity.setupMoreMenu() {
                 },
                 SheetAction("💬", "SMS log") { findViewById<Button>(R.id.buttonSmsLog).performClick() },
                 SheetAction("⏪", "Restore history") { buttonRestoreHistory.performClick() },
+                SheetAction("🎨", "Theme") { AppTheme.showPicker(this) },
                 SheetAction("⚙️", "Settings") { buttonOracleSettings.performClick() },
                 SheetAction("🗑️", "Clear history", destructive = true) { buttonClearLocalHistory.performClick() }
             )

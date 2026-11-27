@@ -322,7 +322,13 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
                 Locale.US, "%s%s %,.2f", if (credit) "+" else "-", tx.currency.uppercase(), tx.amountPaise / 100.0
             )
         }
-    detailTextAmount.setTextColor(Color.parseColor(if (credit) "#2E9E5B" else "#D64545"))
+    detailTextAmount.setTextColor(
+        com.google.android.material.color.MaterialColors.getColor(
+            detailTextAmount,
+            if (credit) R.attr.creditColor else R.attr.debitColor,
+            Color.parseColor(if (credit) "#2E9E5B" else "#D64545")
+        )
+    )
 
     setupForeignAmountSection(dialogView, tx)
     setupSalaryShareSection(dialogView, tx)
