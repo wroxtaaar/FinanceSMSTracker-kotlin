@@ -42,10 +42,10 @@ object AppUpdateChecker {
         private set
     var onAvailableChanged: (() -> Unit)? = null
 
-    /** Looks for a newer build in the background (at most every 30 minutes). Never installs by itself. */
+    /** Looks for a newer build in the background (at most once a minute). Never installs by itself. Runs on every return to the app and every couple of minutes while it is open. */
     fun check(activity: Activity) {
         val now = System.currentTimeMillis()
-        if (now - lastCheckAt < 30 * 60_000L) return
+        if (now - lastCheckAt < 60_000L) return
         lastCheckAt = now
         look(activity, manual = false)
     }
@@ -69,6 +69,7 @@ object AppUpdateChecker {
                 if (available == null) say("Up to date (build $installed)")
                 else say("Update available: tap Update at the top of the home screen")
             } catch (error: Throwable) {
+                lastCheckAt = 0L // retry on the next look instead of waiting
                 Log.w(TAG, "Update check failed: ${error.message}")
                 say("Update check failed: ${error.message}")
             }

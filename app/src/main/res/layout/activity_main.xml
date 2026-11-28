@@ -37,22 +37,23 @@
         app:layout_constraintTop_toTopOf="@id/textViewTitle" />
 
     <!-- Only visible while a newer build is waiting on the server. -->
-    <Button
+    <TextView
         android:id="@+id/buttonUpdateTop"
-        style="@style/Widget.Material3.Button"
         android:layout_width="wrap_content"
         android:layout_height="36dp"
         android:layout_marginEnd="6dp"
-        android:insetTop="0dp"
-        android:insetBottom="0dp"
-        android:minWidth="0dp"
+        android:clickable="true"
+        android:drawablePadding="6dp"
+        android:focusable="true"
+        android:gravity="center"
         android:paddingHorizontal="14dp"
         android:text="Update"
-        android:textSize="13sp"
+        android:textSize="14sp"
+        android:textStyle="bold"
         android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="@id/textViewTitle"
+        app:layout_constraintBottom_toBottomOf="@id/buttonThemeTop"
         app:layout_constraintEnd_toStartOf="@id/textViewNotificationStatus"
-        app:layout_constraintTop_toTopOf="@id/textViewTitle" />
+        app:layout_constraintTop_toTopOf="@id/buttonThemeTop" />
 
     <!-- Top right: theme picker, then settings (the most right one). -->
     <ImageButton

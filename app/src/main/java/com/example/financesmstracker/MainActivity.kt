@@ -255,11 +255,41 @@ class MainActivity : AppCompatActivity() {
         AppUpdateChecker.onAvailableChanged = { refreshUpdateButton() }
         refreshUpdateButton()
         AppUpdateChecker.check(this)
+        updatePoll.removeCallbacks(updatePollTask)
+        updatePoll.postDelayed(updatePollTask, 2 * 60_000L)
+    }
+
+    // While the app is open, look for a new build every couple of minutes so the Update button appears by itself.
+    private val updatePoll = android.os.Handler(android.os.Looper.getMainLooper())
+    private val updatePollTask = object : Runnable {
+        override fun run() {
+            AppUpdateChecker.check(this@MainActivity)
+            updatePoll.postDelayed(this, 2 * 60_000L)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        updatePoll.removeCallbacks(updatePollTask)
     }
 
     private fun refreshUpdateButton() {
-        val button = findViewById<Button>(R.id.buttonUpdateTop) ?: return
+        val button = findViewById<TextView>(R.id.buttonUpdateTop) ?: return
         val release = AppUpdateChecker.available
+        // A red, outlined pill with an arrow icon so it cannot be missed.
+        val red = Color.parseColor("#FF5A5F")
+        val d = resources.displayMetrics.density
+        button.setTextColor(red)
+        button.background = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = 18 * d
+            setColor(Color.argb(40, 255, 90, 95))
+            setStroke((1.5f * d).toInt(), red)
+        }
+        androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_update)?.mutate()?.let { icon ->
+            icon.setTint(red)
+            icon.setBounds(0, 0, (18 * d).toInt(), (18 * d).toInt())
+            button.setCompoundDrawables(icon, null, null, null)
+        }
         button.visibility = if (release != null) View.VISIBLE else View.GONE
         button.setOnClickListener { AppUpdateChecker.installAvailable(this) }
     }
