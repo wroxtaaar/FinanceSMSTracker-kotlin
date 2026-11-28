@@ -276,13 +276,13 @@ class MainActivity : AppCompatActivity() {
     private fun refreshUpdateButton() {
         val button = findViewById<TextView>(R.id.buttonUpdateTop) ?: return
         val release = AppUpdateChecker.available
-        // A red, outlined pill with an arrow icon so it cannot be missed.
-        val red = Color.parseColor("#FF5A5F")
+        // A yellow, outlined pill with an arrow icon so it cannot be missed.
+        val red = Color.parseColor("#FFC93C")
         val d = resources.displayMetrics.density
         button.setTextColor(red)
         button.background = android.graphics.drawable.GradientDrawable().apply {
             cornerRadius = 18 * d
-            setColor(Color.argb(40, 255, 90, 95))
+            setColor(Color.argb(46, 255, 201, 60))
             setStroke((1.5f * d).toInt(), red)
         }
         androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_update)?.mutate()?.let { icon ->
