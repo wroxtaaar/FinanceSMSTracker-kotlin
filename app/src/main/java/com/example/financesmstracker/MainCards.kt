@@ -88,7 +88,7 @@ private fun MainActivity.homeCardTile(group: List<OracleAccount>, meta: CardMeta
         else -> MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimary, Color.CYAN)
     }
 
-    return tile {
+    val built = tile {
         isClickable = true
         setOnClickListener { loadOracleAccountsForManualEdit("CREDIT_CARD") }
 
@@ -107,6 +107,7 @@ private fun MainActivity.homeCardTile(group: List<OracleAccount>, meta: CardMeta
                     text = dueText
                     textSize = 12f
                     setTypeface(typeface, Typeface.BOLD)
+                    tag = "due"
                     setTextColor(if (urgent) Color.parseColor("#D64545") else Color.parseColor("#E08A1E"))
                 }, LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -125,4 +126,6 @@ private fun MainActivity.homeCardTile(group: List<OracleAccount>, meta: CardMeta
         }
         addView(caption(usage).apply { setPadding(0, dp(4), 0, 0) })
     }
+    AppTheme.styleCardTile(built)
+    return built
 }

@@ -324,7 +324,7 @@ internal fun MainActivity.showTransactionDetailDialog(tx: Transaction) {
         }
     detailTextAmount.setTextColor(
         com.google.android.material.color.MaterialColors.getColor(
-            detailTextAmount,
+            this,
             if (credit) R.attr.creditColor else R.attr.debitColor,
             Color.parseColor(if (credit) "#2E9E5B" else "#D64545")
         )

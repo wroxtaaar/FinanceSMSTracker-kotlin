@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import androidx.core.widget.NestedScrollView
 import android.widget.TextView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -80,7 +81,7 @@ internal fun MainActivity.formSheet(
             setPadding(dp(20), 0, dp(20), dp(8))
         })
     }
-    val scroll = (body as? ScrollView) ?: ScrollView(this).apply { addView(body) }
+    val scroll = (body as? NestedScrollView) ?: NestedScrollView(this).apply { addView(body) }
     root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
     val positive = MaterialButton(this).apply { text = positiveText }

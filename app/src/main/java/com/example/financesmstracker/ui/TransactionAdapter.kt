@@ -1,6 +1,8 @@
 package com.example.financesmstracker.ui
 
+import android.content.Context
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
@@ -16,9 +18,9 @@ import com.example.financesmstracker.R
 import com.example.financesmstracker.data.Transaction
 import com.example.financesmstracker.integration.FinanceSyncClient
 import com.example.financesmstracker.parser.AccountType
+import com.example.financesmstracker.AppTheme
 import com.example.financesmstracker.parser.TransactionType
 import com.example.financesmstracker.util.IndianMoney
-import com.google.android.material.color.MaterialColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -87,6 +89,7 @@ class TransactionAdapter(
         val dateTime: TextView = view.findViewById(R.id.textViewDateTime)
         val reviewChip: TextView = view.findViewById(R.id.textViewReviewChip)
         val divider: View = view.findViewById(R.id.divider)
+        val dot: View = view.findViewById(R.id.viewCategoryDot)
     }
 
     override fun getItemViewType(position: Int): Int = if (rows[position] is HomeFormat.DayHeader) 0 else 1
@@ -100,20 +103,12 @@ class TransactionAdapter(
         }
     }
 
-    /** One rounded surface per day: only the first row has rounded top corners, only the last rounded bottom ones. */
-    private fun rowBackground(view: View, first: Boolean, last: Boolean, isSelected: Boolean): GradientDrawable {
-        val context = view.context
-        val radius = context.resources.displayMetrics.density * 16f
-        val base = MaterialColors.getColor(
-            view,
-            R.attr.cardSurface,
-            ContextCompat.getColor(context, R.color.surface_container)
-        )
-        val top = if (first) radius else 0f
-        val bottom = if (last) radius else 0f
+    /** Rows are flat on the page; only a long-press selection gets a soft tint. */
+    private fun selectedBackground(context: Context): GradientDrawable {
+        val radius = context.resources.displayMetrics.density * 12f
         return GradientDrawable().apply {
-            setColor(if (isSelected) ColorUtils.compositeColors(0x667E57C2, base) else base)
-            cornerRadii = floatArrayOf(top, top, top, top, bottom, bottom, bottom, bottom)
+            setColor(0x337E57C2)
+            cornerRadius = radius
         }
     }
 
@@ -121,7 +116,36 @@ class TransactionAdapter(
         val row = rows[position]
         if (row is HomeFormat.DayHeader) {
             val header = viewHolder as HeaderViewHolder
-            header.label.text = row.label
+            val context = header.itemView.context
+            val muted = com.google.android.material.color.MaterialColors.getColor(
+                context, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY
+            )
+            val ink = com.google.android.material.color.MaterialColors.getColor(
+                context, com.google.android.material.R.attr.colorOnSurface, Color.BLACK
+            )
+            when (AppTheme.current(context)) {
+                AppTheme.CALM_TEAL -> {
+                    header.label.text = row.label.uppercase()
+                    header.label.textSize = 12f
+                    header.label.letterSpacing = 0.04f
+                    header.label.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    header.label.setTextColor(muted)
+                }
+                AppTheme.DARK_LEDGER -> {
+                    header.label.text = row.label.uppercase()
+                    header.label.textSize = 11f
+                    header.label.letterSpacing = 0.08f
+                    header.label.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    header.label.setTextColor(muted)
+                }
+                AppTheme.WARM_PAPER -> {
+                    header.label.text = row.label
+                    header.label.textSize = 18f
+                    header.label.letterSpacing = 0f
+                    header.label.typeface = Typeface.create("serif", Typeface.BOLD)
+                    header.label.setTextColor(ink)
+                }
+            }
             header.total.text = if (row.spentMinor > 0) IndianMoney.signed(row.spentMinor, credit = false) else ""
             return
         }
@@ -156,12 +180,38 @@ class TransactionAdapter(
             )
         }
         holder.amount.setTextColor(
-            MaterialColors.getColor(
-                holder.itemView,
+            com.google.android.material.color.MaterialColors.getColor(
+                holder.amount.context,
                 if (credit) R.attr.creditColor else R.attr.debitColor,
                 Color.parseColor(if (credit) "#2E9E5B" else "#D64545")
             )
         )
+
+        val theme = AppTheme.current(holder.itemView.context)
+        when (theme) {
+            AppTheme.CALM_TEAL -> {
+                holder.icon.visibility = View.VISIBLE
+                holder.dot.visibility = View.GONE
+                holder.amount.typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                holder.amount.textSize = 15f
+            }
+            AppTheme.DARK_LEDGER -> {
+                holder.icon.visibility = View.GONE
+                holder.dot.visibility = View.VISIBLE
+                holder.dot.background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(HomeFormat.categoryStyle(tx.category).color)
+                }
+                holder.amount.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                holder.amount.textSize = 16f
+            }
+            AppTheme.WARM_PAPER -> {
+                holder.icon.visibility = View.GONE
+                holder.dot.visibility = View.GONE
+                holder.amount.typeface = Typeface.create("serif", Typeface.BOLD)
+                holder.amount.textSize = 17f
+            }
+        }
 
         // "Groceries · Axis ••9206 · Card": the source (SMS / e-mail) lives in the details.
         val category = HomeFormat.sentenceCase(tx.category ?: "OTHER")
@@ -175,10 +225,16 @@ class TransactionAdapter(
 
         holder.dateTime.text = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(tx.timestamp))
 
-        val first = position == 0 || rows[position - 1] !is Transaction
         val last = position == rows.size - 1 || rows[position + 1] !is Transaction
-        holder.divider.visibility = if (last) View.GONE else View.VISIBLE
-        holder.itemView.background = rowBackground(holder.itemView, first, last, tx.id in selected)
+        // Calm Teal rows are borderless; Dark Ledger and Warm Paper separate rows with a hairline.
+        holder.divider.visibility =
+            if (last || theme == AppTheme.CALM_TEAL) View.GONE else View.VISIBLE
+        // Rows sit flat on the page, so their content lines up with the hero and shortcuts above.
+        (holder.itemView as ViewGroup).getChildAt(0).let { content ->
+            content.setPadding(0, content.paddingTop, 0, content.paddingBottom)
+        }
+        holder.itemView.background =
+            if (tx.id in selected) selectedBackground(holder.itemView.context) else null
 
         holder.itemView.setOnClickListener { if (selected.isEmpty()) onClick(tx) else toggle(tx) }
         holder.itemView.setOnLongClickListener { toggle(tx); true }

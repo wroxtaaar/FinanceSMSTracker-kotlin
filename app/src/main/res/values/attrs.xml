@@ -12,4 +12,11 @@
     <attr name="reviewChipText" format="color" />
     <attr name="debitColor" format="color" />
     <attr name="creditColor" format="color" />
+    <attr name="heroPad" format="dimension" />
+    <attr name="heroChipPad" format="dimension" />
+    <attr name="heroChip" format="reference" />
+    <attr name="heroRuleTop" format="color" />
+    <attr name="heroRuleBottom" format="color" />
+    <attr name="heroAccent" format="color" />
+    <attr name="heroMuted" format="color" />
 </resources>

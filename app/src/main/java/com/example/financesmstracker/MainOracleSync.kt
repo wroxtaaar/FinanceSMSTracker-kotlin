@@ -284,13 +284,20 @@ internal fun MainActivity.showOracleSettingsDialog() {
 
     container.addView(urlInput)
     container.addView(tokenInput)
-    container.addView(TextView(this).apply {
-        text = "Theme: ${AppTheme.current(this@showOracleSettingsDialog).label} ›"
-        setPadding(0, 20, 0, 20)
-        isClickable = true
-        isFocusable = true
+
+    // Appearance: opens the theme chooser (Calm Teal / Dark Ledger / Warm Paper).
+    val themeRow = android.widget.TextView(this).apply {
+        text = "Theme: ${AppTheme.current(this@showOracleSettingsDialog).label}  ›"
+        textSize = 16f
+        setPadding(0, dp(16), 0, dp(8))
+        setTextColor(
+            com.google.android.material.color.MaterialColors.getColor(
+                this, com.google.android.material.R.attr.colorPrimary, android.graphics.Color.CYAN
+            )
+        )
         setOnClickListener { AppTheme.showPicker(this@showOracleSettingsDialog) }
-    })
+    }
+    container.addView(themeRow)
 
     val dialog = AlertDialog.Builder(this)
         .setTitle("Oracle Sync Settings")

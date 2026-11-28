@@ -21,6 +21,13 @@
         <item name="reviewChipText">@color/review_chip_text</item>
         <item name="debitColor">@color/debit_red</item>
         <item name="creditColor">@color/credit_green</item>
+        <item name="heroPad">16dp</item>
+        <item name="heroChipPad">10dp</item>
+        <item name="heroChip">@drawable/bg_hero_chip</item>
+        <item name="heroRuleTop">#00000000</item>
+        <item name="heroRuleBottom">#00000000</item>
+        <item name="heroAccent">@android:color/white</item>
+        <item name="heroMuted">#D9FFFFFF</item>
     </style>
 
     <!-- Dark Ledger: always dark, mint accent. -->
@@ -35,7 +42,7 @@
         <item name="colorOnSurface">@color/ledger_text</item>
         <item name="colorOnSurfaceVariant">@color/ledger_muted</item>
         <item name="colorOutline">@color/ledger_line</item>
-        <item name="heroBackground">@drawable/bg_hero_ledger</item>
+        <item name="heroBackground">@android:color/transparent</item>
         <item name="heroText">@color/ledger_text</item>
         <item name="heroDivider">@color/ledger_line</item>
         <item name="heroPositive">@color/ledger_mint</item>
@@ -46,6 +53,13 @@
         <item name="reviewChipText">@color/ledger_amber</item>
         <item name="debitColor">@color/ledger_red</item>
         <item name="creditColor">@color/ledger_mint</item>
+        <item name="heroPad">0dp</item>
+        <item name="heroChipPad">0dp</item>
+        <item name="heroChip">@android:color/transparent</item>
+        <item name="heroRuleTop">@color/ledger_line</item>
+        <item name="heroRuleBottom">#00000000</item>
+        <item name="heroAccent">@color/ledger_mint</item>
+        <item name="heroMuted">@color/ledger_muted</item>
     </style>
 
     <!-- Warm Paper: always light, cream with terracotta. -->
@@ -60,7 +74,7 @@
         <item name="colorOnSurface">@color/paper_ink</item>
         <item name="colorOnSurfaceVariant">@color/paper_muted</item>
         <item name="colorOutline">@color/paper_line</item>
-        <item name="heroBackground">@drawable/bg_hero_paper</item>
+        <item name="heroBackground">@android:color/transparent</item>
         <item name="heroText">@color/paper_ink</item>
         <item name="heroDivider">@color/paper_line</item>
         <item name="heroPositive">@color/paper_green</item>
@@ -71,5 +85,12 @@
         <item name="reviewChipText">@color/paper_amber</item>
         <item name="debitColor">@color/paper_terracotta</item>
         <item name="creditColor">@color/paper_green</item>
+        <item name="heroPad">0dp</item>
+        <item name="heroChipPad">0dp</item>
+        <item name="heroChip">@android:color/transparent</item>
+        <item name="heroRuleTop">@color/paper_line</item>
+        <item name="heroRuleBottom">@color/paper_line</item>
+        <item name="heroAccent">@color/paper_terracotta</item>
+        <item name="heroMuted">@color/paper_muted</item>
     </style>
 </resources>

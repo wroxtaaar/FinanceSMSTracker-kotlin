@@ -26,6 +26,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -130,6 +131,7 @@ class MainActivity : AppCompatActivity() {
         AppTheme.edgeToEdge(this)
         setContentView(R.layout.activity_main)
         AppTheme.styleHome(this)
+        AppTheme.setupQuickActions(this)
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -263,16 +265,16 @@ class MainActivity : AppCompatActivity() {
         // The count is the badge: it shows on the always-visible More button, in red.
         val more = findViewById<Button>(R.id.buttonMore)
         more.text = if (count > 0) "More ($count)" else "More"
+        AppTheme.setMoreBadge(this, count)
         more.setTextColor(
             if (count > 0) Color.parseColor("#D64545")
             else com.google.android.material.color.MaterialColors.getColor(more, com.google.android.material.R.attr.colorOnSecondaryContainer)
         )
     }
 
-    /** Pull-to-refresh: reload the list and the ledger, and ask the server to scan Gmail. */
+    /** Pull-to-refresh: reload the list and the ledger only. Gmail sync stays under More > Sync Gmail. */
     internal fun refreshAll() {
         loadTransactions()
-        if (buttonGmailSync.isEnabled) triggerManualGmailSync()
         loadOracleSummary { swipeRefresh.isRefreshing = false }
     }
 
@@ -303,9 +305,9 @@ class MainActivity : AppCompatActivity() {
     internal fun renderOracleSummary(summary: OracleLedgerSummary) {
         textViewOracleStatus.text = "Oracle ledger: Connected"
         textViewTrueAvailable.text = formatMinor(summary.trueAvailableMinor)
-        textViewBankCash.text = "+ " + formatMinor(summary.bankCashMinor)
-        textViewSplitwiseReceivable.text = "+ " + formatMinor(summary.splitwiseReceivableMinor)
-        textViewCardOutstanding.text = "− " + formatMinor(summary.creditCardOutstandingMinor)
+        textViewBankCash.text = formatMinor(summary.bankCashMinor)
+        textViewSplitwiseReceivable.text = formatMinor(summary.splitwiseReceivableMinor)
+        textViewCardOutstanding.text = formatMinor(summary.creditCardOutstandingMinor)
         renderEmiNote(summary.emiReservations)
     }
 
