@@ -40,6 +40,7 @@ internal fun friendlyExpenseError(error: Throwable?): String {
 internal fun MainActivity.setupExpenseSelection() {
     val bar = findViewById<View>(R.id.selectionBar)
     val count = findViewById<TextView>(R.id.selectionCount)
+    styleSelectionBar(bar, count)
     // Back cancels a selection instead of leaving the app.
     val backCallback = object : androidx.activity.OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -135,7 +136,7 @@ private fun MainActivity.buildExpenseDialog(
     val pad = (16 * resources.displayMetrics.density).toInt()
     val box = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(pad, pad / 2, pad, 0)
+        setPadding(dp(20), dp(4), dp(20), dp(8))
     }
 
     val lines = txs.joinToString("\n") {
@@ -179,54 +180,69 @@ private fun MainActivity.buildExpenseDialog(
     box.addView(label("Paid by")); box.addView(payerSpinner)
 
     val linked = link?.linked == true
-    val builder = AlertDialog.Builder(this)
-        .setTitle(if (linked) "Update in Expense" else "Add to Expense")
-        .setView(ScrollView(this).apply { addView(box) })
-        .setNegativeButton("Cancel", null)
-        .setPositiveButton(if (linked) "Update" else "Add", null)
-    if (linked) builder.setNeutralButton("Remove from Expense", null)
-    val dialog = builder.create()
-
-    dialog.setOnShowListener {
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
-            val group = opts.groups.getOrNull(groupSpinner.selectedItemPosition - 1)
-            val payer = users[payerSpinner.selectedItemPosition]
-            val text = items.text.toString()
-            button.isEnabled = false
+    formSheet(
+        title = if (linked) "Update in Expense" else "Add to Expense",
+        body = androidx.core.widget.NestedScrollView(this).apply { addView(box) },
+        positiveText = if (linked) "Update" else "Add",
+        neutralText = if (linked) "Remove" else null,
+        onNeutral = {
             oracleExecutor.execute {
-                val result = FinanceSyncClient(this@buildExpenseDialog).addToExpense(ids, text, group?.id, payer.id)
+                val result = FinanceSyncClient(this@buildExpenseDialog).removeFromExpense(ids[0])
                 runOnUiThread {
-                    button.isEnabled = true
                     result.onSuccess {
-                        prefs.edit().putString(KEY_LAST_GROUP, group?.id).putString(KEY_LAST_PAYER, payer.id).apply()
-                        Toast.makeText(this@buildExpenseDialog, "Added to Expense", Toast.LENGTH_SHORT).show()
-                        dialog.dismiss()
-                        adapter.clearSelection()
+                        Toast.makeText(this@buildExpenseDialog, "Removed from Expense", Toast.LENGTH_SHORT).show()
+                        currentExpenseSheet?.dismiss()
                     }.onFailure {
                         Toast.makeText(
-                            this@buildExpenseDialog, "Could not add: " + friendlyExpenseError(it), Toast.LENGTH_LONG
+                            this@buildExpenseDialog, "Could not remove: " + friendlyExpenseError(it), Toast.LENGTH_LONG
                         ).show()
                     }
                 }
             }
         }
-        if (linked) {
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                oracleExecutor.execute {
-                    val result = FinanceSyncClient(this@buildExpenseDialog).removeFromExpense(ids[0])
-                    runOnUiThread {
-                        result.onSuccess {
-                            Toast.makeText(this@buildExpenseDialog, "Removed from Expense", Toast.LENGTH_SHORT).show()
-                            dialog.dismiss()
-                        }.onFailure {
-                            Toast.makeText(
-                                this@buildExpenseDialog, "Could not remove: " + friendlyExpenseError(it), Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    }
+    ) { sheet ->
+        currentExpenseSheet = sheet
+        val group = opts.groups.getOrNull(groupSpinner.selectedItemPosition - 1)
+        val payer = users[payerSpinner.selectedItemPosition]
+        val text = items.text.toString()
+        sheet.positiveEnabled = false
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@buildExpenseDialog).addToExpense(ids, text, group?.id, payer.id)
+            runOnUiThread {
+                sheet.positiveEnabled = true
+                result.onSuccess {
+                    prefs.edit().putString(KEY_LAST_GROUP, group?.id).putString(KEY_LAST_PAYER, payer.id).apply()
+                    Toast.makeText(this@buildExpenseDialog, "Added to Expense", Toast.LENGTH_SHORT).show()
+                    sheet.dismiss()
+                    adapter.clearSelection()
+                }.onFailure {
+                    Toast.makeText(
+                        this@buildExpenseDialog, "Could not add: " + friendlyExpenseError(it), Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }
+    }.also { currentExpenseSheet = it }
+}
+
+private var currentExpenseSheet: FormSheet? = null
+
+
+/** A floating rounded bar in the current theme's surface colours instead of the old fixed purple strip. */
+private fun MainActivity.styleSelectionBar(bar: View, count: TextView) {
+    val surface = com.google.android.material.color.MaterialColors.getColor(bar, R.attr.cardSurface, android.graphics.Color.DKGRAY)
+    val line = com.google.android.material.color.MaterialColors.getColor(bar, R.attr.dividerColor, android.graphics.Color.GRAY)
+    val onSurface = com.google.android.material.color.MaterialColors.getColor(
+        bar, com.google.android.material.R.attr.colorOnSurface, android.graphics.Color.WHITE
+    )
+    bar.background = android.graphics.drawable.GradientDrawable().apply {
+        cornerRadius = dp(22).toFloat()
+        setColor(surface)
+        setStroke(dp(1), line)
     }
-    dialog.show()
+    bar.elevation = dp(8).toFloat()
+    bar.setPadding(dp(18), dp(8), dp(8), dp(8))
+    (bar.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.bottomMargin = dp(12)
+    count.setTextColor(onSurface)
+    count.textSize = 14f
 }

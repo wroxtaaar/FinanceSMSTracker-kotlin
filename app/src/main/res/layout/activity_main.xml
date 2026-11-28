@@ -456,8 +456,7 @@
         android:id="@+id/selectionBar"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:background="#FF4527A0"
-        android:gravity="center_vertical"
+                android:gravity="center_vertical"
         android:orientation="horizontal"
         android:padding="8dp"
         android:visibility="gone"
@@ -470,19 +469,24 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textColor="#FFFFFFFF"
             android:textStyle="bold" />
 
         <Button
             android:id="@+id/selectionAddToExpense"
+            style="@style/Widget.Material3.Button"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="40dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
             android:text="Add to Expense" />
 
         <Button
             android:id="@+id/selectionCancel"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="40dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
             android:text="Cancel" />
     </LinearLayout>
 
