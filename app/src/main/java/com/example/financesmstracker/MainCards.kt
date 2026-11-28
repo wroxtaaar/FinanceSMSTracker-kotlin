@@ -27,6 +27,7 @@ internal fun MainActivity.renderCardCarousel() {
         .groupBy { meta.groupOf(it.id) ?: it.id }
         .values
         .filter { group -> meta.limitMinor(group.first().id) > 0 || group.any { meta.dueDay(it.id) > 0 } }
+        .sortedByDescending { group -> group.sumOf { it.balanceMinor } } // most outstanding first
 
     cardsRow.removeAllViews()
     if (groups.isEmpty()) {

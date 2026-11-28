@@ -323,7 +323,8 @@ private fun MainActivity.showCardSettingsDialog(
 
 private fun MainActivity.showCreditCardsDialog(accounts: List<OracleAccount>, title: String) {
     val meta = cardMeta()
-    val rows = accounts.map { account ->
+    // The card with the most outstanding comes first.
+    val rows = accounts.sortedByDescending { it.balanceMinor }.map { account ->
         // Bill is never negative. Active Spend = outstanding - Bill and may be
         // negative: paying more than the bill, or a refund, leaves a credit.
         val billMinor = account.billBalanceMinor.coerceAtLeast(0L)
