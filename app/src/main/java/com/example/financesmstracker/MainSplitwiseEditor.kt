@@ -126,6 +126,7 @@ internal fun MainActivity.showSplitwiseGroupsSheet() {
         list, R.attr.debitColor, android.graphics.Color.parseColor("#D64545")
     )
     var loading = people.isEmpty()
+    var sheetRef: FormSheet? = null
     lateinit var render: () -> Unit
 
     fun amountRow(name: String, net: Long, bold: Boolean) = LinearLayout(this).apply {
@@ -177,6 +178,13 @@ internal fun MainActivity.showSplitwiseGroupsSheet() {
             })
             list.addView(tile { addView(amountRow("Total", shown.totalMinor, true)) })
         }
+        if (shown != null) {
+            list.addView(caption("Sync the home Splitwise total from the Expense app  ›").apply {
+                textSize = 13f
+                setPadding(0, dp(6), 0, dp(6))
+                setOnClickListener { syncSplitwiseFromExpense(shown.id) { sheetRef?.dismiss() } }
+            })
+        }
         list.addView(caption("Edit the Splitwise total used on the home screen  ›").apply {
             textSize = 13f
             setPadding(0, dp(6), 0, dp(6))
@@ -199,6 +207,7 @@ internal fun MainActivity.showSplitwiseGroupsSheet() {
         },
         positiveText = "Done"
     ) { it.dismiss() }
+    sheetRef = sheet
 
     oracleExecutor.execute {
         val result = FinanceSyncClient(this@showSplitwiseGroupsSheet).fetchExpenseBalances()
@@ -213,6 +222,60 @@ internal fun MainActivity.showSplitwiseGroupsSheet() {
                     showManualSplitwiseDialog() // Expense app not reachable and nothing saved: the single total
                 }
             }
+        }
+    }
+}
+
+/**
+ * One-way: copies what the Expense app says you are owed into this app's Splitwise total. Cash spends typed
+ * only in the Expense app are picked up this way. Nothing is ever written to the Expense app.
+ */
+internal fun MainActivity.syncSplitwiseFromExpense(personId: String, onDone: () -> Unit = {}) {
+    showSnack("Reading the Expense app…")
+    oracleExecutor.execute {
+        val client = FinanceSyncClient(this@syncSplitwiseFromExpense)
+        val fresh = client.refreshExpenseBalances()
+        val current = client.fetchManualSplitwiseTotal()
+        runOnUiThread {
+            val person = fresh.getOrNull()?.firstOrNull { it.id == personId }
+            if (person == null || current.isFailure) {
+                Toast.makeText(
+                    this@syncSplitwiseFromExpense,
+                    "Could not read the Expense app: " + (fresh.exceptionOrNull()?.message ?: current.exceptionOrNull()?.message ?: "unavailable"),
+                    Toast.LENGTH_LONG
+                ).show()
+                return@runOnUiThread
+            }
+            val old = current.getOrDefault(0L)
+            val new = person.totalMinor
+            if (old == new) {
+                showSnack("Already in sync: " + formatMinor(new))
+                return@runOnUiThread
+            }
+            MaterialAlertDialogBuilder(this@syncSplitwiseFromExpense)
+                .setTitle("Sync Splitwise total")
+                .setMessage(
+                    "Home Splitwise total: ${formatMinor(old)}\nExpense app (${person.name.ifBlank { "this account" }}): ${formatMinor(new)}\n\n" +
+                        "Only this app changes. Nothing is written to the Expense app."
+                )
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Set to ${formatMinor(new)}") { _, _ ->
+                    oracleExecutor.execute {
+                        val saved = FinanceSyncClient(this@syncSplitwiseFromExpense).updateManualSplitwiseTotal(new)
+                        runOnUiThread {
+                            saved.onSuccess {
+                                onDone()
+                                loadOracleSummary()
+                                showSnack("Splitwise total synced from Expense: " + formatMinor(new))
+                            }.onFailure { error ->
+                                Toast.makeText(
+                                    this@syncSplitwiseFromExpense, "Could not update: " + (error.message ?: "unavailable"), Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                }
+                .show()
         }
     }
 }

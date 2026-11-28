@@ -110,6 +110,16 @@ class FinanceSyncClient(
         }
     }
 
+    /** Reads the Expense app again right now (not the server's copy) and returns fresh balances. */
+    fun refreshExpenseBalances(): Result<List<ExpenseBalancePerson>> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return post("/api/v1/expense/balances/refresh", "{}").map { raw ->
+            context.getSharedPreferences("expense_balance_view", Context.MODE_PRIVATE).edit().putString("json", raw).apply()
+            ExpenseBalancePerson.parseAll(JSONObject(raw))
+        }
+    }
+
     /** The last balances this phone saw (instant, may be a little old), or null. */
     fun cachedExpenseBalances(): List<ExpenseBalancePerson>? =
         context.getSharedPreferences("expense_balance_view", Context.MODE_PRIVATE).getString("json", null)
