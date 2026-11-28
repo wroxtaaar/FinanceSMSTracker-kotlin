@@ -99,6 +99,13 @@ class FinanceSyncClient(
         return get("/api/v1/expense/options").map { ExpenseOptions.parse(JSONObject(it)) }
     }
 
+    /** What each Expense account is owed, group by group. */
+    fun fetchExpenseBalances(): Result<List<ExpenseBalancePerson>> {
+        if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
+        return get("/api/v1/expense/balances").map { ExpenseBalancePerson.parseAll(JSONObject(it)) }
+    }
+
     /** Whether this transaction can be added to Expense, and whether it already was or was skipped. */
     fun fetchExpenseLink(transactionId: String): Result<ExpenseLink> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
@@ -527,6 +534,27 @@ data class SplitwiseChangeItem(
     val amountMinor: Long,
     val deltaMinor: Long
 )
+
+data class ExpenseBalanceGroup(val id: String?, val name: String, val netMinor: Long)
+
+data class ExpenseBalancePerson(val id: String, val name: String, val totalMinor: Long, val groups: List<ExpenseBalanceGroup>) {
+    companion object {
+        fun parseAll(json: JSONObject): List<ExpenseBalancePerson> {
+            val people = json.optJSONArray("people") ?: return emptyList()
+            return (0 until people.length()).map { i ->
+                val p = people.getJSONObject(i)
+                val gs = p.optJSONArray("groups")
+                ExpenseBalancePerson(
+                    p.getString("id"), p.optString("name"), p.optLong("totalMinor"),
+                    (0 until (gs?.length() ?: 0)).map { j ->
+                        val g = gs!!.getJSONObject(j)
+                        ExpenseBalanceGroup(if (g.isNull("id")) null else g.getString("id"), g.optString("name"), g.optLong("netMinor"))
+                    }
+                )
+            }
+        }
+    }
+}
 
 data class ExpenseGroup(val id: String, val name: String, val members: List<String>)
 data class ExpensePerson(val id: String, val name: String, val isUser: Boolean)

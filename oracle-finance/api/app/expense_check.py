@@ -113,6 +113,53 @@ def options(s=None):
     return {"groups": groups, "people": people}
 
 
+def compute_balances(people, groups, expenses, settlements):
+    """What each of the Expense app's two accounts is owed (+) or owes (-), per group and overall.
+
+    Same rule as the app's pairBalance: an expense paid by X adds each other person's share to what they
+    owe X; a payment from A to B moves A's debt to B down. Expenses outside any group are "Non-group expenses".
+    """
+    names = {g["id"]: g["name"] for g in groups}
+    users = [p for p in people if p.get("isUser")] or list(people)
+
+    def net(me, exps, sets):
+        total = 0
+        for e in exps:
+            share = (e.get("splits") or {}).get(me, 0)
+            if e.get("payer") == me:
+                total += int(e.get("amount") or 0) - share
+            else:
+                total -= share
+        for st in sets:
+            amount = int(st.get("amount") or 0)
+            if st.get("from") == me:
+                total += amount
+            elif st.get("to") == me:
+                total -= amount
+        return total
+
+    out = []
+    for user in users:
+        rows = []
+        for gid in [g["id"] for g in groups] + [None]:
+            exps = [e for e in expenses if (e.get("groupId") or None) == gid]
+            sets = [x for x in settlements if (x.get("groupId") or None) == gid]
+            if not exps and not sets:
+                continue
+            rows.append({"id": gid, "name": names.get(gid) if gid else "Non-group expenses", "netMinor": net(user["id"], exps, sets)})
+        out.append({"id": user["id"], "name": user.get("name") or "", "totalMinor": sum(r["netMinor"] for r in rows), "groups": rows})
+    return {"people": out}
+
+
+def balances(s=None):
+    """Per-group balances for the phone's Splitwise screen."""
+    s = s or settings()
+    headers = _login(s)
+    groups = [{"id": g["id"], "name": g.get("name") or ""} for g in _records(s, headers, "groups")]
+    people = [{"id": p["id"], "name": p.get("name") or "", "isUser": bool(p.get("isUser"))} for p in _records(s, headers, "people")]
+    return compute_balances(people, groups, _records(s, headers, "expenses"), _records(s, headers, "settlements"))
+
+
 def _day(ms):
     return datetime.fromtimestamp(ms / 1000, IST).date()
 

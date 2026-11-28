@@ -179,7 +179,7 @@ class MainActivity : AppCompatActivity() {
         setupMoreMenu()
 
         buttonEditSplitwise.setOnClickListener {
-            showManualSplitwiseDialog()
+            showSplitwiseGroupsSheet()
         }
 
         buttonEditBankAccounts.setOnClickListener {
