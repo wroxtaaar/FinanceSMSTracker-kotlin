@@ -135,11 +135,13 @@ class MainActivity : AppCompatActivity() {
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            // Keep the side margin from the layout (20dp) on top of the system bars.
+            val side = (20 * resources.displayMetrics.density).toInt()
 
             v.setPadding(
-                systemBars.left,
+                systemBars.left + side,
                 systemBars.top,
-                systemBars.right,
+                systemBars.right + side,
                 systemBars.bottom
             )
 

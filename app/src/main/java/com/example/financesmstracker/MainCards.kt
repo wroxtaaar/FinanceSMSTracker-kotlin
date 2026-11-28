@@ -64,7 +64,8 @@ private fun MainActivity.homeCardTile(group: List<OracleAccount>, meta: CardMeta
     }
 
     val title = if (shared) {
-        "Shared · " + group.joinToString(" + ") { it.last4?.let { l -> "••$l" } ?: displayAccountName(it.name) }
+        val banks = group.mapNotNull { HomeFormat.bankLabel(it.bank ?: it.name.trim().substringBefore(' ')) }.distinct()
+        (if (banks.isEmpty()) "Shared" else banks.joinToString(" + ")) + " · " + group.joinToString(" + ") { it.last4?.let { l -> "••$l" } ?: displayAccountName(it.name) }
     } else {
         displayAccountName(first.name) + (first.last4?.let { "  ••$it" } ?: "")
     }
