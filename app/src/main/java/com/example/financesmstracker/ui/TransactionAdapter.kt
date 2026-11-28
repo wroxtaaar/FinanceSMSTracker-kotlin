@@ -155,7 +155,7 @@ class TransactionAdapter(
         val payee = HomeFormat.payeeOrNull(tx)
         holder.merchant.text = payee ?: "Unknown payee"
         holder.merchant.alpha = if (payee == null) 0.6f else 1f
-        holder.reviewChip.visibility = if (payee == null) View.VISIBLE else View.GONE
+        holder.reviewChip.visibility = View.GONE // "Unknown payee" already says it; the chip only confused people with the Review screen
         holder.icon.showCategoryBadge(tx.category)
 
         val credit = tx.transactionType == TransactionType.CREDIT
