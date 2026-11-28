@@ -132,6 +132,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         AppTheme.styleHome(this)
         AppTheme.setupQuickActions(this)
+        AppTheme.setupHeroTiles(this)
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -338,17 +339,20 @@ class MainActivity : AppCompatActivity() {
             } else {
                 "No Gmail alert received yet"
             }
+            textViewNotificationStatus.visibility = View.GONE // all fine: show nothing; the pill appears only when something is wrong
             textViewNotificationStatus.text = statusPill(Color.parseColor("#2E9E5B"), "Alerts on")
             textViewNotificationStatus.setOnClickListener {
                 Toast.makeText(this, "Bank/card notification trigger is on. $detail", Toast.LENGTH_LONG).show()
             }
             buttonOpenNotificationSettings.visibility = View.GONE
         } else if (granted) {
+            textViewNotificationStatus.visibility = View.VISIBLE
             textViewNotificationStatus.text = statusPill(Color.parseColor("#E08A1E"), "Reconnecting…")
             textViewNotificationStatus.setOnClickListener(null)
             textViewNotificationStatus.isClickable = false
             buttonOpenNotificationSettings.visibility = View.GONE
         } else {
+            textViewNotificationStatus.visibility = View.VISIBLE
             textViewNotificationStatus.text = statusPill(Color.parseColor("#D64545"), "Alerts off")
             textViewNotificationStatus.setOnClickListener {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))

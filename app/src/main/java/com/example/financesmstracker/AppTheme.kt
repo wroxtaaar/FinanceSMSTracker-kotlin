@@ -136,12 +136,10 @@ enum class AppTheme(
             val medium = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
             row.gravity = Gravity.CENTER_VERTICAL
-            val specs = listOf(
-                Triple(R.id.buttonEditSplitwise, R.drawable.ic_group, "Splitwise"),
-                Triple(R.id.buttonEditBankAccounts, R.drawable.ic_bank, "Banks"),
-                Triple(R.id.buttonEditCreditCards, R.drawable.ic_card, "Cards"),
-                Triple(R.id.buttonMore, R.drawable.ic_more, "More"),
-            )
+            // Splitwise / Banks / Cards are now the three balance tiles in the hero (see setupHeroTiles).
+            listOf(R.id.buttonEditSplitwise, R.id.buttonEditBankAccounts, R.id.buttonEditCreditCards)
+                .forEach { activity.findViewById<View>(it).visibility = View.GONE }
+            val specs = listOf(Triple(R.id.buttonMore, R.drawable.ic_more, "More"))
             specs.forEach { (buttonId, iconRes, label) ->
                 val source = activity.findViewById<View>(buttonId)
                 source.visibility = View.GONE
@@ -167,44 +165,48 @@ enum class AppTheme(
                     setOnClickListener { if (source.isEnabled) source.performClick() }
                 }
 
-                if (theme == DARK_LEDGER) {
-                    // Outlined pills; "More" is icon-only so all four fit on one line.
-                    item.orientation = LinearLayout.HORIZONTAL
-                    item.gravity = Gravity.CENTER_VERTICAL
-                    item.background = GradientDrawable().apply {
-                        cornerRadius = dp(22).toFloat()
-                        setColor(Color.TRANSPARENT)
-                        setStroke(dp(1), line)
-                    }
-                    if (isMore) {
-                        item.setPadding(dp(11), 0, dp(11), 0)
-                        item.addView(icon, lp(dp(22), dp(22)))
-                    } else {
-                        item.setPadding(dp(14), 0, dp(14), 0)
-                        item.addView(icon, lp(dp(18), dp(18)))
-                        text.textSize = 13f
-                        item.addView(text, lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
-                    }
-                    row.addView(item, lp(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply { marginEnd = dp(8) })
-                } else {
-                    // A rounded square tile with the label underneath.
-                    item.orientation = LinearLayout.VERTICAL
-                    item.gravity = Gravity.CENTER_HORIZONTAL
-                    icon.setPadding(dp(15), dp(15), dp(15), dp(15))
-                    icon.background = GradientDrawable().apply {
-                        cornerRadius = dp(if (theme == CALM_TEAL) 18 else 16).toFloat()
-                        if (theme == CALM_TEAL) {
-                            setColor(card)
-                            setStroke(dp(1), line)
-                        } else {
-                            setColor(field)
-                        }
-                    }
-                    text.textSize = 12f
-                    item.addView(icon, lp(dp(56), dp(56)))
-                    item.addView(text, lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
-                    row.addView(item, lp(0, ViewGroup.LayoutParams.WRAP_CONTENT).apply { weight = 1f })
+                // An outlined pill with icon + label.
+                item.orientation = LinearLayout.HORIZONTAL
+                item.gravity = Gravity.CENTER_VERTICAL
+                item.background = GradientDrawable().apply {
+                    cornerRadius = dp(22).toFloat()
+                    setColor(Color.TRANSPARENT)
+                    setStroke(dp(1), line)
                 }
+                item.setPadding(dp(14), 0, dp(16), 0)
+                item.addView(icon, lp(dp(18), dp(18)))
+                text.textSize = 13f
+                item.addView(text, lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+                row.addView(item, lp(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
+            }
+        }
+
+        /** The three balance tiles in the hero open Banks, Splitwise and Cards; the top icons open Settings and Theme. */
+        fun setupHeroTiles(activity: Activity) {
+            val d = activity.resources.displayMetrics.density
+            val tiles = listOf(
+                R.id.textViewStatBankLabel to R.id.buttonEditBankAccounts,
+                R.id.textViewStatSplitwiseLabel to R.id.buttonEditSplitwise,
+                R.id.textViewStatCardsLabel to R.id.buttonEditCreditCards,
+            )
+            val ripple = android.util.TypedValue().also {
+                activity.theme.resolveAttribute(android.R.attr.selectableItemBackground, it, true)
+            }.resourceId
+            tiles.forEach { (labelId, buttonId) ->
+                val tile = activity.findViewById<View>(labelId).parent as View
+                val source = activity.findViewById<View>(buttonId)
+                tile.isClickable = true
+                tile.isFocusable = true
+                if (ripple != 0) tile.foreground = ContextCompat.getDrawable(activity, ripple)
+                tile.setOnClickListener { if (source.isEnabled) source.performClick() }
+            }
+            val onSurface = attrColor(activity, com.google.android.material.R.attr.colorOnSurface, Color.BLACK)
+            listOf(R.id.buttonThemeTop, R.id.buttonSettingsTop).forEach {
+                activity.findViewById<ImageView>(it).imageTintList = ColorStateList.valueOf(onSurface)
+            }
+            activity.findViewById<View>(R.id.buttonThemeTop).setOnClickListener { showPicker(activity) }
+            activity.findViewById<View>(R.id.buttonSettingsTop).setOnClickListener {
+                activity.findViewById<View>(R.id.buttonOracleSettings).performClick()
             }
         }
 
