@@ -130,15 +130,21 @@ class MainActivity : AppCompatActivity() {
         AppTheme.edgeToEdge(this)
         setContentView(R.layout.activity_main)
         AppTheme.styleHome(this)
+        AppTheme.setupQuickActions(this)
 
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
+        val main = findViewById<View>(R.id.main)
+        val paddingLeft = main.paddingLeft
+        val paddingTop = main.paddingTop
+        val paddingRight = main.paddingRight
+        val paddingBottom = main.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(main) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
 
             v.setPadding(
-                systemBars.left,
-                systemBars.top,
-                systemBars.right,
-                systemBars.bottom
+                systemBars.left + paddingLeft,
+                systemBars.top + paddingTop,
+                systemBars.right + paddingRight,
+                systemBars.bottom + paddingBottom
             )
 
             insets
@@ -263,16 +269,16 @@ class MainActivity : AppCompatActivity() {
         // The count is the badge: it shows on the always-visible More button, in red.
         val more = findViewById<Button>(R.id.buttonMore)
         more.text = if (count > 0) "More ($count)" else "More"
+        AppTheme.setMoreBadge(this, count)
         more.setTextColor(
             if (count > 0) Color.parseColor("#D64545")
             else com.google.android.material.color.MaterialColors.getColor(more, com.google.android.material.R.attr.colorOnSecondaryContainer)
         )
     }
 
-    /** Pull-to-refresh: reload the list and the ledger, and ask the server to scan Gmail. */
+    /** Pull-to-refresh: reload the list and the ledger only; Gmail sync remains available under More. */
     internal fun refreshAll() {
         loadTransactions()
-        if (buttonGmailSync.isEnabled) triggerManualGmailSync()
         loadOracleSummary { swipeRefresh.isRefreshing = false }
     }
 
@@ -303,9 +309,9 @@ class MainActivity : AppCompatActivity() {
     internal fun renderOracleSummary(summary: OracleLedgerSummary) {
         textViewOracleStatus.text = "Oracle ledger: Connected"
         textViewTrueAvailable.text = formatMinor(summary.trueAvailableMinor)
-        textViewBankCash.text = "+ " + formatMinor(summary.bankCashMinor)
-        textViewSplitwiseReceivable.text = "+ " + formatMinor(summary.splitwiseReceivableMinor)
-        textViewCardOutstanding.text = "− " + formatMinor(summary.creditCardOutstandingMinor)
+        textViewBankCash.text = formatMinor(summary.bankCashMinor)
+        textViewSplitwiseReceivable.text = formatMinor(summary.splitwiseReceivableMinor)
+        textViewCardOutstanding.text = formatMinor(summary.creditCardOutstandingMinor)
         renderEmiNote(summary.emiReservations)
     }
 

@@ -5,7 +5,7 @@
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="16dp"
+    android:padding="20dp"
     tools:context=".MainActivity">
 
     <TextView
@@ -53,7 +53,7 @@
         android:layout_marginTop="12dp"
         android:background="?attr/heroBackground"
         android:orientation="vertical"
-        android:padding="16dp"
+        android:padding="?attr/heroPad"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/buttonOpenNotificationSettings">
@@ -62,131 +62,149 @@
             android:id="@+id/textViewOracleStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:alpha="0.75"
             android:text="Oracle ledger: Loading..."
-            android:textColor="?attr/heroText"
+            android:textColor="?attr/heroMuted"
             android:textSize="12sp" />
 
         <TextView
+            android:id="@+id/textViewTrueLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:alpha="0.8"
             android:text="True available"
-            android:textColor="?attr/heroText"
+            android:textColor="?attr/heroMuted"
             android:textSize="13sp" />
 
         <TextView
             android:id="@+id/textViewTrueAvailable"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
             android:fontFeatureSettings="tnum"
             android:text="—"
             android:textColor="?attr/heroText"
-            android:textSize="32sp"
+            android:textSize="40sp"
             android:textStyle="bold" />
 
         <View
             android:layout_width="match_parent"
-            android:layout_height="0.5dp"
-            android:background="?attr/heroDivider" />
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:background="?attr/heroRuleTop" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingVertical="6dp">
+            android:paddingVertical="12dp">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:alpha="0.8"
-                android:text="Bank cash"
-                android:textColor="?attr/heroText"
-                android:textSize="13sp" />
+                android:layout_marginEnd="8dp"
+                android:background="?attr/heroChip"
+                android:orientation="vertical"
+                android:padding="?attr/heroChipPad">
 
-            <TextView
-                android:id="@+id/textViewBankCash"
-                android:layout_width="wrap_content"
+                <TextView
+                    android:id="@+id/textViewStatBankLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Bank cash"
+                    android:textColor="?attr/heroMuted"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/textViewBankCash"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFeatureSettings="tnum"
+                    android:maxLines="1"
+                    android:text="—"
+                    android:textColor="?attr/heroText"
+                    android:textStyle="bold"
+                    app:autoSizeMaxTextSize="17sp"
+                    app:autoSizeMinTextSize="9sp"
+                    app:autoSizeStepGranularity="1sp"
+                    app:autoSizeTextType="uniform" />
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:fontFeatureSettings="tnum"
-                android:text="—"
-                android:textColor="?attr/heroPositive"
-                android:textSize="13sp"
-                android:textStyle="bold" />
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:background="?attr/heroChip"
+                android:orientation="vertical"
+                android:padding="?attr/heroChipPad">
+
+                <TextView
+                    android:id="@+id/textViewStatSplitwiseLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Splitwise"
+                    android:textColor="?attr/heroMuted"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/textViewSplitwiseReceivable"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFeatureSettings="tnum"
+                    android:maxLines="1"
+                    android:text="—"
+                    android:textColor="?attr/heroAccent"
+                    android:textStyle="bold"
+                    app:autoSizeMaxTextSize="17sp"
+                    app:autoSizeMinTextSize="9sp"
+                    app:autoSizeStepGranularity="1sp"
+                    app:autoSizeTextType="uniform" />
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="?attr/heroChip"
+                android:orientation="vertical"
+                android:padding="?attr/heroChipPad">
+
+                <TextView
+                    android:id="@+id/textViewStatCardsLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Cards"
+                    android:textColor="?attr/heroMuted"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/textViewCardOutstanding"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFeatureSettings="tnum"
+                    android:maxLines="1"
+                    android:text="—"
+                    android:textColor="?attr/heroText"
+                    android:textStyle="bold"
+                    app:autoSizeMaxTextSize="17sp"
+                    app:autoSizeMinTextSize="9sp"
+                    app:autoSizeStepGranularity="1sp"
+                    app:autoSizeTextType="uniform" />
+            </LinearLayout>
         </LinearLayout>
 
         <View
             android:layout_width="match_parent"
-            android:layout_height="0.5dp"
-            android:background="?attr/heroDivider" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingVertical="6dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:alpha="0.8"
-                android:text="Splitwise owed"
-                android:textColor="?attr/heroText"
-                android:textSize="13sp" />
-
-            <TextView
-                android:id="@+id/textViewSplitwiseReceivable"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFeatureSettings="tnum"
-                android:text="—"
-                android:textColor="?attr/heroPositive"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="0.5dp"
-            android:background="?attr/heroDivider" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingVertical="6dp">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:alpha="0.8"
-                android:text="Card outstanding"
-                android:textColor="?attr/heroText"
-                android:textSize="13sp" />
-
-            <TextView
-                android:id="@+id/textViewCardOutstanding"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFeatureSettings="tnum"
-                android:text="—"
-                android:textColor="?attr/heroNegative"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-        </LinearLayout>
+            android:layout_height="1dp"
+            android:background="?attr/heroRuleBottom" />
 
         <TextView
             android:id="@+id/textViewEmiNote"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:alpha="0.8"
-            android:textColor="?attr/heroText"
+            android:textColor="?attr/heroMuted"
             android:textSize="12sp"
             android:visibility="gone" />
     </LinearLayout>
@@ -203,6 +221,7 @@
 
         <Button
             android:id="@+id/buttonEditSplitwise"
+            android:visibility="gone"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="64dp"
@@ -223,6 +242,7 @@
             app:iconSize="22dp" />
         <Button
             android:id="@+id/buttonEditBankAccounts"
+            android:visibility="gone"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="64dp"
@@ -243,6 +263,7 @@
             app:iconSize="22dp" />
         <Button
             android:id="@+id/buttonEditCreditCards"
+            android:visibility="gone"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="64dp"
@@ -263,6 +284,7 @@
             app:iconSize="22dp" />
         <Button
             android:id="@+id/buttonMore"
+            android:visibility="gone"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="64dp"

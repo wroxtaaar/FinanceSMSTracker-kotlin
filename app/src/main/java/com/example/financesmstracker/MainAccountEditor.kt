@@ -10,7 +10,7 @@ import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
+import androidx.core.widget.NestedScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.example.financesmstracker.integration.EmiNote
@@ -76,7 +76,7 @@ private fun MainActivity.amountInput(hint: String, valueMinor: Long, signed: Boo
         selectAll()
     }
 
-private fun MainActivity.dialogContent(build: LinearLayout.() -> Unit) = ScrollView(this).apply {
+private fun MainActivity.dialogContent(build: LinearLayout.() -> Unit) = NestedScrollView(this).apply {
     isFillViewport = true
     addView(LinearLayout(this@dialogContent).apply {
         orientation = LinearLayout.VERTICAL
