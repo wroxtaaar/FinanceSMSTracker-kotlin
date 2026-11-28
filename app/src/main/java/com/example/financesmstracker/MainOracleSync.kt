@@ -261,191 +261,80 @@ internal fun MainActivity.showLedgerAudit() {
 
 internal fun MainActivity.showOracleSettingsDialog() {
     val settings = SyncSettings(this)
-    val container = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(48, 8, 48, 0)
-    }
+    val primary = com.google.android.material.color.MaterialColors.getColor(
+        this, com.google.android.material.R.attr.colorPrimary, android.graphics.Color.CYAN
+    )
 
     val urlInput = EditText(this).apply {
-        hint = "Oracle URL"
+        hint = "https://your-server"
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         setSingleLine(true)
         setText(settings.baseUrl())
     }
-
     val tokenInput = EditText(this).apply {
-        hint = "Oracle sync token"
+        hint = "Sync token"
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         setSingleLine(true)
-        if (settings.token().isNotBlank()) {
-            setText(settings.token())
+        if (settings.token().isNotBlank()) setText(settings.token())
+    }
+
+    fun linkRow(label: String, onClick: () -> Unit) = TextView(this).apply {
+        text = label
+        textSize = 15f
+        setTextColor(primary)
+        setPadding(0, dp(4), 0, dp(4))
+        minHeight = dp(44)
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        setOnClickListener { onClick() }
+    }
+
+    val body = androidx.core.widget.NestedScrollView(this).apply {
+        addView(LinearLayout(this@showOracleSettingsDialog).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(8))
+            addView(tile {
+                addView(caption("Server address"))
+                addView(urlInput)
+                addView(caption("Sync token").apply { setPadding(0, dp(12), 0, 0) })
+                addView(tokenInput)
+                addView(caption("Your private Tailscale/Serve address. The token stays only in this app's private storage.").apply {
+                    textSize = 11f
+                    setPadding(0, dp(8), 0, 0)
+                })
+            })
+            addView(tile {
+                addView(linkRow("Theme: ${AppTheme.current(this@showOracleSettingsDialog).label}  ›") {
+                    AppTheme.showPicker(this@showOracleSettingsDialog)
+                })
+                addView(linkRow("Check app update  ›") { AppUpdateChecker.checkNow(this@showOracleSettingsDialog) })
+            })
+        })
+    }
+
+    formSheet("Settings", body, positiveText = "Save & test") { form ->
+        val baseUrl = urlInput.text.toString().trim().trimEnd('/')
+        val token = tokenInput.text.toString()
+        if (baseUrl.isBlank()) { urlInput.error = "Enter the server address"; return@formSheet }
+        if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
+            urlInput.error = "Use an http:// or https:// address"
+            return@formSheet
         }
-    }
+        if (token.isBlank()) { tokenInput.error = "Enter the sync token"; return@formSheet }
 
-    container.addView(urlInput)
-    container.addView(tokenInput)
+        settings.save(baseUrl, token)
+        form.dismiss()
+        loadOracleSummary()
 
-    // Appearance: opens the theme chooser (Calm Teal / Dark Ledger / Warm Paper).
-    val themeRow = android.widget.TextView(this).apply {
-        text = "Theme: ${AppTheme.current(this@showOracleSettingsDialog).label}  ›"
-        textSize = 16f
-        setPadding(0, dp(16), 0, dp(8))
-        setTextColor(
-            com.google.android.material.color.MaterialColors.getColor(
-                this, com.google.android.material.R.attr.colorPrimary, android.graphics.Color.CYAN
-            )
-        )
-        setOnClickListener { AppTheme.showPicker(this@showOracleSettingsDialog) }
-    }
-    container.addView(themeRow)
-
-    val dialog = AlertDialog.Builder(this)
-        .setTitle("Oracle Sync Settings")
-        .setMessage("Use your private Tailscale/Serve URL. The token is stored only in this app's private preferences.")
-        .setView(container)
-        .setNegativeButton("Cancel", null)
-        .setNeutralButton("Check app update") { _, _ -> AppUpdateChecker.checkNow(this) }
-        .setPositiveButton("Save & Test", null)
-        .create()
-
-    dialog.setOnShowListener {
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val baseUrl = urlInput.text.toString().trim().trimEnd('/')
-            val token = tokenInput.text.toString()
-
-            if (baseUrl.isBlank()) {
-                urlInput.error = "Enter the Oracle URL"
-                return@setOnClickListener
-            }
-
-            if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
-                urlInput.error = "Use an http:// or https:// URL"
-                return@setOnClickListener
-            }
-
-            if (token.isBlank()) {
-                tokenInput.error = "Enter the Oracle sync token"
-                return@setOnClickListener
-            }
-
-            settings.save(baseUrl, token)
-            dialog.dismiss()
-            loadOracleSummary()
-
-            oracleExecutor.execute {
-                val result = FinanceSyncClient(this@showOracleSettingsDialog).fetchSummary()
-                runOnUiThread {
-                    result.onSuccess {
-                        renderOracleSummary(it)
-                        Toast.makeText(
-                            this@showOracleSettingsDialog,
-                            "Oracle settings saved and connection verified",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }.onFailure { error ->
-                        textViewOracleStatus.text =
-                            "Oracle ledger: " + (error.message ?: "Connection failed")
-                        Toast.makeText(
-                            this@showOracleSettingsDialog,
-                            "Settings saved, but Oracle connection failed",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
+        oracleExecutor.execute {
+            val result = FinanceSyncClient(this@showOracleSettingsDialog).fetchSummary()
+            runOnUiThread {
+                result.onSuccess {
+                    renderOracleSummary(it)
+                    Toast.makeText(this@showOracleSettingsDialog, "Settings saved and connection verified", Toast.LENGTH_LONG).show()
+                }.onFailure { error ->
+                    textViewOracleStatus.text = "Oracle ledger: " + (error.message ?: "Connection failed")
+                    Toast.makeText(this@showOracleSettingsDialog, "Settings saved, but the connection failed", Toast.LENGTH_LONG).show()
                 }
-            }
-        }
-    }
-
-    dialog.show()
-}
-
-internal fun MainActivity.triggerManualGmailSync() {
-    buttonGmailSync.isEnabled = false
-    buttonGmailSync.text = "Syncing..."
-
-    oracleExecutor.execute {
-        val result = FinanceSyncClient(this@triggerManualGmailSync).triggerGmailSync()
-
-        runOnUiThread {
-            buttonGmailSync.isEnabled = true
-            buttonGmailSync.text = "Sync Gmail"
-
-            result.onSuccess { summary ->
-                com.example.financesmstracker.receiver.SmsHandlingLog.saveGmailScan(
-                    this@triggerManualGmailSync,
-                    com.example.financesmstracker.receiver.SmsHandlingLog.formatGmailScan(
-                        summary.searchSummary, summary.messageLog
-                    )
-                )
-                Toast.makeText(
-                    this@triggerManualGmailSync,
-                    "Gmail: scanned ${summary.messagesScanned}, new transactions " +
-                        "${summary.parsedTransactions}, duplicates ${summary.duplicateTransactions}",
-                    Toast.LENGTH_LONG
-                ).show()
-                syncOracleGmailTransactions()
-                loadOracleSummary()
-                loadTransactions()
-            }.onFailure { error ->
-                // A 403 here means Gmail is switched off on the Oracle server
-                // (GMAIL_ENABLED in its .env).
-                Toast.makeText(
-                    this@triggerManualGmailSync,
-                    "Gmail sync failed: " + (error.message ?: "Unavailable"),
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-    }
-}
-
-internal fun MainActivity.syncOracleGmailTransactions() {
-    oracleExecutor.execute {
-        val result = FinanceSyncClient(this@syncOracleGmailTransactions).fetchGmailTransactions()
-
-        runOnUiThread {
-            result.onSuccess { transactions ->
-                val clearedAt = localHistoryPrefs.getLong(MainActivity.KEY_LOCAL_HISTORY_CLEARED_AT, 0L)
-                val clearedOracleIds =
-                    localHistoryPrefs.getStringSet(
-                        MainActivity.KEY_LOCAL_HISTORY_CLEARED_ORACLE_IDS,
-                        emptySet()
-                    ) ?: emptySet()
-                var changed = 0
-
-                transactions.forEach { transaction ->
-                    // Clear Local History is intentionally local-only. Oracle
-                    // keeps Gmail processing history, but rows that existed
-                    // before the clear must never repopulate the phone.
-                    if (
-                        transaction.id.toString() in clearedOracleIds ||
-                        (clearedAt > 0L && transaction.timestamp <= clearedAt)
-                    ) {
-                        return@forEach
-                    }
-
-                    val rowId = repository.upsertOracleGmailTransaction(transaction)
-                    if (rowId != 0L) {
-                        changed++
-
-                        // Pulling an Oracle Gmail row is a read/rehydration
-                        // operation. Do not enqueue the resolved local row back
-                        // to Oracle merely because the app was reopened.
-                        // Re-sending here can replay metadata/category changes
-                        // and make the mutable Splitwise aggregate drift on
-                        // every startup. User edits and new local evidence have
-                        // their own explicit sync paths.
-                        Unit
-                    }
-                }
-
-                if (changed > 0) {
-                    loadTransactions()
-                }
-            }.onFailure {
-                // The local transaction list remains usable when Oracle is
-                // temporarily unavailable. The next resume or Gmail sync
-                // retries the pull.
             }
         }
     }

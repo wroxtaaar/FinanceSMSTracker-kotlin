@@ -252,7 +252,16 @@ class MainActivity : AppCompatActivity() {
         loadTransactions()
         updateNotificationAccessStatus()
         loadOracleSummary()
+        AppUpdateChecker.onAvailableChanged = { refreshUpdateButton() }
+        refreshUpdateButton()
         AppUpdateChecker.check(this)
+    }
+
+    private fun refreshUpdateButton() {
+        val button = findViewById<Button>(R.id.buttonUpdateTop) ?: return
+        val release = AppUpdateChecker.available
+        button.visibility = if (release != null) View.VISIBLE else View.GONE
+        button.setOnClickListener { AppUpdateChecker.installAvailable(this) }
     }
 
     internal fun updateReviewCount() {

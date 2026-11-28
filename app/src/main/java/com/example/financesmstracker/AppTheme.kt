@@ -139,7 +139,7 @@ enum class AppTheme(
             // Splitwise / Banks / Cards are now the three balance tiles in the hero (see setupHeroTiles).
             listOf(R.id.buttonEditSplitwise, R.id.buttonEditBankAccounts, R.id.buttonEditCreditCards)
                 .forEach { activity.findViewById<View>(it).visibility = View.GONE }
-            val specs = listOf(Triple(R.id.buttonMore, R.drawable.ic_more, "More"))
+            val specs = emptyList<Triple<Int, Int, String>>() // the More pill is gone: the gear icon opens the menu
             specs.forEach { (buttonId, iconRes, label) ->
                 val source = activity.findViewById<View>(buttonId)
                 source.visibility = View.GONE
@@ -205,8 +205,10 @@ enum class AppTheme(
                 activity.findViewById<ImageView>(it).imageTintList = ColorStateList.valueOf(onSurface)
             }
             activity.findViewById<View>(R.id.buttonThemeTop).setOnClickListener { showPicker(activity) }
+            // The gear opens the full menu (Review, Spending, Sync, Settings, ...). The old More button is hidden.
+            activity.findViewById<View>(R.id.buttonMore).visibility = View.GONE
             activity.findViewById<View>(R.id.buttonSettingsTop).setOnClickListener {
-                activity.findViewById<View>(R.id.buttonOracleSettings).performClick()
+                activity.findViewById<View>(R.id.buttonMore).performClick()
             }
         }
 
@@ -216,6 +218,9 @@ enum class AppTheme(
             val red = Color.parseColor("#D64545")
             val primary = attrColor(activity, com.google.android.material.R.attr.colorPrimary, Color.CYAN)
             val onSurface = attrColor(activity, com.google.android.material.R.attr.colorOnSurface, Color.BLACK)
+            // The review count now lives on the gear: it turns red while items wait.
+            activity.findViewById<ImageView>(R.id.buttonSettingsTop)?.imageTintList =
+                ColorStateList.valueOf(if (count > 0) red else onSurface)
             row.findViewWithTag<TextView>("quickMoreLabel")?.let {
                 it.text = if (count > 0) "More ($count)" else "More"
                 it.setTextColor(if (count > 0) red else onSurface)

@@ -34,20 +34,26 @@ data class AppRelease(val versionCode: Long, val versionName: String, val sha256
 object AppUpdateChecker {
     private const val TAG = "AppUpdateChecker"
     private const val ACTION = "com.example.financesmstracker.INSTALL_STATUS"
-    private var checkedThisProcess = false
+    private var lastCheckAt = 0L
     private var receiverRegistered = false
 
-    /** Once per app launch, in the background; installs by itself when a newer build exists. */
+    /** The newer build found on the server, or null. The home screen shows an Update button while this is set. */
+    @Volatile var available: AppRelease? = null
+        private set
+    var onAvailableChanged: (() -> Unit)? = null
+
+    /** Looks for a newer build in the background (at most every 30 minutes). Never installs by itself. */
     fun check(activity: Activity) {
-        if (checkedThisProcess) return
-        checkedThisProcess = true
-        run(activity, manual = false)
+        val now = System.currentTimeMillis()
+        if (now - lastCheckAt < 30 * 60_000L) return
+        lastCheckAt = now
+        look(activity, manual = false)
     }
 
-    /** From the Settings dialog: same thing, but tells the user what happened. */
-    fun checkNow(activity: Activity) = run(activity, manual = true)
+    /** From Settings: same look, but tells the user what happened. */
+    fun checkNow(activity: Activity) = look(activity, manual = true)
 
-    private fun run(activity: Activity, manual: Boolean) {
+    private fun look(activity: Activity, manual: Boolean) {
         val app = activity.applicationContext
         Thread {
             fun say(text: String) {
@@ -58,21 +64,33 @@ object AppUpdateChecker {
                 if (settings.baseUrl().isBlank() || settings.token().isBlank()) { say("Set the Oracle URL and token first"); return@Thread }
                 val latest = fetchLatest(settings)
                 val installed = installedCode(app)
-                if (!isNewerBuild(installed, latest.versionCode)) { say("Up to date (build $installed)"); return@Thread }
-                if (!app.packageManager.canRequestPackageInstalls()) {
-                    activity.runOnUiThread {
-                        Toast.makeText(app, "Allow \"Install unknown apps\" for this app, then reopen it to update", Toast.LENGTH_LONG).show()
-                        activity.startActivity(
-                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${app.packageName}"))
-                        )
-                    }
-                    return@Thread
-                }
-                say("Updating to build ${latest.versionCode}…")
-                install(app, settings, latest)
+                available = if (isNewerBuild(installed, latest.versionCode)) latest else null
+                activity.runOnUiThread { onAvailableChanged?.invoke() }
+                if (available == null) say("Up to date (build $installed)")
+                else say("Update available: tap Update at the top of the home screen")
+            } catch (error: Throwable) {
+                Log.w(TAG, "Update check failed: ${error.message}")
+                say("Update check failed: ${error.message}")
+            }
+        }.start()
+    }
+
+    /** The Update button: downloads the build found by [check], verifies it and installs it. */
+    fun installAvailable(activity: Activity) {
+        val release = available ?: return
+        val app = activity.applicationContext
+        if (!app.packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(app, "Allow \"Install unknown apps\" for this app, then tap Update again", Toast.LENGTH_LONG).show()
+            activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${app.packageName}")))
+            return
+        }
+        Toast.makeText(app, "Updating to build ${release.versionCode}…", Toast.LENGTH_LONG).show()
+        Thread {
+            try {
+                install(app, SyncSettings(app), release)
             } catch (error: Throwable) {
                 Log.w(TAG, "Update failed: ${error.message}")
-                say("Update check failed: ${error.message}")
+                activity.runOnUiThread { Toast.makeText(app, "Update failed: ${error.message}", Toast.LENGTH_LONG).show() }
             }
         }.start()
     }
