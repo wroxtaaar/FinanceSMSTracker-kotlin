@@ -17,10 +17,12 @@ import java.util.Locale
 
 /** Editing the single Splitwise total that the home screen starts from. */
 internal fun MainActivity.showManualSplitwiseDialog() {
+    if (!beginAction("splitwise-total")) return
     buttonEditSplitwise.isEnabled = false
     oracleExecutor.execute {
         val result = FinanceSyncClient(this@showManualSplitwiseDialog).fetchManualSplitwiseTotal()
         runOnUiThread {
+            endAction("splitwise-total")
             buttonEditSplitwise.isEnabled = true
             result.onSuccess { currentMinor ->
                 val input = EditText(this@showManualSplitwiseDialog).apply {
@@ -113,6 +115,7 @@ internal fun MainActivity.showManualSplitwiseDialog() {
 
 /** The Splitwise tile: what the Expense app says you are owed (or owe), group by group. */
 internal fun MainActivity.showSplitwiseGroupsSheet() {
+    if (!beginAction("splitwise-sheet")) return
     val client = FinanceSyncClient(this)
     // Open at once from the copy kept on this phone; the server's own copy then refreshes it in a moment.
     var people: List<com.example.financesmstracker.integration.ExpenseBalancePerson> = client.cachedExpenseBalances().orEmpty()
@@ -212,6 +215,7 @@ internal fun MainActivity.showSplitwiseGroupsSheet() {
     oracleExecutor.execute {
         val result = FinanceSyncClient(this@showSplitwiseGroupsSheet).fetchExpenseBalances()
         runOnUiThread {
+            endAction("splitwise-sheet")
             loading = false
             result.onSuccess { fresh ->
                 people = fresh
@@ -231,12 +235,14 @@ internal fun MainActivity.showSplitwiseGroupsSheet() {
  * only in the Expense app are picked up this way. Nothing is ever written to the Expense app.
  */
 internal fun MainActivity.syncSplitwiseFromExpense(personId: String, onDone: () -> Unit = {}) {
+    if (!beginAction("splitwise-sync")) return
     showSnack("Reading the Expense app…")
     oracleExecutor.execute {
         val client = FinanceSyncClient(this@syncSplitwiseFromExpense)
         val fresh = client.refreshExpenseBalances()
         val current = client.fetchManualSplitwiseTotal()
         runOnUiThread {
+            endAction("splitwise-sync")
             val person = fresh.getOrNull()?.firstOrNull { it.id == personId }
             if (person == null || current.isFailure) {
                 Toast.makeText(
@@ -282,11 +288,13 @@ internal fun MainActivity.syncSplitwiseFromExpense(personId: String, onDone: () 
 
 /** Lists what the app counted since the Splitwise total was last set, to compare with the Splitwise app. */
 internal fun MainActivity.showSplitwiseChangesDialog() {
+    if (!beginAction("splitwise-changes")) return
     oracleExecutor.execute {
         val client = FinanceSyncClient(this@showSplitwiseChangesDialog)
         val result = client.fetchSplitwiseChanges()
         val expense = client.fetchExpenseCheck()
         runOnUiThread {
+            endAction("splitwise-changes")
             result.onSuccess { changes ->
                 val expenseText = expense.getOrNull()?.let { ExpenseCheckText.format(it, { m -> formatMinor(m) }) }
                     ?: ("Expense check unavailable: " + (expense.exceptionOrNull()?.message ?: "unknown"))

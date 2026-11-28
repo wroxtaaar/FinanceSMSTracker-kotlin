@@ -51,34 +51,51 @@ object AppUpdateChecker {
     }
 
     /** From Settings: same look, but tells the user what happened. */
-    fun checkNow(activity: Activity) = look(activity, manual = true)
+    @Volatile private var looking = false
+
+    fun checkNow(activity: Activity) {
+        if (looking) return
+        looking = true
+        look(activity, manual = true)
+    }
 
     private fun look(activity: Activity, manual: Boolean) {
         val app = activity.applicationContext
         Thread {
-            fun say(text: String) {
-                if (manual) activity.runOnUiThread { Toast.makeText(app, text, Toast.LENGTH_LONG).show() }
-            }
             try {
-                val settings = SyncSettings(app)
-                if (settings.baseUrl().isBlank() || settings.token().isBlank()) { say("Set the Oracle URL and token first"); return@Thread }
-                val latest = fetchLatest(settings)
-                val installed = installedCode(app)
-                available = if (isNewerBuild(installed, latest.versionCode)) latest else null
-                activity.runOnUiThread { onAvailableChanged?.invoke() }
-                if (available == null) say("Up to date (build $installed)")
-                else say("Update available: tap Update at the top of the home screen")
-            } catch (error: Throwable) {
-                lastCheckAt = 0L // retry on the next look instead of waiting
-                Log.w(TAG, "Update check failed: ${error.message}")
-                say("Update check failed: ${error.message}")
+                lookBlocking(activity, app, manual)
+            } finally {
+                looking = false
             }
         }.start()
     }
 
+    private fun lookBlocking(activity: Activity, app: Context, manual: Boolean) {
+        fun say(text: String) {
+            if (manual) activity.runOnUiThread { Toast.makeText(app, text, Toast.LENGTH_LONG).show() }
+        }
+        try {
+            val settings = SyncSettings(app)
+            if (settings.baseUrl().isBlank() || settings.token().isBlank()) { say("Set the Oracle URL and token first"); return }
+            val latest = fetchLatest(settings)
+            val installed = installedCode(app)
+            available = if (isNewerBuild(installed, latest.versionCode)) latest else null
+            activity.runOnUiThread { onAvailableChanged?.invoke() }
+            if (available == null) say("Up to date (build $installed)")
+            else say("Update available: tap Update at the top of the home screen")
+        } catch (error: Throwable) {
+            lastCheckAt = 0L // retry on the next look instead of waiting
+            Log.w(TAG, "Update check failed: ${error.message}")
+            say("Update check failed: ${error.message}")
+        }
+    }
+
     /** The Update button: downloads the build found by [check], verifies it and installs it. */
+    @Volatile private var installing = false
+
     fun installAvailable(activity: Activity) {
         val release = available ?: return
+        if (installing) return // already downloading: a second tap must not start a second install
         val app = activity.applicationContext
         if (!app.packageManager.canRequestPackageInstalls()) {
             Toast.makeText(app, "Allow \"Install unknown apps\" for this app, then tap Update again", Toast.LENGTH_LONG).show()
@@ -86,10 +103,14 @@ object AppUpdateChecker {
             return
         }
         Toast.makeText(app, "Updating to build ${release.versionCode}…", Toast.LENGTH_LONG).show()
+        installing = true
         Thread {
             try {
                 install(app, SyncSettings(app), release)
+                Thread.sleep(30_000) // the app is replaced when the install finishes; if not, allow a retry
+                installing = false
             } catch (error: Throwable) {
+                installing = false
                 Log.w(TAG, "Update failed: ${error.message}")
                 activity.runOnUiThread { Toast.makeText(app, "Update failed: ${error.message}", Toast.LENGTH_LONG).show() }
             }

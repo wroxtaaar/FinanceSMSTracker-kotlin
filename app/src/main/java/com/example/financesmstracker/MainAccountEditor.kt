@@ -20,10 +20,13 @@ import com.example.financesmstracker.integration.OracleAccount
 import com.example.financesmstracker.util.MoneyInput
 
 internal fun MainActivity.loadOracleAccountsForManualEdit(accountType: String) {
+    val key = "accounts-$accountType"
+    if (!beginAction(key)) return
     oracleExecutor.execute {
         val result = FinanceSyncClient(this@loadOracleAccountsForManualEdit).fetchAccounts()
 
         runOnUiThread {
+            endAction(key)
             result.onSuccess { accounts ->
                 val filtered = accounts.filter { it.accountType == accountType }
                 showManualAccountsDialog(filtered, accountType)

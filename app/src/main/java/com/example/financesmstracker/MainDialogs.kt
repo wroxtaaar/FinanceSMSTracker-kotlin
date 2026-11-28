@@ -190,3 +190,21 @@ internal fun MainActivity.showSnack(message: String, actionLabel: String? = null
     if (actionLabel != null && action != null) bar.setAction(actionLabel) { action() }
     bar.show()
 }
+
+
+// ---- one tap = one request ---------------------------------------------------------------------
+// Buttons that call the server take a moment. Tapping again while the first request is still running
+// must not queue a second one (the screens would otherwise open one after another).
+private val actionsInFlight = mutableSetOf<String>()
+
+/** False when the same action is still running: the tap is ignored. Pair every true with [endAction]. */
+internal fun MainActivity.beginAction(key: String): Boolean {
+    if (!actionsInFlight.add(key)) return false
+    // Safety net: never leave a button dead if a request somehow never reports back.
+    window.decorView.postDelayed({ actionsInFlight.remove(key) }, 20_000L)
+    return true
+}
+
+internal fun MainActivity.endAction(key: String) {
+    actionsInFlight.remove(key)
+}

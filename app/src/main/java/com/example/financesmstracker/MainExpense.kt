@@ -105,12 +105,14 @@ internal fun MainActivity.showAddToExpenseDialog(txs: List<Transaction>) {
         Toast.makeText(this, "Only expenses can be added to Expense", Toast.LENGTH_SHORT).show()
         return
     }
+    if (!beginAction("add-to-expense")) return
     val ids = txs.map { oracleIdOf(it) }
     oracleExecutor.execute {
         val client = FinanceSyncClient(this@showAddToExpenseDialog)
         val options = client.fetchExpenseOptions()
         val link = if (ids.size == 1) client.fetchExpenseLink(ids[0]).getOrNull() else null
         runOnUiThread {
+            endAction("add-to-expense")
             options.onSuccess { opts -> buildExpenseDialog(txs, ids, opts, link) }
                 .onFailure {
                     Toast.makeText(
