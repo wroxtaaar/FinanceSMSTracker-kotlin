@@ -71,18 +71,43 @@ internal fun MainActivity.showSmsHandlingLog() {
     )
     val view = android.widget.TextView(this).apply {
         setTextIsSelectable(true)
-        setPadding(48, 24, 48, 24)
         textSize = 13f
     }
-    val tabGroup = android.widget.RadioGroup(this).apply {
-        orientation = android.widget.LinearLayout.HORIZONTAL
-        setPadding(24, 16, 24, 0)
-    }
-    val tabButtons = mutableListOf<android.widget.RadioButton>()
     fun entries() = SmsHandlingLog.fromSource(allEntries, source)
     fun currentText(): String =
         if (current >= sectionsInOrder.size) gmailText
         else SmsHandlingLog.formatSection(entries(), sectionsInOrder[current].second)
+
+    /** A segmented control: one button per choice, the chosen one filled. */
+    fun segmented(labels: List<String>, selected: Int, onPick: (Int) -> Unit): Pair<android.view.View, List<com.google.android.material.button.MaterialButton>> {
+        val group = com.google.android.material.button.MaterialButtonToggleGroup(this).apply {
+            isSingleSelection = true
+            isSelectionRequired = true
+        }
+        val buttons = labels.mapIndexed { i, label ->
+            com.google.android.material.button.MaterialButton(
+                this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
+            ).apply {
+                id = android.view.View.generateViewId()
+                text = label
+                textSize = 12f
+                isAllCaps = false
+                insetTop = 0
+                insetBottom = 0
+                group.addView(this)
+            }
+        }
+        group.check(buttons[selected].id)
+        group.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) onPick(buttons.indexOfFirst { it.id == checkedId })
+        }
+        return android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(group)
+        } to buttons
+    }
+
+    lateinit var tabButtons: List<com.google.android.material.button.MaterialButton>
     fun refresh() {
         val list = entries()
         sectionsInOrder.forEachIndexed { i, (label, section) ->
@@ -90,52 +115,42 @@ internal fun MainActivity.showSmsHandlingLog() {
         }
         view.text = currentText()
     }
-    (sectionsInOrder.map { it.first } + "E-mail scan").forEachIndexed { index, label ->
-        val button = android.widget.RadioButton(this).apply {
-            id = android.view.View.generateViewId()
-            text = label
-            textSize = 12f
-            isChecked = index == 0
-            setOnClickListener { current = index; refresh() }
-        }
-        tabButtons.add(button)
-        tabGroup.addView(button)
-    }
-    val sourceGroup = android.widget.RadioGroup(this).apply {
-        orientation = android.widget.LinearLayout.HORIZONTAL
-        setPadding(24, 0, 24, 8)
-    }
-    listOf(
+    val (tabs, tb) = segmented(sectionsInOrder.map { it.first } + "E-mail scan", 0) { current = it; refresh() }
+    tabButtons = tb
+    val sources = listOf(
         "All" to SmsHandlingLog.Source.ALL,
         "SMS" to SmsHandlingLog.Source.SMS,
         "Notifications" to SmsHandlingLog.Source.NOTIFICATION
-    ).forEach { (label, value) ->
-        sourceGroup.addView(android.widget.RadioButton(this).apply {
-            id = android.view.View.generateViewId()
-            text = label
-            textSize = 12f
-            isChecked = value == source
-            setOnClickListener { source = value; refresh() }
+    )
+    val (sourceRow, _) = segmented(sources.map { it.first }, 0) { source = sources[it].second; refresh() }
+    refresh()
+
+    val body = androidx.core.widget.NestedScrollView(this).apply {
+        addView(android.widget.LinearLayout(this@showSmsHandlingLog).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(8))
+            addView(tabs)
+            addView(sourceRow, android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(8); bottomMargin = dp(10) })
+            addView(tile { addView(view) })
         })
     }
-    refresh()
-    val container = android.widget.LinearLayout(this).apply {
-        orientation = android.widget.LinearLayout.VERTICAL
-        addView(android.widget.HorizontalScrollView(this@showSmsHandlingLog).apply { addView(tabGroup) })
-        addView(android.widget.HorizontalScrollView(this@showSmsHandlingLog).apply { addView(sourceGroup) })
-        addView(android.widget.ScrollView(this@showSmsHandlingLog).apply { addView(view) })
-    }
-    AlertDialog.Builder(this)
-        .setTitle("Logs: SMS, notifications, e-mail")
-        .setView(container)
-        .setPositiveButton("Close", null)
-        .setNeutralButton("Copy") { _, _ ->
+    formSheet(
+        title = "Logs",
+        subtitle = "SMS, notifications and e-mail, as the app handled them",
+        body = body,
+        positiveText = "Ledger audit",
+        neutralText = "Copy",
+        onNeutral = {
             val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             cm.setPrimaryClip(android.content.ClipData.newPlainText("SMS log", currentText()))
             Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
         }
-        .setNegativeButton("Ledger audit") { _, _ -> showLedgerAudit() }
-        .show()
+    ) { sheet ->
+        sheet.dismiss()
+        showLedgerAudit()
+    }
 }
 
 internal fun formatLedgerAudit(body: String): String {
@@ -238,20 +253,26 @@ internal fun MainActivity.showLedgerAudit() {
                 val view = android.widget.TextView(this).apply {
                     this.text = text
                     setTextIsSelectable(true)
-                    setPadding(48, 24, 48, 24)
                     textSize = 12f
                     typeface = android.graphics.Typeface.MONOSPACE
                 }
-                AlertDialog.Builder(this)
-                    .setTitle("Ledger audit (read-only)")
-                    .setView(android.widget.ScrollView(this).apply { addView(view) })
-                    .setPositiveButton("Close", null)
-                    .setNeutralButton("Copy") { _, _ ->
-                        val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        cm.setPrimaryClip(android.content.ClipData.newPlainText("Ledger audit", text))
-                        Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
-                    }
-                    .show()
+                formSheet(
+                    title = "Ledger audit",
+                    subtitle = "Read-only",
+                    body = androidx.core.widget.NestedScrollView(this).apply {
+                        addView(android.widget.LinearLayout(this@showLedgerAudit).apply {
+                            orientation = android.widget.LinearLayout.VERTICAL
+                            setPadding(dp(20), dp(4), dp(20), dp(8))
+                            addView(tile { addView(view) })
+                        })
+                    },
+                    positiveText = "Copy",
+                    neutralText = null
+                ) { _ ->
+                    val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Ledger audit", text))
+                    Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+                }
             }.onFailure { error ->
                 Toast.makeText(this, "Audit failed: " + (error.message ?: "Unavailable"), Toast.LENGTH_LONG).show()
             }
