@@ -339,3 +339,95 @@ internal fun MainActivity.showOracleSettingsDialog() {
         }
     }
 }
+
+internal fun MainActivity.triggerManualGmailSync() {
+    buttonGmailSync.isEnabled = false
+    buttonGmailSync.text = "Syncing..."
+
+    oracleExecutor.execute {
+        val result = FinanceSyncClient(this@triggerManualGmailSync).triggerGmailSync()
+
+        runOnUiThread {
+            buttonGmailSync.isEnabled = true
+            buttonGmailSync.text = "Sync Gmail"
+
+            result.onSuccess { summary ->
+                com.example.financesmstracker.receiver.SmsHandlingLog.saveGmailScan(
+                    this@triggerManualGmailSync,
+                    com.example.financesmstracker.receiver.SmsHandlingLog.formatGmailScan(
+                        summary.searchSummary, summary.messageLog
+                    )
+                )
+                Toast.makeText(
+                    this@triggerManualGmailSync,
+                    "Gmail: scanned ${summary.messagesScanned}, new transactions " +
+                        "${summary.parsedTransactions}, duplicates ${summary.duplicateTransactions}",
+                    Toast.LENGTH_LONG
+                ).show()
+                syncOracleGmailTransactions()
+                loadOracleSummary()
+                loadTransactions()
+            }.onFailure { error ->
+                // A 403 here means Gmail is switched off on the Oracle server
+                // (GMAIL_ENABLED in its .env).
+                Toast.makeText(
+                    this@triggerManualGmailSync,
+                    "Gmail sync failed: " + (error.message ?: "Unavailable"),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+}
+
+internal fun MainActivity.syncOracleGmailTransactions() {
+    oracleExecutor.execute {
+        val result = FinanceSyncClient(this@syncOracleGmailTransactions).fetchGmailTransactions()
+
+        runOnUiThread {
+            result.onSuccess { transactions ->
+                val clearedAt = localHistoryPrefs.getLong(MainActivity.KEY_LOCAL_HISTORY_CLEARED_AT, 0L)
+                val clearedOracleIds =
+                    localHistoryPrefs.getStringSet(
+                        MainActivity.KEY_LOCAL_HISTORY_CLEARED_ORACLE_IDS,
+                        emptySet()
+                    ) ?: emptySet()
+                var changed = 0
+
+                transactions.forEach { transaction ->
+                    // Clear Local History is intentionally local-only. Oracle
+                    // keeps Gmail processing history, but rows that existed
+                    // before the clear must never repopulate the phone.
+                    if (
+                        transaction.id.toString() in clearedOracleIds ||
+                        (clearedAt > 0L && transaction.timestamp <= clearedAt)
+                    ) {
+                        return@forEach
+                    }
+
+                    val rowId = repository.upsertOracleGmailTransaction(transaction)
+                    if (rowId != 0L) {
+                        changed++
+
+                        // Pulling an Oracle Gmail row is a read/rehydration
+                        // operation. Do not enqueue the resolved local row back
+                        // to Oracle merely because the app was reopened.
+                        // Re-sending here can replay metadata/category changes
+                        // and make the mutable Splitwise aggregate drift on
+                        // every startup. User edits and new local evidence have
+                        // their own explicit sync paths.
+                        Unit
+                    }
+                }
+
+                if (changed > 0) {
+                    loadTransactions()
+                }
+            }.onFailure {
+                // The local transaction list remains usable when Oracle is
+                // temporarily unavailable. The next resume or Gmail sync
+                // retries the pull.
+            }
+        }
+    }
+}
