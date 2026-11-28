@@ -11,5 +11,5 @@ object TransactionCategories {
     /** Labels that only make sense for credits and must never stick to a debit. */
     val creditOnly = setOf("BILL_PAYMENT")
 
-    val credit = listOf("SALARY", "TRANSFER", "BILL_PAYMENT", "REFUND", "OTHER")
+    val credit = listOf("SALARY", "CASHBACK", "TRANSFER", "BILL_PAYMENT", "REFUND", "OTHER")
 }

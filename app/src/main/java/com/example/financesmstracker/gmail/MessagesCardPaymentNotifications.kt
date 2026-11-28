@@ -30,6 +30,16 @@ object MessagesCardPaymentNotifications {
         val body = (content.text ?: content.bigText).orEmpty().trim()
         if (body.isEmpty()) return
 
+        com.example.financesmstracker.parser.CashbackSmsParser.parse(body)?.let { cashback ->
+            val outcome = com.example.financesmstracker.receiver.CashbackRecorder.record(
+                context, sbn.postTime, HashUtil.sha256(body), cashback
+            )
+            SmsHandlingLog.record(context, "Messages notification: $title", body, outcome)
+            context.sendBroadcast(
+                Intent(SmsReceiver.ACTION_TRANSACTION_DATA_CHANGED).setPackage(context.packageName)
+            )
+            return
+        }
         val parsed = CardBillPaymentSmsParser.parse(title, body) ?: return
 
         // Hash only the message text, like the SMS path, so the same confirmation

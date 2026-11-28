@@ -729,3 +729,19 @@ def test_salary_share_is_validated_and_only_for_salary_credits():
                   timestamp=T0 + 10**9 + 1, category="TRANSFER"))
     assert L.set_splitwise_share("sms:share-other", 1_000)["status"] == "NOT_SALARY"
     assert L.splitwise_share_info("sms:share-other")["status"] == "NOT_SALARY"
+
+
+def test_card_cashback_lowers_the_card_bill_but_stays_out_of_splitwise():
+    L.sync_transaction(Tx(id="sms:cb-spend", amountMinor=100_000, type="DEBIT", bank="AXIS", accountLast4="9206",
+                          paymentMethod="CARD", accountType="CREDIT_CARD", timestamp=T0 + 10**9,
+                          merchantOrPayee="SHOP", category="GROCERIES"))
+    spend_splitwise = L.get_manual_splitwise_total("INR")
+    with connection() as conn:
+        before = conn.execute("SELECT balance_minor FROM accounts WHERE id='airtel-card-9206'").fetchone()[0]
+    L.sync_transaction(Tx(id="sms:cb", amountMinor=86_800, type="CREDIT", bank="AXIS", accountLast4="9206",
+                          paymentMethod="UNKNOWN", accountType="CREDIT_CARD", timestamp=T0 + 10**9 + 5,
+                          merchantOrPayee="Cashback", category="CASHBACK"))
+    with connection() as conn:
+        after = conn.execute("SELECT balance_minor FROM accounts WHERE id='airtel-card-9206'").fetchone()[0]
+    assert after == before - 86_800  # the card owes less
+    assert L.get_manual_splitwise_total("INR") == spend_splitwise  # but nobody paid you back anything

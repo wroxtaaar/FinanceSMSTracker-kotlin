@@ -18,6 +18,7 @@ import com.example.financesmstracker.evidence.SourceType
 import com.example.financesmstracker.integration.FinanceSyncBridge
 import com.example.financesmstracker.integration.SyncCardBill
 import com.example.financesmstracker.parser.CardBillPaymentSmsParser
+import com.example.financesmstracker.parser.CashbackSmsParser
 import com.example.financesmstracker.parser.CardBillStatementParser
 import com.example.financesmstracker.parser.SenderTrustManager
 import com.example.financesmstracker.parser.SenderTrustStatus
@@ -55,6 +56,16 @@ class SmsReceiver : BroadcastReceiver() {
                     // explicitly says the payment was applied to a credit
                     // card. A normal "Sent/Debited from bank account" SMS
                     // must remain a bank transaction.
+                    // A cashback credit comes first: it also says "credited to your ... Credit Card",
+                    // but it is a reward, not a bill payment.
+                    val cashback = CashbackSmsParser.parse(fullBody)
+                    if (cashback != null && trustStatus != SenderTrustStatus.UNTRUSTED) {
+                        val outcome = CashbackRecorder.record(context, timestamp, smsHash, cashback)
+                        SmsHandlingLog.record(context, sender, fullBody, outcome)
+                        context.sendBroadcast(Intent(ACTION_TRANSACTION_DATA_CHANGED).setPackage(context.packageName))
+                        return
+                    }
+
                     val cardBillPayment = CardBillPaymentSmsParser.parse(sender, fullBody)
                     // The message itself must name a bank, a credit card with its last
                     // digits and a received payment, so it is accepted from an unknown

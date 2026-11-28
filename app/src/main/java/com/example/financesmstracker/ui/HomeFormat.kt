@@ -53,6 +53,7 @@ object HomeFormat {
         "TRANSFER", "BILL_PAYMENT" -> CategoryStyle("⇄", 0xFF607D8B.toInt())
         "SALARY" -> CategoryStyle("💼", 0xFF2E9E5B.toInt())
         "REFUND" -> CategoryStyle("↩", 0xFF2E9E5B.toInt())
+        "CASHBACK" -> CategoryStyle("🎁", 0xFFE0A31E.toInt())
         else -> CategoryStyle("•", 0xFF8A8F98.toInt())
     }
 

@@ -50,6 +50,7 @@ object CardBillPaymentSmsParser {
         val text = messageBody.replace("\u00A0", " ").trim()
         val lower = text.lowercase()
         if (!Regex("""\bcredit\s+card\b""").containsMatchIn(lower)) return null
+        if (lower.contains("cashback")) return null // a reward credit, handled by CashbackSmsParser
 
         val destinationPaymentSignal =
             Regex("""(?is)(?:credited\s+to|payment\s+(?:received|processed|successful|completed|credited)|received\s+(?:your\s+)?payment|received\s+(?:towards|for|on)|paid\s+(?:towards|for|on|to)).{0,120}\bcredit\s+card\b""").containsMatchIn(lower) ||

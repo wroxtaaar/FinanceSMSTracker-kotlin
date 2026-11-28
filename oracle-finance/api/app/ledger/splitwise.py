@@ -6,7 +6,7 @@ from .emi import excluded_from_splitwise, list_loans
 
 
 def splitwise_delta(account_type, transaction_type, amount_minor, category=None, exclude_salary=True,
-                    salary_share_minor=None):
+                    salary_share_minor=None, exclude_cashback=True):
     """Return the Splitwise effect implied by the final ledger movement.
 
     Splitwise is deliberately derived from the same ledger movement as the
@@ -33,6 +33,9 @@ def splitwise_delta(account_type, transaction_type, amount_minor, category=None,
 
     category_name = str(category or "").strip().upper()
     if category_name == "OTHER":
+        return 0
+    # Card cashback is the bank's reward, not someone paying you back for a shared expense.
+    if exclude_cashback and category_name == "CASHBACK" and transaction_type == "CREDIT":
         return 0
     if exclude_salary and category_name == "SALARY" and transaction_type == "CREDIT":
         if salary_share_minor is None or account_type != "BANK_ACCOUNT":
@@ -101,7 +104,8 @@ def apply_splitwise_contribution(conn, t, applied_at=None):
     return bool(inserted.rowcount)
 
 
-def _ledger_splitwise_entries(conn, cur, honor_other=True, honor_salary=True, legacy_statement_rule=False):
+def _ledger_splitwise_entries(conn, cur, honor_other=True, honor_salary=True, legacy_statement_rule=False,
+                              honor_cashback=True):
     """Yield (row, delta) for every canonical bank/card movement that counts toward Splitwise.
 
     Only active, canonical transactions that actually affect a bank/card
@@ -166,6 +170,7 @@ def _ledger_splitwise_entries(conn, cur, honor_other=True, honor_salary=True, le
             row["amount_minor"],
             category,
             exclude_salary=honor_salary,
+            exclude_cashback=honor_cashback,
             salary_share_minor=row["splitwise_amount_minor"] if honor_salary else None,
         )
 
