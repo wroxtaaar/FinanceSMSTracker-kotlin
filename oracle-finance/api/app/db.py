@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS expense_links (
   transaction_id TEXT PRIMARY KEY, expense_id TEXT NOT NULL, description TEXT,
   group_id TEXT, payer_id TEXT, amount_minor INTEGER NOT NULL, created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS expense_balance_cache (
+  id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS expense_handled (
   transaction_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL
 );

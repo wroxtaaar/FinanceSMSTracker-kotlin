@@ -113,89 +113,105 @@ internal fun MainActivity.showManualSplitwiseDialog() {
 
 /** The Splitwise tile: what the Expense app says you are owed (or owe), group by group. */
 internal fun MainActivity.showSplitwiseGroupsSheet() {
+    val client = FinanceSyncClient(this)
+    // Open at once from the copy kept on this phone; the server's own copy then refreshes it in a moment.
+    var people: List<com.example.financesmstracker.integration.ExpenseBalancePerson> = client.cachedExpenseBalances().orEmpty()
+    val prefs = getSharedPreferences("expense_balance_view", android.content.Context.MODE_PRIVATE)
+    var shownId: String? = prefs.getString("person", null)
+    val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    val owedColor = com.google.android.material.color.MaterialColors.getColor(
+        list, R.attr.creditColor, android.graphics.Color.parseColor("#2E9E5B")
+    )
+    val oweColor = com.google.android.material.color.MaterialColors.getColor(
+        list, R.attr.debitColor, android.graphics.Color.parseColor("#D64545")
+    )
+    var loading = people.isEmpty()
+    lateinit var render: () -> Unit
+
+    fun amountRow(name: String, net: Long, bold: Boolean) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        setPadding(0, dp(10), 0, dp(10))
+        addView(android.widget.TextView(context).apply {
+            text = name
+            textSize = 15f
+            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addView(android.widget.TextView(context).apply {
+            text = when {
+                net > 0 -> "you are owed " + formatMinor(net)
+                net < 0 -> "you owe " + formatMinor(-net)
+                else -> "settled up"
+            }
+            textSize = if (bold) 15f else 14f
+            setTextColor(if (net > 0) owedColor else if (net < 0) oweColor else currentTextColor)
+            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            alpha = if (net == 0L) 0.6f else 1f
+        })
+    }
+
+    render = {
+        list.removeAllViews()
+        val shown = people.firstOrNull { it.id == shownId } ?: people.maxByOrNull { it.totalMinor }
+        if (shown == null) {
+            list.addView(caption(if (loading) "Loading…" else "No data from the Expense app yet.").apply {
+                textSize = 14f
+                setPadding(0, dp(8), 0, dp(16))
+            })
+        } else {
+            if (people.size > 1) {
+                list.addView(caption("Showing for ${shown.name.ifBlank { "this account" }}  ›").apply {
+                    textSize = 13f
+                    setPadding(0, 0, 0, dp(6))
+                    setOnClickListener {
+                        val next = people[(people.indexOf(shown) + 1) % people.size]
+                        shownId = next.id
+                        prefs.edit().putString("person", next.id).apply()
+                        render()
+                    }
+                })
+            }
+            list.addView(tile {
+                if (shown.groups.isEmpty()) addView(caption("No expenses in the Expense app yet."))
+                shown.groups.forEach { addView(amountRow(it.name, it.netMinor, false)) }
+            })
+            list.addView(tile { addView(amountRow("Total", shown.totalMinor, true)) })
+        }
+        list.addView(caption("Edit the Splitwise total used on the home screen  ›").apply {
+            textSize = 13f
+            setPadding(0, dp(6), 0, dp(6))
+            setOnClickListener { showManualSplitwiseDialog() }
+        })
+        list.addView(caption("Changes since the total was set  ›").apply {
+            textSize = 13f
+            setPadding(0, dp(6), 0, dp(6))
+            setOnClickListener { showSplitwiseChangesDialog() }
+        })
+    }
+    render()
+
+    val sheet = formSheet(
+        title = "Splitwise",
+        subtitle = "As recorded in the Expense app",
+        body = androidx.core.widget.NestedScrollView(this).apply {
+            setPadding(dp(20), dp(4), dp(20), dp(8))
+            addView(list)
+        },
+        positiveText = "Done"
+    ) { it.dismiss() }
+
     oracleExecutor.execute {
         val result = FinanceSyncClient(this@showSplitwiseGroupsSheet).fetchExpenseBalances()
         runOnUiThread {
-            result.onSuccess { people ->
-                if (people.isEmpty()) { showManualSplitwiseDialog(); return@onSuccess }
-                val prefs = getSharedPreferences("expense_balance_view", android.content.Context.MODE_PRIVATE)
-                var shown = people.firstOrNull { it.id == prefs.getString("person", null) }
-                    ?: people.maxByOrNull { it.totalMinor }!!
-                val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                val owedColor = com.google.android.material.color.MaterialColors.getColor(
-                    list, R.attr.creditColor, android.graphics.Color.parseColor("#2E9E5B")
-                )
-                val oweColor = com.google.android.material.color.MaterialColors.getColor(
-                    list, R.attr.debitColor, android.graphics.Color.parseColor("#D64545")
-                )
-                lateinit var render: () -> Unit
-
-                fun amountRow(name: String, net: Long, bold: Boolean) = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = android.view.Gravity.CENTER_VERTICAL
-                    setPadding(0, dp(10), 0, dp(10))
-                    addView(android.widget.TextView(context).apply {
-                        text = name
-                        textSize = 15f
-                        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                    addView(android.widget.TextView(context).apply {
-                        text = when {
-                            net > 0 -> "you are owed " + formatMinor(net)
-                            net < 0 -> "you owe " + formatMinor(-net)
-                            else -> "settled up"
-                        }
-                        textSize = if (bold) 15f else 14f
-                        setTextColor(if (net > 0) owedColor else if (net < 0) oweColor else currentTextColor)
-                        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
-                        alpha = if (net == 0L) 0.6f else 1f
-                    })
-                }
-
-                render = {
-                    list.removeAllViews()
-                    if (people.size > 1) {
-                        list.addView(caption("Showing for ${shown.name.ifBlank { "this account" }}  ›").apply {
-                            textSize = 13f
-                            setPadding(0, 0, 0, dp(6))
-                            setOnClickListener {
-                                val next = people[(people.indexOf(shown) + 1) % people.size]
-                                shown = next
-                                prefs.edit().putString("person", next.id).apply()
-                                render()
-                            }
-                        })
-                    }
-                    list.addView(tile {
-                        if (shown.groups.isEmpty()) addView(caption("No expenses in the Expense app yet."))
-                        shown.groups.forEach { addView(amountRow(it.name, it.netMinor, false)) }
-                    })
-                    list.addView(tile { addView(amountRow("Total", shown.totalMinor, true)) })
-                    list.addView(caption("Edit the Splitwise total used on the home screen  ›").apply {
-                        textSize = 13f
-                        setPadding(0, dp(6), 0, dp(6))
-                        setOnClickListener { showManualSplitwiseDialog() }
-                    })
-                    list.addView(caption("Changes since the total was set  ›").apply {
-                        textSize = 13f
-                        setPadding(0, dp(6), 0, dp(6))
-                        setOnClickListener { showSplitwiseChangesDialog() }
-                    })
-                }
+            loading = false
+            result.onSuccess { fresh ->
+                people = fresh
                 render()
-
-                formSheet(
-                    title = "Splitwise",
-                    subtitle = "As recorded in the Expense app",
-                    body = androidx.core.widget.NestedScrollView(this).apply {
-                        setPadding(dp(20), dp(4), dp(20), dp(8))
-                        addView(list)
-                    },
-                    positiveText = "Done"
-                ) { sheet -> sheet.dismiss() }
             }.onFailure {
-                // Expense app not reachable: fall back to the single total.
-                showManualSplitwiseDialog()
+                if (people.isEmpty()) {
+                    sheet.dismiss()
+                    showManualSplitwiseDialog() // Expense app not reachable and nothing saved: the single total
+                }
             }
         }
     }

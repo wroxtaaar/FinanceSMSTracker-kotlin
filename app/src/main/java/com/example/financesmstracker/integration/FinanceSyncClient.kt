@@ -103,8 +103,18 @@ class FinanceSyncClient(
     fun fetchExpenseBalances(): Result<List<ExpenseBalancePerson>> {
         if (baseUrl.isBlank()) return Result.failure(IllegalStateException("Oracle URL is not configured"))
         if (token.isBlank()) return Result.failure(IllegalStateException("Oracle sync token is not configured"))
-        return get("/api/v1/expense/balances").map { ExpenseBalancePerson.parseAll(JSONObject(it)) }
+        return get("/api/v1/expense/balances").map { raw ->
+            // Keep a copy on the phone so the Splitwise screen can open instantly next time.
+            context.getSharedPreferences("expense_balance_view", Context.MODE_PRIVATE).edit().putString("json", raw).apply()
+            ExpenseBalancePerson.parseAll(JSONObject(raw))
+        }
     }
+
+    /** The last balances this phone saw (instant, may be a little old), or null. */
+    fun cachedExpenseBalances(): List<ExpenseBalancePerson>? =
+        context.getSharedPreferences("expense_balance_view", Context.MODE_PRIVATE).getString("json", null)
+            ?.let { runCatching { ExpenseBalancePerson.parseAll(JSONObject(it)) }.getOrNull() }
+            ?.takeIf { it.isNotEmpty() }
 
     /** Whether this transaction can be added to Expense, and whether it already was or was skipped. */
     fun fetchExpenseLink(transactionId: String): Result<ExpenseLink> {

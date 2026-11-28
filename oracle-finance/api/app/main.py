@@ -14,7 +14,8 @@ from .expense_check import (
     link_info as expense_link_info,
     mark_handled as expense_mark_handled,
     options as expense_options,
-    balances as expense_balances,
+    cached_balances as expense_balances,
+    refresh_balances as expense_refresh_balances,
     remove_expense as expense_remove_expense,
 )
 from .splitwise import (
@@ -289,6 +290,10 @@ def expense_options_api(x_sync_token:str=Header(default="")):
 @app.get("/api/v1/expense/balances")
 def expense_balances_api(x_sync_token:str=Header(default="")):
     require_token(x_sync_token); return _expense_call(expense_balances)
+
+@app.post("/api/v1/expense/balances/refresh")
+def expense_balances_refresh_api(x_sync_token:str=Header(default="")):
+    require_token(x_sync_token); return _expense_call(expense_refresh_balances)
 
 @app.get("/api/v1/splits/link")  # old name, kept for the previous app build
 @app.get("/api/v1/expense/link")

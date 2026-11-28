@@ -13,6 +13,8 @@ never in the repo; that email must be in the Expense `allowed_users` table).
 import hashlib
 import json
 import os
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -152,12 +154,85 @@ def compute_balances(people, groups, expenses, settlements):
 
 
 def balances(s=None):
-    """Per-group balances for the phone's Splitwise screen."""
+    """Per-group balances straight from the Expense app (slow: reads every record). Use cached_balances."""
     s = s or settings()
     headers = _login(s)
     groups = [{"id": g["id"], "name": g.get("name") or ""} for g in _records(s, headers, "groups")]
     people = [{"id": p["id"], "name": p.get("name") or "", "isUser": bool(p.get("isUser"))} for p in _records(s, headers, "people")]
     return compute_balances(people, groups, _records(s, headers, "expenses"), _records(s, headers, "settlements"))
+
+
+# ---- local copy -------------------------------------------------------------------------------
+# Reading the Expense app takes seconds, so the server keeps its own copy of the balances. Opening the
+# Splitwise screen reads the copy; adding/removing an expense updates it at once; a background refresh
+# from the Expense app keeps it honest (and picks up expenses typed in the Expense app itself).
+CACHE_MAX_AGE_S = 120
+_refresh_lock = threading.Lock()
+
+
+def _read_cache():
+    with connection() as conn:
+        row = conn.execute("SELECT payload, updated_at FROM expense_balance_cache WHERE id=1").fetchone()
+    if not row:
+        return None
+    return {**json.loads(row["payload"]), "updatedAt": row["updated_at"]}
+
+
+def _write_cache(payload):
+    payload = {k: v for k, v in payload.items() if k != "updatedAt"}
+    now = int(time.time())
+    with connection() as conn:
+        conn.execute("INSERT OR REPLACE INTO expense_balance_cache(id,payload,updated_at) VALUES(1,?,?)",
+                     (json.dumps(payload), now))
+    return {**payload, "updatedAt": now}
+
+
+def refresh_balances():
+    """Read the Expense app and replace the local copy."""
+    return _write_cache(balances())
+
+
+def _refresh_in_background():
+    if not _refresh_lock.acquire(blocking=False):
+        return
+
+    def run():
+        try:
+            refresh_balances()
+        except Exception:  # the old copy stays; the next call tries again
+            pass
+        finally:
+            _refresh_lock.release()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def cached_balances(max_age=CACHE_MAX_AGE_S):
+    """The local copy, instantly. Stale copies are returned at once and refreshed behind the scenes."""
+    cached = _read_cache()
+    if cached is None:
+        return refresh_balances()
+    if time.time() - cached["updatedAt"] > max_age:
+        _refresh_in_background()
+    return cached
+
+
+def apply_expense_to_cache(record, group_name, sign=1):
+    """Add (sign=1) one expense to the local copy without waiting for the Expense app."""
+    cached = _read_cache()
+    if cached is None:
+        return
+    for person in cached["people"]:
+        share = (record.get("splits") or {}).get(person["id"], 0)
+        delta = (int(record["amount"]) - share) if record["payer"] == person["id"] else -share
+        gid = record.get("groupId") or None
+        row = next((g for g in person["groups"] if g["id"] == gid), None)
+        if row is None:
+            row = {"id": gid, "name": group_name if gid else "Non-group expenses", "netMinor": 0}
+            person["groups"].append(row)
+        row["netMinor"] += sign * delta
+        person["totalMinor"] += sign * delta
+    _write_cache(cached)
 
 
 def _day(ms):
@@ -279,14 +354,20 @@ def add_expense(transaction_ids, description, group_id, payer_id, now_ms=None):
     group = next((g for g in groups if g["id"] == group_id), None) if group_id else None
     if group_id and group is None:
         raise ExpenseError("That group no longer exists in Expense")
-    group = {"id": group["id"], "members": list(group.get("members") or [])} if group else None
+    group = {"id": group["id"], "name": group.get("name") or "", "members": list(group.get("members") or [])} if group else None
     people = [{"id": p["id"], "isUser": bool(p.get("isUser"))} for p in people_raw]
     record = build_expense(rows, description, group, payer_id, people, now_ms)
     with connection() as conn:  # rows leaving an older, different combination: drop that expense
         old_ids = {l["expense_id"] for l in conn.execute(
             "SELECT DISTINCT expense_id FROM expense_links WHERE transaction_id IN (%s)" % ",".join("?" * len(rows)),
             [r["id"] for r in rows])} - {record["id"]}
+    with connection() as conn:
+        replaced = conn.execute("SELECT 1 FROM expense_links WHERE expense_id=? LIMIT 1", (record["id"],)).fetchone()
     _upsert(s, headers, record)
+    if not old_ids and not replaced:  # a brand-new expense: show it in the local copy straight away
+        apply_expense_to_cache(record, group["name"] if group else "", 1)
+    else:
+        _refresh_in_background()
     for old in old_ids:
         _upsert(s, headers, {"id": old, "deleted": True, "updatedAt": now_ms}, deleted=True)
     with connection() as conn:
@@ -316,6 +397,7 @@ def remove_expense(transaction_id, now_ms=None):
     _upsert(s, _login(s), {"id": link["expense_id"], "deleted": True, "updatedAt": now_ms}, deleted=True)
     with connection() as conn:
         conn.execute("DELETE FROM expense_links WHERE expense_id=?", (link["expense_id"],))
+    _refresh_in_background()
     return {"status": "removed"}
 
 
